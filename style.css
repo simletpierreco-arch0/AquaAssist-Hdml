@@ -59,6 +59,9 @@ input, select, textarea {
   background: var(--card); color: var(--text);
 }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+input[type="checkbox"], input[type="radio"] {
+  width: 1.05rem; height: 1.05rem; flex-shrink: 0; margin: 0; padding: 0; accent-color: var(--primary);
+}
 
 .page { max-width: 720px; margin: 0 auto; padding: 1.2rem 1rem 2rem; animation: fadeUp .35s ease-out; }
 @keyframes fadeUp { from { opacity:0; transform: translateY(10px);} to {opacity:1; transform:none;} }
