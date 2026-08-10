@@ -20,7 +20,10 @@
     </label>
   </div>
   <div class="login-header">
-    <div id="loginLogo" class="nawasa-logo-fallback">NAWASA</div>
+    <div id="loginLogo" class="brand-logo-wrap">
+      <img src="nawasa_logo.png.png" alt="NAWASA" class="brand-logo-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
+      <div class="nawasa-logo-fallback" style="display:none;">NAWASA</div>
+    </div>
     <div class="login-title">AquaAssist</div>
     <div class="login-subtitle">Your smart water support assistant</div>
   </div>
@@ -39,7 +42,7 @@
   <div id="customerHero" class="hero">
     <div class="hero-content">
       <div class="hero-brand">
-        <div class="avatar-ring"><div class="avatar-circle">💧</div></div>
+        <div class="avatar-ring"><div class="avatar-circle"><img src="aquaassist_avatar.png.png" alt="AquaAssist" class="avatar-img" onerror="this.style.display='none';this.nextElementSibling.style.display='block';" /><span style="display:none;">💧</span></div></div>
         <div>
           <div class="hero-title">AquaAssist</div>
           <div class="hero-subtitle">NAWASA Official Virtual Assistant</div>
@@ -47,7 +50,7 @@
           <div id="hoursPill" class="hours-pill"></div>
         </div>
       </div>
-      <div class="hero-nawasa-badge">NAWASA</div>
+      <div class="hero-nawasa-badge"><img src="nawasa_logo.png.png" alt="NAWASA" class="badge-img" onerror="this.style.display='none';this.nextElementSibling.style.display='block';" /><span style="display:none;">NAWASA</span></div>
     </div>
     <svg class="wave" viewBox="0 0 500 40" preserveAspectRatio="none"><path class="wave-fill" d="M0,20 C150,45 350,-5 500,20 L500,40 L0,40 Z"></path></svg>
   </div>
@@ -99,10 +102,13 @@
           📎
           <input type="file" id="chatAttachment" accept="image/*,.pdf,.doc,.docx" hidden />
         </label>
+        <button type="button" id="chatCameraBtn" class="attach-btn" title="Take a photo">📷</button>
+        <button type="button" id="chatMicBtn" class="attach-btn" title="Speak your message">🎤</button>
         <input id="chatText" type="text" placeholder="Ask about your water service..." autocomplete="off" />
         <button type="submit" class="send-btn">➤</button>
       </form>
       <div id="attachmentPreview" class="attachment-preview"></div>
+      <p id="micStatus" class="hint-text" style="display:none;"></p>
 
       <div class="section-label">💧 Quick actions</div>
       <div id="quickActions" class="quick-actions-grid"></div>
@@ -132,7 +138,11 @@
       <div class="card">
         <form id="reportForm">
           <label class="field-label">Attach a photo, video, or document (optional)</label>
-          <input id="reportFile" type="file" accept="image/*,video/*,.pdf,.doc,.docx" />
+          <div class="report-file-row">
+            <input id="reportFile" type="file" accept="image/*,video/*,.pdf,.doc,.docx" />
+            <button type="button" id="reportCameraBtn" class="btn-secondary" style="flex-shrink:0;">📷 Take photo</button>
+          </div>
+          <p id="reportFilePreview" class="hint-text"></p>
 
           <label class="field-label">Your name</label>
           <input id="reportName" type="text" required />
@@ -194,6 +204,7 @@
         <label class="toggle-row"><input type="checkbox" id="darkModeToggle" /> 🌙 Dark mode</label>
         <label class="toggle-row"><input type="checkbox" id="highContrastToggle" /> 🔲 High contrast mode</label>
         <label class="toggle-row"><input type="checkbox" id="largeTextToggle" /> 🔠 Larger text</label>
+        <label class="toggle-row"><input type="checkbox" id="readAloudToggle" /> 🔊 Read AquaAssist's replies aloud</label>
         <p class="hint-text">Accessibility: this app supports keyboard navigation and screen readers natively through standard HTML controls.</p>
         <label class="field-label">Your parish (for outage alerts)</label>
         <select id="customerParishSelect"></select>
@@ -273,6 +284,26 @@
 </div>
 
 <footer class="footer">Powered by <strong>NAWASA</strong></footer>
+
+<!-- ===================== CAMERA MODAL (shared: chat + report) ===================== -->
+<div id="cameraModal" class="camera-modal" style="display:none;">
+  <div class="camera-modal-inner">
+    <div class="camera-modal-head">
+      <span>📷 Take a photo</span>
+      <button type="button" id="cameraCloseBtn" class="camera-close-btn">✕</button>
+    </div>
+    <video id="cameraVideo" autoplay playsinline muted></video>
+    <canvas id="cameraCanvas" style="display:none;"></canvas>
+    <img id="cameraPreviewImg" style="display:none;" alt="Captured photo preview" />
+    <p id="cameraError" class="error-text" style="display:none;"></p>
+    <div class="camera-modal-actions">
+      <button type="button" id="cameraSwitchBtn" class="btn-secondary">🔄 Switch camera</button>
+      <button type="button" id="cameraShotBtn" class="btn-primary">Capture</button>
+      <button type="button" id="cameraRetakeBtn" class="btn-secondary" style="display:none;">Retake</button>
+      <button type="button" id="cameraUseBtn" class="btn-primary" style="display:none;">Use photo</button>
+    </div>
+  </div>
+</div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="app.js"></script>
