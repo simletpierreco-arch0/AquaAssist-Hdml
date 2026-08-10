@@ -37,7 +37,7 @@ from google.genai import types
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 ATTACH_DIR = BASE_DIR / "attachments"
-FRONTEND_DIR = BASE_DIR.parent / "frontend"
+FRONTEND_DIR = BASE_DIR
 
 DATA_DIR.mkdir(exist_ok=True)
 ATTACH_DIR.mkdir(exist_ok=True)
@@ -568,4 +568,5 @@ def api_staff_login():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
