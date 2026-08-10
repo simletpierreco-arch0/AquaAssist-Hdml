@@ -1,22 +1,23 @@
 # AquaAssist — HTML/JS frontend + Flask backend
 
 This replaces the Streamlit app with:
-- `backend/app.py` — a small Flask API that holds the Gemini key, CSV "database"
+- `app.py` — a small Flask API that holds the Gemini key, CSV "database"
   (reports, outages, notification signups), business-hours logic, and staff auth.
-- `frontend/` — plain HTML/CSS/JS (no build step) that calls that API. Open it
-  by visiting the Flask server's URL — Flask serves the frontend files itself.
+  It also serves `index.html`, `app.js`, and `style.css` directly (same folder,
+  no build step, no separate frontend directory).
 
 ## Run it
 
 ```bash
-cd backend
 pip install -r requirements.txt
 export GEMINI_API_KEY="your-real-key"      # get one at https://aistudio.google.com/
 export STAFF_PASSCODE="something-not-changeme123"
 python app.py
 ```
 
-Then open **http://localhost:5000** in a browser. That's the whole app —
+Then open **http://localhost:5000** in a browser (or whatever `PORT` your host
+assigns — `app.py` reads the `PORT` env var and binds `0.0.0.0`, which is what
+Render/Heroku-style hosts require). That's the whole app —
 customer chat, report & track, FAQ, notify signups, and (via the "🔐 Staff
 Portal" switch at the top) the staff dashboard.
 
