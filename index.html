@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AquaAssist — NAWASA Virtual Assistant</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<a id="whatsappFloat" class="whatsapp-float" target="_blank" title="Chat on WhatsApp">💬</a>
+
+<!-- ===================== LOGIN GATE ===================== -->
+<div id="loginGate" class="login-wrap">
+  <div class="login-toggle-row">
+    <label class="dm-toggle">
+      <input type="checkbox" id="loginDarkToggle" /> 🌙 Dark
+    </label>
+  </div>
+  <div class="login-header">
+    <div id="loginLogo" class="nawasa-logo-fallback">NAWASA</div>
+    <div class="login-title">AquaAssist</div>
+    <div class="login-subtitle">Your smart water support assistant</div>
+  </div>
+  <div class="card login-card">
+    <label class="field-label" for="territorySelect">📍 Select your NAWASA territory</label>
+    <select id="territorySelect"></select>
+    <button id="startChatBtn" class="btn-primary" style="margin-top:1rem;width:100%;">💧 Start chatting</button>
+    <p id="loginError" class="error-text" style="display:none;">Please select your territory first.</p>
+  </div>
+</div>
+
+<!-- ===================== MAIN APP ===================== -->
+<div id="app" class="page" style="display:none;">
+
+  <!-- Customer portal hero -->
+  <div id="customerHero" class="hero">
+    <div class="hero-content">
+      <div class="hero-brand">
+        <div class="avatar-ring"><div class="avatar-circle">💧</div></div>
+        <div>
+          <div class="hero-title">AquaAssist</div>
+          <div class="hero-subtitle">NAWASA Official Virtual Assistant</div>
+          <div class="hero-online"><span class="online-dot"></span>AquaAssist Online</div>
+          <div id="hoursPill" class="hours-pill"></div>
+        </div>
+      </div>
+      <div class="hero-nawasa-badge">NAWASA</div>
+    </div>
+    <svg class="wave" viewBox="0 0 500 40" preserveAspectRatio="none"><path class="wave-fill" d="M0,20 C150,45 350,-5 500,20 L500,40 L0,40 Z"></path></svg>
+  </div>
+
+  <!-- Staff portal hero -->
+  <div id="staffHero" class="hero" style="display:none;">
+    <div class="hero-content">
+      <div>
+        <div class="hero-title">🔐 Staff Portal</div>
+        <div class="hero-subtitle">Reports submitted by customers</div>
+      </div>
+    </div>
+    <svg class="wave" viewBox="0 0 500 40" preserveAspectRatio="none"><path class="wave-fill" d="M0,20 C150,45 350,-5 500,20 L500,40 L0,40 Z"></path></svg>
+  </div>
+
+  <!-- Top-level nav: customer vs staff -->
+  <div class="portal-switch">
+    <button id="btnCustomerPortal" class="portal-switch-btn active">💬 Customer Portal</button>
+    <button id="btnStaffPortal" class="portal-switch-btn">🔐 Staff Portal</button>
+  </div>
+
+  <!-- ===================== CUSTOMER PORTAL ===================== -->
+  <div id="customerPortal">
+    <nav class="tab-nav">
+      <button class="tab-btn active" data-tab="chat">💬 Chat</button>
+      <button class="tab-btn" data-tab="report">📋 Report &amp; Track</button>
+      <button class="tab-btn" data-tab="faq">❓ FAQ</button>
+      <button class="tab-btn" data-tab="notify">🔔 Notify</button>
+      <button class="tab-btn" data-tab="settings">⚙️ Settings</button>
+    </nav>
+
+    <!-- CHAT TAB -->
+    <section id="tab-chat" class="tab-panel active">
+      <div id="hoursBanner"></div>
+      <div class="contact-row">
+        <a id="contactCallCard" class="contact-card" href="#"><span class="contact-icon">📞</span><span class="contact-label">Call Us</span><span class="contact-value">(473) 440-2155</span></a>
+        <a id="contactWhatsappCard" class="contact-card" target="_blank"><span class="contact-icon">💬</span><span class="contact-label">WhatsApp</span><span class="contact-value">Chat now</span></a>
+        <a id="contactWebsiteCard" class="contact-card" target="_blank"><span class="contact-icon">🌐</span><span class="contact-label">Website</span><span class="contact-value">nawasa.gd</span></a>
+      </div>
+
+      <div id="outageBanners"></div>
+
+      <div id="chatMessages" class="chat-messages"></div>
+
+      <div id="followupChips" class="chip-row"></div>
+
+      <form id="chatForm" class="chat-input-row">
+        <label class="attach-btn" title="Attach a photo or file">
+          📎
+          <input type="file" id="chatAttachment" accept="image/*,.pdf,.doc,.docx" hidden />
+        </label>
+        <input id="chatText" type="text" placeholder="Ask about your water service..." autocomplete="off" />
+        <button type="submit" class="send-btn">➤</button>
+      </form>
+      <div id="attachmentPreview" class="attachment-preview"></div>
+
+      <div class="section-label">💧 Quick actions</div>
+      <div id="quickActions" class="quick-actions-grid"></div>
+    </section>
+
+    <!-- REPORT & TRACK TAB -->
+    <section id="tab-report" class="tab-panel">
+      <div class="section-label">🚿 Report an issue</div>
+
+      <div class="card">
+        <div class="section-label" style="margin-top:0;">📍 Pin location on map</div>
+        <div class="form-row-2">
+          <div>
+            <label class="field-label">Parish / Territory</label>
+            <select id="reportParish"></select>
+          </div>
+          <div>
+            <label class="field-label">Street / Landmark Address</label>
+            <input id="reportLandmark" type="text" placeholder="e.g. New Life Grocery, Main road" />
+          </div>
+        </div>
+        <button id="gpsBtn" type="button" class="btn-secondary" style="margin:0.6rem 0;">📡 Use My GPS Location</button>
+        <div id="reportMap" class="leaflet-map"></div>
+        <p class="hint-text">Click anywhere on the map to set the pin — the nearest parish fills in automatically.</p>
+      </div>
+
+      <div class="card">
+        <form id="reportForm">
+          <label class="field-label">Attach a photo, video, or document (optional)</label>
+          <input id="reportFile" type="file" accept="image/*,video/*,.pdf,.doc,.docx" />
+
+          <label class="field-label">Your name</label>
+          <input id="reportName" type="text" required />
+
+          <label class="field-label">Phone number</label>
+          <input id="reportPhone" type="text" required />
+
+          <label class="field-label">Location / address of the issue</label>
+          <input id="reportLocation" type="text" required />
+
+          <label class="field-label">Issue type</label>
+          <select id="reportIssueType"></select>
+
+          <label class="field-label">Describe the issue</label>
+          <textarea id="reportDescription" rows="3"></textarea>
+
+          <label class="field-label">Severity</label>
+          <select id="reportSeverity"></select>
+
+          <button type="submit" class="btn-primary" style="margin-top:0.8rem;width:100%;">Submit report</button>
+        </form>
+        <div id="reportResult"></div>
+      </div>
+
+      <div class="section-label">📍 Track a report</div>
+      <div class="card">
+        <input id="trackRef" type="text" placeholder="Enter your reference number (e.g. NW-A1B2C3D)" />
+        <div id="trackResult"></div>
+      </div>
+    </section>
+
+    <!-- FAQ TAB -->
+    <section id="tab-faq" class="tab-panel">
+      <div class="section-label">❓ Frequently Asked Questions</div>
+      <p class="hint-text">Sourced from the official NAWASA FAQ page (nawasa.gd).</p>
+      <input id="faqSearch" type="text" placeholder="Search FAQs — e.g. billing, leak, disconnection..." style="margin-bottom:1rem;" />
+      <div id="faqList"></div>
+    </section>
+
+    <!-- NOTIFY TAB -->
+    <section id="tab-notify" class="tab-panel">
+      <div class="section-label">🔔 Get notified</div>
+      <div class="card">
+        <form id="notifyForm">
+          <label class="field-label">Email or phone number</label>
+          <input id="notifyContact" type="text" required />
+          <label class="field-label">Notify me about</label>
+          <div id="notifyCategories" class="checkbox-group"></div>
+          <button type="submit" class="btn-primary" style="margin-top:0.8rem;width:100%;">Subscribe</button>
+        </form>
+        <div id="notifyResult"></div>
+      </div>
+    </section>
+
+    <!-- SETTINGS TAB -->
+    <section id="tab-settings" class="tab-panel">
+      <div class="section-label">⚙️ Preferences</div>
+      <div class="card">
+        <label class="toggle-row"><input type="checkbox" id="darkModeToggle" /> 🌙 Dark mode</label>
+        <label class="toggle-row"><input type="checkbox" id="highContrastToggle" /> 🔲 High contrast mode</label>
+        <label class="toggle-row"><input type="checkbox" id="largeTextToggle" /> 🔠 Larger text</label>
+        <p class="hint-text">Accessibility: this app supports keyboard navigation and screen readers natively through standard HTML controls.</p>
+        <label class="field-label">Your parish (for outage alerts)</label>
+        <select id="customerParishSelect"></select>
+      </div>
+      <div class="section-label">💬 Conversation</div>
+      <div class="card">
+        <p id="messageCount" class="hint-text">0 messages in this session.</p>
+        <button id="newChatBtn" class="btn-secondary">＋ New chat</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== STAFF PORTAL ===================== -->
+  <div id="staffPortal" style="display:none;">
+    <div id="staffLoginCard" class="card">
+      <label class="field-label">Enter staff passcode</label>
+      <input id="staffPasscodeInput" type="password" />
+      <button id="staffLoginBtn" class="btn-primary" style="margin-top:0.6rem;">Log in</button>
+      <p id="staffLoginError" class="error-text" style="display:none;">Incorrect passcode.</p>
+    </div>
+
+    <div id="staffDashboard" style="display:none;">
+      <button id="staffLogoutBtn" class="btn-secondary" style="margin-bottom:1rem;">Log out</button>
+
+      <div class="section-label">📊 Overview</div>
+      <div id="statusMetrics" class="metrics-row"></div>
+
+      <div class="section-label">🗺️ Reports map</div>
+      <div id="staffMap" class="leaflet-map"></div>
+
+      <div class="section-label">📋 All reports</div>
+      <div class="card table-wrap">
+        <table id="reportsTable" class="reports-table">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="section-label">🔄 Update a report status</div>
+      <div class="card">
+        <form id="quickStatusForm" class="form-row-2">
+          <div>
+            <label class="field-label">Reference number</label>
+            <select id="quickStatusRef"></select>
+          </div>
+          <div>
+            <label class="field-label">New status</label>
+            <select id="quickStatusNew"></select>
+          </div>
+          <button type="submit" class="btn-primary" style="grid-column:1/-1;">Update status</button>
+        </form>
+      </div>
+
+      <div class="section-label">📢 Outage announcements</div>
+      <div class="card">
+        <form id="outageForm">
+          <label class="field-label">Parish / Territory</label>
+          <select id="outageParish"></select>
+          <label class="field-label">Message to customers</label>
+          <textarea id="outageMessage" rows="2"></textarea>
+          <div class="form-row-2">
+            <div><label class="field-label">Start date</label><input id="outageStart" type="date" /></div>
+            <div><label class="field-label">End date</label><input id="outageEnd" type="date" /></div>
+          </div>
+          <button type="submit" class="btn-primary" style="margin-top:0.6rem;width:100%;">Post announcement</button>
+        </form>
+      </div>
+      <div id="outageList"></div>
+
+      <div class="section-label">🔔 Notification subscribers</div>
+      <div class="card table-wrap">
+        <table id="notifyTable" class="reports-table"><thead></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<footer class="footer">Powered by <strong>NAWASA</strong></footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
