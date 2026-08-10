@@ -104,6 +104,7 @@ function startApp() {
   setupStaffPortal();
   setupCamera();
   setupMic();
+  setupLocationShare();
 
   setInterval(async () => {
     const res = await fetch(`${API}/api/business-hours`);
@@ -280,7 +281,7 @@ function renderChat() {
   if (!state.messages.length) {
     appendBubble("assistant", welcomeText());
   } else {
-    state.messages.forEach((m) => appendBubble(m.role, m.content, m.attachmentName, m.reportCard));
+    state.messages.forEach((m) => appendBubble(m.role, m.content, m.attachmentName, m.reportCard, m.attachmentMime));
   }
   $("#messageCount").textContent = `${state.messages.length} messages in this session.`;
   renderFollowupChips();
@@ -290,7 +291,7 @@ function welcomeText() {
   return "👋 **Welcome to AquaAssist**\n\nI'm NAWASA's official virtual assistant, available 24/7 to help with water outages, billing, new connections, reporting leaks, office locations, FAQs, and general support.\n\nHow may I assist you today?";
 }
 
-function appendBubble(role, content, attachmentName, reportCard) {
+function appendBubble(role, content, attachmentName, reportCard, attachmentMime) {
   const row = document.createElement("div");
   row.className = `msg-row ${role}`;
   const avatar = document.createElement("div");
@@ -306,7 +307,8 @@ function appendBubble(role, content, attachmentName, reportCard) {
   if (attachmentName) {
     const att = document.createElement("div");
     att.className = "msg-attachment";
-    att.textContent = `📎 ${attachmentName}`;
+    const icon = attachmentMime && attachmentMime.startsWith("audio") ? "🎤" : attachmentMime && attachmentMime.startsWith("video") ? "🎥" : "📎";
+    att.textContent = `${icon} ${attachmentName}`;
     bubble.appendChild(att);
   }
   if (reportCard) {
@@ -412,13 +414,14 @@ function fileToBase64(file) {
   });
 }
 
-async function sendMessage(text) {
-  const displayText = text || (pendingAttachment ? "📎 Sent an attachment" : "");
+async function sendMessage(text, directAttachment) {
+  const attachment = directAttachment || pendingAttachment;
+  const displayText = text || (attachment ? (attachment.mime && attachment.mime.startsWith("audio") ? `🎤 Voice note${attachment.durationLabel ? ` (${attachment.durationLabel})` : ""}` : "📎 Sent an attachment") : "");
   if (!displayText) return;
 
-  state.messages.push({ role: "user", content: displayText, attachmentName: pendingAttachment ? pendingAttachment.name : null });
+  state.messages.push({ role: "user", content: displayText, attachmentName: attachment ? attachment.name : null, attachmentMime: attachment ? attachment.mime : null });
   saveMessages();
-  appendBubble("user", displayText, pendingAttachment ? pendingAttachment.name : null);
+  appendBubble("user", displayText, attachment ? attachment.name : null, null, attachment ? attachment.mime : null);
   $("#chatText").value = "";
 
   const typingRow = document.createElement("div");
@@ -427,7 +430,7 @@ async function sendMessage(text) {
   $("#chatMessages").appendChild(typingRow);
   $("#chatMessages").scrollTop = $("#chatMessages").scrollHeight;
 
-  const attachments = pendingAttachment ? [pendingAttachment] : [];
+  const attachments = attachment ? [attachment] : [];
   pendingAttachment = null;
   $("#attachmentPreview").textContent = "";
   $("#chatAttachment").value = "";
@@ -580,11 +583,16 @@ function setupReportForm() {
 }
 
 // ---------------------------------------------------------------------
-// Camera capture (live photo) — shared modal used by chat and the report form
+// Camera capture (live photo or short video) — shared modal used by chat and the report form
 // ---------------------------------------------------------------------
 let cameraStream = null;
 let cameraFacingMode = "environment";
 let cameraTarget = null; // "chat" | "report"
+let cameraMode = "photo"; // "photo" | "video"
+let cameraRecorder = null;
+let cameraChunks = [];
+let capturedPhotoB64 = null;
+let capturedVideoBlob = null;
 
 function setupCamera() {
   const hasCamera = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
@@ -602,71 +610,134 @@ function setupCamera() {
     startCameraStream();
   });
 
+  $("#cameraModePhotoBtn").addEventListener("click", () => setCameraMode("photo"));
+  $("#cameraModeVideoBtn").addEventListener("click", () => setCameraMode("video"));
+
   $("#cameraShotBtn").addEventListener("click", () => {
-    const video = $("#cameraVideo");
-    const canvas = $("#cameraCanvas");
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
-    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
-    $("#cameraPreviewImg").src = canvas.toDataURL("image/jpeg", 0.9);
-    $("#cameraPreviewImg").style.display = "block";
-    video.style.display = "none";
+    if (cameraMode === "photo") capturePhoto();
+    else toggleVideoRecording();
+  });
+
+  $("#cameraRetakeBtn").addEventListener("click", resetCameraCaptureUI);
+
+  $("#cameraUseBtn").addEventListener("click", () => {
+    if (cameraMode === "photo" && capturedPhotoB64) {
+      attachCapturedMedia(`photo_${Date.now()}.jpg`, "image/jpeg", capturedPhotoB64);
+    } else if (cameraMode === "video" && capturedVideoBlob) {
+      const reader = new FileReader();
+      reader.onload = () => attachCapturedMedia(`video_${Date.now()}.webm`, capturedVideoBlob.type || "video/webm", reader.result.split(",")[1]);
+      reader.readAsDataURL(capturedVideoBlob);
+      return;
+    }
+    closeCamera();
+  });
+}
+
+function attachCapturedMedia(name, mime, b64) {
+  const icon = mime.startsWith("video") ? "🎥" : "📷";
+  if (cameraTarget === "chat") {
+    pendingAttachment = { name, mime, data_base64: b64 };
+    $("#attachmentPreview").textContent = `${icon} ${name} attached — will be sent with your next message.`;
+  } else if (cameraTarget === "report") {
+    pendingReportPhoto = { name, mime, data_base64: b64 };
+    $("#reportFilePreview").textContent = `${icon} ${name} captured — will be attached to your report.`;
+  }
+  closeCamera();
+}
+
+function setCameraMode(mode) {
+  cameraMode = mode;
+  $("#cameraModePhotoBtn").classList.toggle("active", mode === "photo");
+  $("#cameraModeVideoBtn").classList.toggle("active", mode === "video");
+  $("#cameraModalTitle").textContent = mode === "photo" ? "📷 Take a photo" : "🎥 Record a video";
+  $("#cameraShotBtn").textContent = mode === "photo" ? "Capture" : "● Record";
+  resetCameraCaptureUI();
+}
+
+function resetCameraCaptureUI() {
+  capturedPhotoB64 = null;
+  capturedVideoBlob = null;
+  $("#cameraPreviewImg").style.display = "none";
+  $("#cameraPreviewVideo").style.display = "none";
+  $("#cameraRecordingStatus").style.display = "none";
+  $("#cameraVideo").style.display = "block";
+  $("#cameraShotBtn").style.display = "inline-block";
+  $("#cameraShotBtn").textContent = cameraMode === "photo" ? "Capture" : "● Record";
+  $("#cameraSwitchBtn").style.display = "inline-block";
+  $("#cameraRetakeBtn").style.display = "none";
+  $("#cameraUseBtn").style.display = "none";
+}
+
+function capturePhoto() {
+  const video = $("#cameraVideo");
+  const canvas = $("#cameraCanvas");
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+  canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+  capturedPhotoB64 = dataUrl.split(",")[1];
+  $("#cameraPreviewImg").src = dataUrl;
+  $("#cameraPreviewImg").style.display = "block";
+  video.style.display = "none";
+  $("#cameraShotBtn").style.display = "none";
+  $("#cameraSwitchBtn").style.display = "none";
+  $("#cameraRetakeBtn").style.display = "inline-block";
+  $("#cameraUseBtn").style.display = "inline-block";
+}
+
+function toggleVideoRecording() {
+  if (cameraRecorder && cameraRecorder.state === "recording") {
+    cameraRecorder.stop();
+    return;
+  }
+  if (!cameraStream) return;
+  cameraChunks = [];
+  try {
+    cameraRecorder = new MediaRecorder(cameraStream);
+  } catch (err) {
+    $("#cameraError").textContent = "Video recording isn't supported in this browser.";
+    $("#cameraError").style.display = "block";
+    return;
+  }
+  cameraRecorder.ondataavailable = (e) => { if (e.data.size > 0) cameraChunks.push(e.data); };
+  cameraRecorder.onstop = () => {
+    capturedVideoBlob = new Blob(cameraChunks, { type: "video/webm" });
+    const url = URL.createObjectURL(capturedVideoBlob);
+    $("#cameraPreviewVideo").src = url;
+    $("#cameraPreviewVideo").style.display = "block";
+    $("#cameraVideo").style.display = "none";
+    $("#cameraRecordingStatus").style.display = "none";
     $("#cameraShotBtn").style.display = "none";
     $("#cameraSwitchBtn").style.display = "none";
     $("#cameraRetakeBtn").style.display = "inline-block";
     $("#cameraUseBtn").style.display = "inline-block";
-  });
-
-  $("#cameraRetakeBtn").addEventListener("click", () => {
-    $("#cameraPreviewImg").style.display = "none";
-    $("#cameraVideo").style.display = "block";
-    $("#cameraShotBtn").style.display = "inline-block";
-    $("#cameraSwitchBtn").style.display = "inline-block";
-    $("#cameraRetakeBtn").style.display = "none";
-    $("#cameraUseBtn").style.display = "none";
-  });
-
-  $("#cameraUseBtn").addEventListener("click", () => {
-    const canvas = $("#cameraCanvas");
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
-    const b64 = dataUrl.split(",")[1];
-    const fileName = `photo_${Date.now()}.jpg`;
-    if (cameraTarget === "chat") {
-      pendingAttachment = { name: fileName, mime: "image/jpeg", data_base64: b64 };
-      $("#attachmentPreview").textContent = `📷 ${fileName} attached — will be sent with your next message.`;
-    } else if (cameraTarget === "report") {
-      pendingReportPhoto = { name: fileName, mime: "image/jpeg", data_base64: b64 };
-      $("#reportFilePreview").textContent = `📷 ${fileName} captured — will be attached to your report.`;
-    }
-    closeCamera();
-  });
+  };
+  cameraRecorder.start();
+  $("#cameraRecordingStatus").style.display = "block";
+  $("#cameraShotBtn").textContent = "■ Stop";
 }
 
 function openCamera(target) {
   cameraTarget = target;
   $("#cameraModal").style.display = "flex";
   $("#cameraError").style.display = "none";
-  $("#cameraVideo").style.display = "block";
-  $("#cameraPreviewImg").style.display = "none";
-  $("#cameraShotBtn").style.display = "inline-block";
-  $("#cameraSwitchBtn").style.display = "inline-block";
-  $("#cameraRetakeBtn").style.display = "none";
-  $("#cameraUseBtn").style.display = "none";
+  setCameraMode("photo");
   startCameraStream();
 }
 
 async function startCameraStream() {
   stopCameraStream();
   try {
-    cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: cameraFacingMode }, audio: false });
+    cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: cameraFacingMode }, audio: cameraMode === "video" });
     $("#cameraVideo").srcObject = cameraStream;
   } catch (err) {
-    $("#cameraError").textContent = `Camera unavailable: ${err.message}. You can still use the attach button to upload a photo.`;
+    $("#cameraError").textContent = `Camera unavailable: ${err.message}. You can still use the attach button to upload a file.`;
     $("#cameraError").style.display = "block";
   }
 }
 
 function stopCameraStream() {
+  if (cameraRecorder && cameraRecorder.state === "recording") cameraRecorder.stop();
   if (cameraStream) {
     cameraStream.getTracks().forEach((t) => t.stop());
     cameraStream = null;
@@ -679,55 +750,80 @@ function closeCamera() {
 }
 
 // ---------------------------------------------------------------------
-// Voice input (browser-native speech-to-text dictation into the chat box)
+// Voice notes — records actual audio (like a WhatsApp voice note) and
+// sends it as a chat attachment, rather than just transcribing to text.
 // ---------------------------------------------------------------------
+let voiceRecorder = null;
+let voiceChunks = [];
+let voiceStartTime = null;
+
 function setupMic() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
+  const hasMic = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+  if (!hasMic) {
     $("#chatMicBtn").style.display = "none";
     return;
   }
-  const recognition = new SpeechRecognition();
-  recognition.continuous = false;
-  recognition.interimResults = true;
-  recognition.lang = "en-US";
-  let listening = false;
 
-  recognition.onresult = (e) => {
-    let transcript = "";
-    for (let i = 0; i < e.results.length; i++) transcript += e.results[i][0].transcript;
-    $("#chatText").value = transcript;
-  };
-  recognition.onerror = (e) => {
-    $("#micStatus").textContent = `Mic error: ${e.error}. You can still type your message.`;
-    $("#micStatus").style.display = "block";
-    setListening(false);
-  };
-  recognition.onend = () => setListening(false);
-
-  function setListening(state) {
-    listening = state;
-    $("#chatMicBtn").classList.toggle("mic-active", state);
-    if (state) {
-      $("#micStatus").textContent = "🎤 Listening... tap the mic again to stop.";
+  $("#chatMicBtn").addEventListener("click", async () => {
+    if (voiceRecorder && voiceRecorder.state === "recording") {
+      voiceRecorder.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      voiceChunks = [];
+      voiceRecorder = new MediaRecorder(stream);
+      voiceRecorder.ondataavailable = (e) => { if (e.data.size > 0) voiceChunks.push(e.data); };
+      voiceRecorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        $("#chatMicBtn").classList.remove("mic-active");
+        $("#micStatus").style.display = "none";
+        const blob = new Blob(voiceChunks, { type: "audio/webm" });
+        const seconds = Math.round((Date.now() - voiceStartTime) / 1000);
+        if (seconds < 1) return; // accidental tap, discard
+        const reader = new FileReader();
+        reader.onload = () => {
+          const b64 = reader.result.split(",")[1];
+          sendMessage("", { name: `voice_note_${Date.now()}.webm`, mime: "audio/webm", data_base64: b64, durationLabel: `${seconds}s` });
+        };
+        reader.readAsDataURL(blob);
+      };
+      voiceRecorder.start();
+      voiceStartTime = Date.now();
+      $("#chatMicBtn").classList.add("mic-active");
+      $("#micStatus").textContent = "🔴 Recording voice note... tap the mic again to send.";
       $("#micStatus").style.display = "block";
-    } else {
-      $("#micStatus").style.display = "none";
+    } catch (err) {
+      $("#micStatus").textContent = `Mic unavailable: ${err.message}`;
+      $("#micStatus").style.display = "block";
     }
-  }
+  });
+}
 
-  $("#chatMicBtn").addEventListener("click", () => {
-    if (listening) {
-      recognition.stop();
-    } else {
-      try {
-        recognition.start();
-        setListening(true);
-      } catch (err) {
-        $("#micStatus").textContent = "Couldn't start the mic.";
-        $("#micStatus").style.display = "block";
+// ---------------------------------------------------------------------
+// Location sharing — lets the assistant see where the customer actually is
+// (NAWASA only serves Grenada, Carriacou & Petit Martinique, so we resolve
+// straight to the nearest parish rather than asking for a country).
+// ---------------------------------------------------------------------
+function setupLocationShare() {
+  if (!navigator.geolocation) {
+    $("#chatLocationBtn").style.display = "none";
+    return;
+  }
+  $("#chatLocationBtn").addEventListener("click", () => {
+    $("#chatLocationBtn").disabled = true;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        $("#chatLocationBtn").disabled = false;
+        const { latitude, longitude } = pos.coords;
+        const parish = nearestParish(latitude, longitude) || "Grenada";
+        sendMessage(`📍 My current location is ${parish}, Grenada (GPS: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}).`);
+      },
+      (err) => {
+        $("#chatLocationBtn").disabled = false;
+        alert(`Location unavailable: ${err.message}`);
       }
-    }
+    );
   });
 }
 
