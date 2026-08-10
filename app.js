@@ -824,6 +824,15 @@ function setupSettings() {
     renderOutageBanners();
   });
 
+  const territorySelect = $("#settingsTerritorySelect");
+  populateSelect(territorySelect, state.config.territories);
+  territorySelect.value = state.territory;
+  territorySelect.addEventListener("change", () => {
+    state.territory = territorySelect.value;
+    localStorage.setItem("aqua_territory", state.territory);
+    renderContactRow();
+  });
+
   $("#newChatBtn").addEventListener("click", () => {
     state.messages = [];
     saveMessages();
