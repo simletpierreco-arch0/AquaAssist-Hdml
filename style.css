@@ -261,6 +261,41 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .footer { text-align:center; font-size:.72rem; color: color-mix(in srgb, var(--text) 65%, transparent); padding: .9rem 0 1.4rem; }
 .footer strong { color: var(--primary); }
 
+/* ---------------- Real logo / avatar images ---------------- */
+.brand-logo-wrap { width:72px; height:72px; margin:0 auto .6rem; }
+.brand-logo-img { width:100%; height:100%; border-radius:50%; object-fit:cover; box-shadow:0 4px 14px rgba(0,0,0,.18); }
+.avatar-img { width:100%; height:100%; border-radius:50%; object-fit:cover; }
+.badge-img { width:100%; height:100%; border-radius:50%; object-fit:cover; }
+.msg-avatar img { width:100%; height:100%; border-radius:50%; object-fit:cover; }
+.msg-avatar span { font-size:1rem; }
+
+/* ---------------- Chat extras: camera/mic buttons, speak button ---------------- */
+#chatMicBtn.mic-active { color:#D64545; animation: micPulse 1s infinite; }
+@keyframes micPulse { 0%,100%{opacity:1;} 50%{opacity:.4;} }
+.speak-btn {
+  background:none; border:none; font-size:.85rem; padding:.15rem .3rem; margin-top:.35rem;
+  opacity:.6; border-radius:6px;
+}
+.speak-btn:hover { opacity:1; background: color-mix(in srgb, var(--primary) 10%, transparent); }
+
+.report-file-row { display:flex; align-items:center; gap:.5rem; }
+.report-file-row input[type=file] { margin-bottom:0; flex:1; }
+
+/* ---------------- Camera modal ---------------- */
+.camera-modal {
+  position: fixed; inset:0; z-index:1000; background: rgba(0,0,0,.72);
+  display:flex; align-items:center; justify-content:center; padding:1rem;
+}
+.camera-modal-inner {
+  background: var(--card); border-radius:20px; padding:1rem; width:100%; max-width:420px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.35);
+}
+.camera-modal-head { display:flex; justify-content:space-between; align-items:center; font-weight:700; margin-bottom:.6rem; color: var(--text); }
+.camera-close-btn { background:none; border:none; font-size:1.1rem; color: var(--text); padding:.2rem .5rem; }
+#cameraVideo, #cameraPreviewImg { width:100%; border-radius:14px; background:#000; max-height:60vh; object-fit:cover; display:block; }
+.camera-modal-actions { display:flex; gap:.5rem; margin-top:.8rem; flex-wrap:wrap; }
+.camera-modal-actions button { flex:1; min-width: 90px; }
+
 @media (max-width: 480px) {
   .quick-actions-grid { grid-template-columns: 1fr; }
   .form-row-2 { grid-template-columns: 1fr; }
