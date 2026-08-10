@@ -98,17 +98,19 @@
       <div id="followupChips" class="chip-row"></div>
 
       <form id="chatForm" class="chat-input-row">
-        <label class="attach-btn" title="Attach a photo or file">
+        <label class="attach-btn" title="Attach a photo, video, or file">
           📎
-          <input type="file" id="chatAttachment" accept="image/*,.pdf,.doc,.docx" hidden />
+          <input type="file" id="chatAttachment" accept="image/*,video/*,.pdf,.doc,.docx" hidden />
         </label>
         <button type="button" id="chatCameraBtn" class="attach-btn" title="Take a photo">📷</button>
-        <button type="button" id="chatMicBtn" class="attach-btn" title="Speak your message">🎤</button>
+        <button type="button" id="chatMicBtn" class="attach-btn" title="Record a voice note">🎤</button>
+        <button type="button" id="chatLocationBtn" class="attach-btn" title="Share my location">📍</button>
         <input id="chatText" type="text" placeholder="Ask about your water service..." autocomplete="off" />
         <button type="submit" class="send-btn">➤</button>
       </form>
       <div id="attachmentPreview" class="attachment-preview"></div>
       <p id="micStatus" class="hint-text" style="display:none;"></p>
+
 
       <div class="section-label">💧 Quick actions</div>
       <div id="quickActions" class="quick-actions-grid"></div>
@@ -295,18 +297,24 @@
 <div id="cameraModal" class="camera-modal" style="display:none;">
   <div class="camera-modal-inner">
     <div class="camera-modal-head">
-      <span>📷 Take a photo</span>
+      <span id="cameraModalTitle">📷 Take a photo</span>
       <button type="button" id="cameraCloseBtn" class="camera-close-btn">✕</button>
+    </div>
+    <div class="camera-mode-row">
+      <button type="button" id="cameraModePhotoBtn" class="camera-mode-btn active">📷 Photo</button>
+      <button type="button" id="cameraModeVideoBtn" class="camera-mode-btn">🎥 Video</button>
     </div>
     <video id="cameraVideo" autoplay playsinline muted></video>
     <canvas id="cameraCanvas" style="display:none;"></canvas>
     <img id="cameraPreviewImg" style="display:none;" alt="Captured photo preview" />
+    <video id="cameraPreviewVideo" style="display:none;" controls></video>
+    <p id="cameraRecordingStatus" class="hint-text" style="display:none;">🔴 Recording... tap Stop when done.</p>
     <p id="cameraError" class="error-text" style="display:none;"></p>
     <div class="camera-modal-actions">
       <button type="button" id="cameraSwitchBtn" class="btn-secondary">🔄 Switch camera</button>
       <button type="button" id="cameraShotBtn" class="btn-primary">Capture</button>
       <button type="button" id="cameraRetakeBtn" class="btn-secondary" style="display:none;">Retake</button>
-      <button type="button" id="cameraUseBtn" class="btn-primary" style="display:none;">Use photo</button>
+      <button type="button" id="cameraUseBtn" class="btn-primary" style="display:none;">Use this</button>
     </div>
   </div>
 </div>
