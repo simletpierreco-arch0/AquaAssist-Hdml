@@ -488,10 +488,22 @@ def api_create_report():
     required = ["name", "phone", "location", "issue_type"]
     if any(not body.get(f) for f in required):
         return jsonify({"error": "name, phone, location, and issue_type are required."}), 400
+
+    saved_attachment_name = body.get("attachment", "")
+    b64 = body.get("attachment_base64")
+    if b64:
+        try:
+            raw = base64.b64decode(b64)
+            saved_attachment_name = f"{uuid.uuid4().hex[:8]}_{body.get('attachment_name', 'upload')}"
+            with open(ATTACH_DIR / saved_attachment_name, "wb") as f:
+                f.write(raw)
+        except Exception:
+            saved_attachment_name = ""
+
     row = save_report(
         body.get("name"), body.get("phone"), body.get("location"),
         body.get("issue_type"), body.get("description", ""),
-        attachment_name=body.get("attachment", ""),
+        attachment_name=saved_attachment_name,
         severity=body.get("severity", "Unknown"),
     )
     return jsonify(row)
