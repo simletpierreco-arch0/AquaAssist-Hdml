@@ -102,6 +102,8 @@ function startApp() {
   setupNotifyForm();
   setupSettings();
   setupStaffPortal();
+  setupCamera();
+  setupMic();
 
   setInterval(async () => {
     const res = await fetch(`${API}/api/business-hours`);
@@ -270,6 +272,7 @@ function renderFAQ(query) {
 // Chat
 // ---------------------------------------------------------------------
 let pendingAttachment = null; // {name, mime, data_base64}
+let pendingReportPhoto = null; // {name, mime, data_base64} — from report form's file input or camera
 
 function renderChat() {
   const box = $("#chatMessages");
@@ -292,7 +295,9 @@ function appendBubble(role, content, attachmentName, reportCard) {
   row.className = `msg-row ${role}`;
   const avatar = document.createElement("div");
   avatar.className = "msg-avatar";
-  avatar.textContent = role === "assistant" ? "💧" : "🙂";
+  const avatarSrc = role === "assistant" ? "aquaassist_avatar.png.png" : "user_avatar.png.jpg";
+  const avatarFallback = role === "assistant" ? "💧" : "🙂";
+  avatar.innerHTML = `<img src="${avatarSrc}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='inline';" /><span style="display:none;">${avatarFallback}</span>`;
   const bubble = document.createElement("div");
   bubble.className = "msg-bubble";
   const p = document.createElement("p");
@@ -307,10 +312,34 @@ function appendBubble(role, content, attachmentName, reportCard) {
   if (reportCard) {
     bubble.appendChild(buildReportCardEl(reportCard));
   }
+  if (role === "assistant" && "speechSynthesis" in window) {
+    const speakBtn = document.createElement("button");
+    speakBtn.type = "button";
+    speakBtn.className = "speak-btn";
+    speakBtn.title = "Read this reply aloud";
+    speakBtn.textContent = "🔊";
+    speakBtn.addEventListener("click", () => speakText(content));
+    bubble.appendChild(speakBtn);
+  }
   row.appendChild(avatar);
   row.appendChild(bubble);
   $("#chatMessages").appendChild(row);
   $("#chatMessages").scrollTop = $("#chatMessages").scrollHeight;
+  if (role === "assistant" && localStorage.getItem("aqua_read_aloud") === "1") {
+    speakText(content);
+  }
+}
+
+// ---------------------------------------------------------------------
+// Text-to-speech (browser-native, no backend call needed)
+// ---------------------------------------------------------------------
+function speakText(text) {
+  if (!("speechSynthesis" in window)) return;
+  window.speechSynthesis.cancel();
+  const plain = text.replace(/\*\*(.+?)\*\*/g, "$1").replace(/[#_*`]/g, "");
+  const utter = new SpeechSynthesisUtterance(plain);
+  utter.rate = 1;
+  window.speechSynthesis.speak(utter);
 }
 
 function mdLite(text) {
@@ -506,6 +535,14 @@ function setReportPin(lat, lng) {
 }
 
 function setupReportForm() {
+  $("#reportFile").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const b64 = await fileToBase64(file);
+    pendingReportPhoto = { name: file.name, mime: file.type || "application/octet-stream", data_base64: b64 };
+    $("#reportFilePreview").textContent = `📎 ${file.name} attached.`;
+  });
+
   $("#reportForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const body = {
@@ -516,6 +553,11 @@ function setupReportForm() {
       description: $("#reportDescription").value.trim(),
       severity: $("#reportSeverity").value,
     };
+    if (pendingReportPhoto) {
+      body.attachment_name = pendingReportPhoto.name;
+      body.attachment_mime = pendingReportPhoto.mime;
+      body.attachment_base64 = pendingReportPhoto.data_base64;
+    }
     const res = await fetch(`${API}/api/report`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
@@ -532,6 +574,160 @@ function setupReportForm() {
     note.textContent = "Save this reference number to track your report below.";
     resultEl.appendChild(note);
     $("#reportForm").reset();
+    $("#reportFilePreview").textContent = "";
+    pendingReportPhoto = null;
+  });
+}
+
+// ---------------------------------------------------------------------
+// Camera capture (live photo) — shared modal used by chat and the report form
+// ---------------------------------------------------------------------
+let cameraStream = null;
+let cameraFacingMode = "environment";
+let cameraTarget = null; // "chat" | "report"
+
+function setupCamera() {
+  const hasCamera = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  if (!hasCamera) {
+    $("#chatCameraBtn").style.display = "none";
+    $("#reportCameraBtn").style.display = "none";
+    return;
+  }
+
+  $("#chatCameraBtn").addEventListener("click", () => openCamera("chat"));
+  $("#reportCameraBtn").addEventListener("click", () => openCamera("report"));
+  $("#cameraCloseBtn").addEventListener("click", closeCamera);
+  $("#cameraSwitchBtn").addEventListener("click", () => {
+    cameraFacingMode = cameraFacingMode === "environment" ? "user" : "environment";
+    startCameraStream();
+  });
+
+  $("#cameraShotBtn").addEventListener("click", () => {
+    const video = $("#cameraVideo");
+    const canvas = $("#cameraCanvas");
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+    $("#cameraPreviewImg").src = canvas.toDataURL("image/jpeg", 0.9);
+    $("#cameraPreviewImg").style.display = "block";
+    video.style.display = "none";
+    $("#cameraShotBtn").style.display = "none";
+    $("#cameraSwitchBtn").style.display = "none";
+    $("#cameraRetakeBtn").style.display = "inline-block";
+    $("#cameraUseBtn").style.display = "inline-block";
+  });
+
+  $("#cameraRetakeBtn").addEventListener("click", () => {
+    $("#cameraPreviewImg").style.display = "none";
+    $("#cameraVideo").style.display = "block";
+    $("#cameraShotBtn").style.display = "inline-block";
+    $("#cameraSwitchBtn").style.display = "inline-block";
+    $("#cameraRetakeBtn").style.display = "none";
+    $("#cameraUseBtn").style.display = "none";
+  });
+
+  $("#cameraUseBtn").addEventListener("click", () => {
+    const canvas = $("#cameraCanvas");
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+    const b64 = dataUrl.split(",")[1];
+    const fileName = `photo_${Date.now()}.jpg`;
+    if (cameraTarget === "chat") {
+      pendingAttachment = { name: fileName, mime: "image/jpeg", data_base64: b64 };
+      $("#attachmentPreview").textContent = `📷 ${fileName} attached — will be sent with your next message.`;
+    } else if (cameraTarget === "report") {
+      pendingReportPhoto = { name: fileName, mime: "image/jpeg", data_base64: b64 };
+      $("#reportFilePreview").textContent = `📷 ${fileName} captured — will be attached to your report.`;
+    }
+    closeCamera();
+  });
+}
+
+function openCamera(target) {
+  cameraTarget = target;
+  $("#cameraModal").style.display = "flex";
+  $("#cameraError").style.display = "none";
+  $("#cameraVideo").style.display = "block";
+  $("#cameraPreviewImg").style.display = "none";
+  $("#cameraShotBtn").style.display = "inline-block";
+  $("#cameraSwitchBtn").style.display = "inline-block";
+  $("#cameraRetakeBtn").style.display = "none";
+  $("#cameraUseBtn").style.display = "none";
+  startCameraStream();
+}
+
+async function startCameraStream() {
+  stopCameraStream();
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: cameraFacingMode }, audio: false });
+    $("#cameraVideo").srcObject = cameraStream;
+  } catch (err) {
+    $("#cameraError").textContent = `Camera unavailable: ${err.message}. You can still use the attach button to upload a photo.`;
+    $("#cameraError").style.display = "block";
+  }
+}
+
+function stopCameraStream() {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach((t) => t.stop());
+    cameraStream = null;
+  }
+}
+
+function closeCamera() {
+  stopCameraStream();
+  $("#cameraModal").style.display = "none";
+}
+
+// ---------------------------------------------------------------------
+// Voice input (browser-native speech-to-text dictation into the chat box)
+// ---------------------------------------------------------------------
+function setupMic() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    $("#chatMicBtn").style.display = "none";
+    return;
+  }
+  const recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.lang = "en-US";
+  let listening = false;
+
+  recognition.onresult = (e) => {
+    let transcript = "";
+    for (let i = 0; i < e.results.length; i++) transcript += e.results[i][0].transcript;
+    $("#chatText").value = transcript;
+  };
+  recognition.onerror = (e) => {
+    $("#micStatus").textContent = `Mic error: ${e.error}. You can still type your message.`;
+    $("#micStatus").style.display = "block";
+    setListening(false);
+  };
+  recognition.onend = () => setListening(false);
+
+  function setListening(state) {
+    listening = state;
+    $("#chatMicBtn").classList.toggle("mic-active", state);
+    if (state) {
+      $("#micStatus").textContent = "🎤 Listening... tap the mic again to stop.";
+      $("#micStatus").style.display = "block";
+    } else {
+      $("#micStatus").style.display = "none";
+    }
+  }
+
+  $("#chatMicBtn").addEventListener("click", () => {
+    if (listening) {
+      recognition.stop();
+    } else {
+      try {
+        recognition.start();
+        setListening(true);
+      } catch (err) {
+        $("#micStatus").textContent = "Couldn't start the mic.";
+        $("#micStatus").style.display = "block";
+      }
+    }
   });
 }
 
@@ -603,14 +799,23 @@ function setupNotifyForm() {
 // Settings
 // ---------------------------------------------------------------------
 function setupSettings() {
-  const dark = $("#darkModeToggle"), hc = $("#highContrastToggle"), large = $("#largeTextToggle");
+  const dark = $("#darkModeToggle"), hc = $("#highContrastToggle"), large = $("#largeTextToggle"), readAloud = $("#readAloudToggle");
   dark.checked = document.body.classList.contains("dark");
   hc.checked = document.body.classList.contains("high-contrast");
   large.checked = document.body.classList.contains("large-text");
+  readAloud.checked = localStorage.getItem("aqua_read_aloud") === "1";
+  if (!("speechSynthesis" in window)) {
+    readAloud.disabled = true;
+    readAloud.parentElement.title = "Not supported in this browser.";
+  }
 
   dark.addEventListener("change", () => { document.body.classList.toggle("dark", dark.checked); localStorage.setItem("aqua_dark", dark.checked ? "1" : "0"); });
   hc.addEventListener("change", () => { document.body.classList.toggle("high-contrast", hc.checked); localStorage.setItem("aqua_hc", hc.checked ? "1" : "0"); });
   large.addEventListener("change", () => { document.body.classList.toggle("large-text", large.checked); localStorage.setItem("aqua_large", large.checked ? "1" : "0"); });
+  readAloud.addEventListener("change", () => {
+    localStorage.setItem("aqua_read_aloud", readAloud.checked ? "1" : "0");
+    if (!readAloud.checked && "speechSynthesis" in window) window.speechSynthesis.cancel();
+  });
 
   const parishSelect = $("#customerParishSelect");
   parishSelect.value = localStorage.getItem("aqua_customer_parish") || "";
