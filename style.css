@@ -298,6 +298,13 @@ input[type="checkbox"], input[type="radio"] {
 #cameraVideo, #cameraPreviewImg { width:100%; border-radius:14px; background:#000; max-height:60vh; object-fit:cover; display:block; }
 .camera-modal-actions { display:flex; gap:.5rem; margin-top:.8rem; flex-wrap:wrap; }
 .camera-modal-actions button { flex:1; min-width: 90px; }
+.camera-mode-row { display:flex; gap:.4rem; margin-bottom:.6rem; }
+.camera-mode-btn {
+  flex:1; padding:.4rem; border-radius:10px; border:1px solid color-mix(in srgb, var(--primary) 25%, transparent);
+  background: color-mix(in srgb, var(--card) 90%, transparent); color: var(--primary); font-weight:600; font-size:.82rem;
+}
+.camera-mode-btn.active { background: var(--primary); color:#fff; }
+#cameraPreviewVideo { width:100%; border-radius:14px; max-height:60vh; }
 
 @media (max-width: 480px) {
   .quick-actions-grid { grid-template-columns: 1fr; }
