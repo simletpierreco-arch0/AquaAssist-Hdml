@@ -191,6 +191,22 @@ input[type="checkbox"], input[type="radio"] {
 .report-card-row span:first-child { color: color-mix(in srgb, var(--text) 65%, transparent); }
 .severity-badge { padding:.05rem .5rem; border-radius:999px; font-weight:700; }
 
+/* Location card — shown on a chat bubble when the customer shares GPS location */
+.location-card {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--card) 95%, transparent), color-mix(in srgb, var(--bg-soft) 95%, transparent));
+  border:1px solid color-mix(in srgb, var(--primary) 18%, transparent); border-radius:14px; padding:.75rem .9rem; margin-top:.4rem;
+}
+.location-card-head { display:flex; align-items:center; gap:.6rem; margin-bottom:.5rem; }
+.location-card-title { font-size:.75rem; font-weight:700; color: color-mix(in srgb, var(--text) 65%, transparent); text-transform:uppercase; letter-spacing:.04em; }
+.location-card-parish { font-size:1.02rem; font-weight:800; color: var(--primary); }
+.location-card-row { display:flex; justify-content:space-between; font-size:.82rem; padding: .1rem 0; }
+.location-card-row span:first-child { color: color-mix(in srgb, var(--text) 65%, transparent); }
+.location-card-link { display:inline-block; margin-top:.45rem; font-size:.8rem; font-weight:700; color: var(--primary); text-decoration:none; }
+.location-card-link:hover { text-decoration:underline; }
+
+/* Location button pulses while we're waiting on GPS + reverse-geocode */
+#chatLocationBtn.locating { animation: micPulse 1s infinite; }
+
 .chip-row { display:flex; gap:.5rem; margin: .3rem 0 .8rem; flex-wrap: wrap; }
 .chip-btn {
   border-radius:999px; font-size:.78rem; padding:.35rem .8rem; background: color-mix(in srgb, var(--primary) 8%, transparent);
