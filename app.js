@@ -281,7 +281,7 @@ function renderChat() {
   if (!state.messages.length) {
     appendBubble("assistant", welcomeText());
   } else {
-    state.messages.forEach((m) => appendBubble(m.role, m.content, m.attachmentName, m.reportCard, m.attachmentMime));
+    state.messages.forEach((m) => appendBubble(m.role, m.content, m.attachmentName, m.reportCard, m.attachmentMime, m.locationCard));
   }
   $("#messageCount").textContent = `${state.messages.length} messages in this session.`;
   renderFollowupChips();
@@ -291,7 +291,7 @@ function welcomeText() {
   return "👋 **Welcome to AquaAssist**\n\nI'm NAWASA's official virtual assistant, available 24/7 to help with water outages, billing, new connections, reporting leaks, office locations, FAQs, and general support.\n\nHow may I assist you today?";
 }
 
-function appendBubble(role, content, attachmentName, reportCard, attachmentMime) {
+function appendBubble(role, content, attachmentName, reportCard, attachmentMime, locationCard) {
   const row = document.createElement("div");
   row.className = `msg-row ${role}`;
   const avatar = document.createElement("div");
@@ -313,6 +313,9 @@ function appendBubble(role, content, attachmentName, reportCard, attachmentMime)
   }
   if (reportCard) {
     bubble.appendChild(buildReportCardEl(reportCard));
+  }
+  if (locationCard) {
+    bubble.appendChild(buildLocationCardEl(locationCard));
   }
   if (role === "assistant" && "speechSynthesis" in window) {
     const speakBtn = document.createElement("button");
@@ -375,6 +378,24 @@ function buildReportCardEl(card) {
   return wrap;
 }
 
+// Nicer bubble for a shared GPS location — shows the resolved parish,
+// the accuracy radius reported by the device, and a link to view the pin
+// on a real map, instead of just a plain "My current location is..." line.
+function buildLocationCardEl(loc) {
+  const wrap = document.createElement("div");
+  wrap.className = "location-card";
+  const mapsUrl = `https://www.openstreetmap.org/?mlat=${loc.lat}&mlon=${loc.lng}#map=16/${loc.lat}/${loc.lng}`;
+  wrap.innerHTML = `
+    <div class="location-card-head">
+      <span style="font-size:1.2rem;">📍</span>
+      <div><div class="location-card-title">Shared location</div><div class="location-card-parish">${escapeHtml(loc.parish)}</div></div>
+    </div>
+    <div class="location-card-row"><span>Accuracy</span><b>${loc.accuracy ? `± ${loc.accuracy} m` : "—"}</b></div>
+    <a class="location-card-link" href="${mapsUrl}" target="_blank" rel="noopener">View on map ↗</a>
+  `;
+  return wrap;
+}
+
 function renderFollowupChips() {
   const wrap = $("#followupChips");
   wrap.innerHTML = "";
@@ -414,14 +435,14 @@ function fileToBase64(file) {
   });
 }
 
-async function sendMessage(text, directAttachment) {
+async function sendMessage(text, directAttachment, locationCard) {
   const attachment = directAttachment || pendingAttachment;
   const displayText = text || (attachment ? (attachment.mime && attachment.mime.startsWith("audio") ? `🎤 Voice note${attachment.durationLabel ? ` (${attachment.durationLabel})` : ""}` : "📎 Sent an attachment") : "");
   if (!displayText) return;
 
-  state.messages.push({ role: "user", content: displayText, attachmentName: attachment ? attachment.name : null, attachmentMime: attachment ? attachment.mime : null });
+  state.messages.push({ role: "user", content: displayText, attachmentName: attachment ? attachment.name : null, attachmentMime: attachment ? attachment.mime : null, locationCard: locationCard || null });
   saveMessages();
-  appendBubble("user", displayText, attachment ? attachment.name : null, null, attachment ? attachment.mime : null);
+  appendBubble("user", displayText, attachment ? attachment.name : null, null, attachment ? attachment.mime : null, locationCard);
   $("#chatText").value = "";
 
   const typingRow = document.createElement("div");
@@ -491,6 +512,52 @@ function nearestParish(lat, lng) {
   return best;
 }
 
+// Straight-line "nearest parish center" is only a rough fallback — parish
+// boundaries don't actually line up with distance to one arbitrary point
+// per parish, so a house right on a border can easily snap to the wrong
+// parish. We try a real reverse-geocode against OpenStreetMap first (which
+// knows actual parish/county boundaries) and only fall back to the center
+// trick if that lookup fails or the network is unavailable.
+const NOMINATIM_PARISH_MAP = {
+  "saint george": "St. George's (Capital area)",
+  "st george": "St. George's (Capital area)",
+  "saint andrew": "St. Andrew's",
+  "st andrew": "St. Andrew's",
+  "saint david": "St. David's",
+  "st david": "St. David's",
+  "saint john": "St. John's",
+  "st john": "St. John's",
+  "saint mark": "St. Mark's",
+  "st mark": "St. Mark's",
+  "saint patrick": "St. Patrick's",
+  "st patrick": "St. Patrick's",
+  "carriacou": "Carriacou and Petite Martinique",
+  "petite martinique": "Carriacou and Petite Martinique",
+  "petit martinique": "Carriacou and Petite Martinique",
+};
+
+async function reverseGeocodeParish(lat, lng) {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=12&addressdetails=1`,
+      { headers: { "Accept-Language": "en" } }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const addr = data.address || {};
+    const candidates = [addr.county, addr.state_district, addr.state, addr.city_district, addr.suburb, addr.municipality].filter(Boolean);
+    for (const raw of candidates) {
+      const key = raw.toLowerCase();
+      for (const [needle, parish] of Object.entries(NOMINATIM_PARISH_MAP)) {
+        if (key.includes(needle)) return parish;
+      }
+    }
+    return null;
+  } catch (err) {
+    return null;
+  }
+}
+
 function composedLocation() {
   const landmark = $("#reportLandmark").value.trim();
   const parish = $("#reportParish").value;
@@ -517,9 +584,22 @@ function setupReportMap() {
       alert("Geolocation isn't available in this browser.");
       return;
     }
+    const btn = $("#gpsBtn");
+    const originalLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "📡 Finding you...";
     navigator.geolocation.getCurrentPosition(
-      (pos) => setReportPin(pos.coords.latitude, pos.coords.longitude),
-      (err) => alert(`Location unavailable: ${err.message}`)
+      async (pos) => {
+        await setReportPin(pos.coords.latitude, pos.coords.longitude);
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+      },
+      (err) => {
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+        alert(`Location unavailable: ${err.message}`);
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
     );
   });
 
@@ -528,11 +608,11 @@ function setupReportMap() {
   $("#reportLandmark").addEventListener("input", () => { $("#reportLocation").value = composedLocation(); });
 }
 
-function setReportPin(lat, lng) {
+async function setReportPin(lat, lng) {
   state.reportPin = { lat, lng };
   state.reportMarker.setLatLng([lat, lng]);
   state.reportMap.panTo([lat, lng]);
-  const parish = nearestParish(lat, lng);
+  const parish = (await reverseGeocodeParish(lat, lng)) || nearestParish(lat, lng);
   $("#reportParish").value = parish;
   $("#reportLocation").value = composedLocation();
 }
@@ -594,6 +674,23 @@ let cameraChunks = [];
 let capturedPhotoB64 = null;
 let capturedVideoBlob = null;
 
+// Pick the best MediaRecorder mimeType a browser actually supports, out of
+// a preference-ordered candidate list. Used for both the mic (voice notes)
+// and camera (video) recorders so we record in a format Gemini can read
+// natively wherever possible, instead of always falling back to whatever
+// the browser's default happens to be.
+function pickSupportedMimeType(candidates) {
+  if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return "";
+  return candidates.find((t) => MediaRecorder.isTypeSupported(t)) || "";
+}
+
+const PREFERRED_VIDEO_MIME_TYPES = [
+  "video/mp4",
+  "video/webm;codecs=vp9,opus",
+  "video/webm;codecs=vp8,opus",
+  "video/webm",
+];
+
 function setupCamera() {
   const hasCamera = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   if (!hasCamera) {
@@ -624,8 +721,10 @@ function setupCamera() {
     if (cameraMode === "photo" && capturedPhotoB64) {
       attachCapturedMedia(`photo_${Date.now()}.jpg`, "image/jpeg", capturedPhotoB64);
     } else if (cameraMode === "video" && capturedVideoBlob) {
+      const type = capturedVideoBlob.type || "video/webm";
+      const ext = type.includes("mp4") ? "mp4" : "webm";
       const reader = new FileReader();
-      reader.onload = () => attachCapturedMedia(`video_${Date.now()}.webm`, capturedVideoBlob.type || "video/webm", reader.result.split(",")[1]);
+      reader.onload = () => attachCapturedMedia(`video_${Date.now()}.${ext}`, type, reader.result.split(",")[1]);
       reader.readAsDataURL(capturedVideoBlob);
       return;
     }
@@ -692,8 +791,9 @@ function toggleVideoRecording() {
   }
   if (!cameraStream) return;
   cameraChunks = [];
+  const videoMimeType = pickSupportedMimeType(PREFERRED_VIDEO_MIME_TYPES);
   try {
-    cameraRecorder = new MediaRecorder(cameraStream);
+    cameraRecorder = videoMimeType ? new MediaRecorder(cameraStream, { mimeType: videoMimeType }) : new MediaRecorder(cameraStream);
   } catch (err) {
     $("#cameraError").textContent = "Video recording isn't supported in this browser.";
     $("#cameraError").style.display = "block";
@@ -701,7 +801,8 @@ function toggleVideoRecording() {
   }
   cameraRecorder.ondataavailable = (e) => { if (e.data.size > 0) cameraChunks.push(e.data); };
   cameraRecorder.onstop = () => {
-    capturedVideoBlob = new Blob(cameraChunks, { type: "video/webm" });
+    const actualType = cameraRecorder.mimeType || videoMimeType || "video/webm";
+    capturedVideoBlob = new Blob(cameraChunks, { type: actualType });
     const url = URL.createObjectURL(capturedVideoBlob);
     $("#cameraPreviewVideo").src = url;
     $("#cameraPreviewVideo").style.display = "block";
@@ -757,6 +858,25 @@ let voiceRecorder = null;
 let voiceChunks = [];
 let voiceStartTime = null;
 
+// Gemini's audio understanding reliably reads wav/mp3/aiff/aac/ogg/flac.
+// Most browsers only ever offer webm/opus to MediaRecorder for audio, which
+// the model can't parse as audio — so voice notes were uploading fine but
+// being "heard" as nothing. We prefer any better-supported type the browser
+// actually has, and the backend also remuxes webm -> ogg as a second safety
+// net for browsers (mainly Chrome/Firefox) that only offer webm.
+const PREFERRED_VOICE_MIME_TYPES = [
+  "audio/mp4",
+  "audio/aac",
+  "audio/ogg;codecs=opus",
+  "audio/webm;codecs=opus",
+  "audio/webm",
+];
+function extForVoiceMime(mime) {
+  if (mime.includes("mp4") || mime.includes("aac")) return "m4a";
+  if (mime.includes("ogg")) return "ogg";
+  return "webm";
+}
+
 function setupMic() {
   const hasMic = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
   if (!hasMic) {
@@ -772,19 +892,21 @@ function setupMic() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       voiceChunks = [];
-      voiceRecorder = new MediaRecorder(stream);
+      const mimeType = pickSupportedMimeType(PREFERRED_VOICE_MIME_TYPES);
+      voiceRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       voiceRecorder.ondataavailable = (e) => { if (e.data.size > 0) voiceChunks.push(e.data); };
       voiceRecorder.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
         $("#chatMicBtn").classList.remove("mic-active");
         $("#micStatus").style.display = "none";
-        const blob = new Blob(voiceChunks, { type: "audio/webm" });
+        const actualType = voiceRecorder.mimeType || mimeType || "audio/webm";
+        const blob = new Blob(voiceChunks, { type: actualType });
         const seconds = Math.round((Date.now() - voiceStartTime) / 1000);
         if (seconds < 1) return; // accidental tap, discard
         const reader = new FileReader();
         reader.onload = () => {
           const b64 = reader.result.split(",")[1];
-          sendMessage("", { name: `voice_note_${Date.now()}.webm`, mime: "audio/webm", data_base64: b64, durationLabel: `${seconds}s` });
+          sendMessage("", { name: `voice_note_${Date.now()}.${extForVoiceMime(actualType)}`, mime: actualType, data_base64: b64, durationLabel: `${seconds}s` });
         };
         reader.readAsDataURL(blob);
       };
@@ -811,20 +933,30 @@ function setupLocationShare() {
     return;
   }
   $("#chatLocationBtn").addEventListener("click", () => {
-    $("#chatLocationBtn").disabled = true;
+    const btn = $("#chatLocationBtn");
+    btn.disabled = true;
+    btn.classList.add("locating");
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        $("#chatLocationBtn").disabled = false;
-        const { latitude, longitude } = pos.coords;
-        const parish = nearestParish(latitude, longitude) || "Grenada";
-        sendMessage(`📍 My current location is ${parish}, Grenada (GPS: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}).`);
+      async (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        const parish = (await reverseGeocodeParish(latitude, longitude)) || nearestParish(latitude, longitude) || "Grenada";
+        btn.disabled = false;
+        btn.classList.remove("locating");
+        sendLocationMessage(latitude, longitude, accuracy, parish);
       },
       (err) => {
-        $("#chatLocationBtn").disabled = false;
+        btn.disabled = false;
+        btn.classList.remove("locating");
         alert(`Location unavailable: ${err.message}`);
-      }
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
     );
   });
+}
+
+function sendLocationMessage(lat, lng, accuracy, parish) {
+  const gpsText = `📍 My current location is ${parish}, Grenada (GPS: ${lat.toFixed(5)}, ${lng.toFixed(5)}).`;
+  sendMessage(gpsText, null, { parish, lat, lng, accuracy: accuracy ? Math.round(accuracy) : null });
 }
 
 function setupTrackForm() {
