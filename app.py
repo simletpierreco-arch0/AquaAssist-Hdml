@@ -12,17 +12,20 @@ Run with:
 
 Then open http://localhost:5000
 
-NOTE ON SCOPE (see chat with the user for full rationale): this port keeps
-chat, tool-triggered report logging, manual report submission + tracking,
-FAQ search, outage announcements, notification signups, and a staff portal.
-It intentionally drops: live mic transcription, text-to-speech replies,
-in-browser camera capture (photo *upload* still works), and Pinecone
-retrieval — each is a self-contained addition if you want it back later.
+NOTE ON ATTACHMENTS: report attachments (photos/videos/voice notes) are
+stored inline in reports.csv as base64, not as separate files on disk. This
+is deliberate — on a host like Render without a persistent disk attached,
+anything written to a local "attachments/" folder disappears on the next
+deploy or restart, silently breaking every old link. Storing the bytes in
+the same CSV row means attachments survive exactly as long as the report
+data does, with nothing extra to configure. The trade-off: reports.csv
+grows faster (base64 is ~33% larger than the raw file) and this won't
+scale gracefully to a high volume of large video reports — if that
+happens, move to a real database + object storage (e.g. Postgres + S3/R2).
 """
 
 import os
 import csv
-import io
 import re
 import uuid
 import base64
@@ -32,17 +35,15 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from functools import wraps
 
-from flask import Flask, request, jsonify, send_from_directory, g
+from flask import Flask, request, jsonify, send_from_directory
 from google import genai
 from google.genai import types
 
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
-ATTACH_DIR = BASE_DIR / "attachments"
 FRONTEND_DIR = BASE_DIR
 
 DATA_DIR.mkdir(exist_ok=True)
-ATTACH_DIR.mkdir(exist_ok=True)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 STAFF_PASSCODE = os.environ.get("STAFF_PASSCODE", "changeme123")
@@ -71,6 +72,12 @@ NAWASA_WEBSITE = "https://nawasa.gd/"
 # doesn't have this problem, but to have one reliable, well-formed path for
 # every browser we re-mux/transcode any recorded video into a proper
 # faststart MP4 server-side when ffmpeg is available.
+#
+# NOTE: this normalized version is ONLY used for what we send to Gemini.
+# What we store for staff viewing (attachment_mime / attachment_data on the
+# report row) is always the ORIGINAL bytes the browser sent — that's the
+# format any regular browser can already play back directly, so there's no
+# reason to make staff depend on ffmpeg being installed just to view a clip.
 # ---------------------------------------------------------------------------
 def _ffmpeg_available():
     try:
@@ -85,7 +92,7 @@ _HAS_FFMPEG = _ffmpeg_available()
 
 
 def _normalize_media_for_gemini(raw: bytes, mime: str):
-    """Returns (bytes_to_send, mime_type_to_send) for a chat attachment.
+    """Returns (bytes_to_send, mime_type_to_send) for what Gemini sees.
 
     - audio/webm -> remuxed to audio/ogg (same Opus audio, new container).
     - any video/* -> re-muxed/transcoded into a proper faststart MP4, since
@@ -143,13 +150,15 @@ app = Flask(__name__, static_folder=None)
 # ---------------------------------------------------------------------------
 # CSV storage — same shape as the Streamlit app's data/*.csv files, plain
 # csv module instead of pandas (one less heavy dependency for a small API).
+# Attachments live inline as attachment_mime / attachment_data (base64) —
+# see the module docstring for why.
 # ---------------------------------------------------------------------------
 REPORTS_PATH = DATA_DIR / "reports.csv"
 NOTIFY_PATH = DATA_DIR / "notifications.csv"
 OUTAGES_PATH = DATA_DIR / "outages.csv"
 
 REPORTS_FIELDS = ["reference", "timestamp", "name", "phone", "location", "issue_type",
-                   "description", "attachment", "status", "severity"]
+                   "description", "attachment_mime", "attachment_data", "status", "severity"]
 NOTIFY_FIELDS = ["timestamp", "contact", "categories"]
 OUTAGE_FIELDS = ["id", "parish", "message", "start_date", "end_date", "created_at"]
 STATUS_STAGES = ["Received", "Assigned", "Crew Dispatched", "In Progress", "Resolved"]
@@ -181,7 +190,8 @@ def new_reference():
     return "NW-" + uuid.uuid4().hex[:7].upper()
 
 
-def save_report(name, phone, location, issue_type, description, attachment_name="", severity="Unknown"):
+def save_report(name, phone, location, issue_type, description,
+                 attachment_mime="", attachment_data="", severity="Unknown"):
     _ensure_csv(REPORTS_PATH, REPORTS_FIELDS)
     reference = new_reference()
     row = {
@@ -189,7 +199,8 @@ def save_report(name, phone, location, issue_type, description, attachment_name=
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "name": name or "Not provided", "phone": phone or "Not provided", "location": location,
         "issue_type": issue_type, "description": description,
-        "attachment": attachment_name, "status": "Received", "severity": severity or "Unknown",
+        "attachment_mime": attachment_mime or "", "attachment_data": attachment_data or "",
+        "status": "Received", "severity": severity or "Unknown",
     }
     with open(REPORTS_PATH, "a", newline="", encoding="utf-8") as f:
         csv.DictWriter(f, fieldnames=REPORTS_FIELDS).writerow(row)
@@ -420,6 +431,7 @@ If a question is unrelated to NAWASA services, politely explain that you can onl
 _client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 SESSIONS = {}       # session_id -> {"chat": chat_obj, "territory": str}
 LAST_REPORT = {}    # session_id -> report dict, set by the tool call for that turn
+CURRENT_ATTACHMENT = {}  # session_id -> {"mime": str, "data_base64": str} for the in-flight turn
 
 
 def _make_log_tool(session_id):
@@ -444,10 +456,16 @@ def _make_log_tool(session_id):
         Returns:
             A confirmation message including the reference number for tracking.
         """
-        row = save_report(name, phone, location, issue_type, description, severity=severity)
+        att = CURRENT_ATTACHMENT.get(session_id) or {}
+        row = save_report(
+            name, phone, location, issue_type, description,
+            attachment_mime=att.get("mime", ""), attachment_data=att.get("data_base64", ""),
+            severity=severity,
+        )
         LAST_REPORT[session_id] = {
             "reference": row["reference"], "status": "Received",
             "issue_type": issue_type, "severity": severity,
+            "attachment_mime": att.get("mime", ""),
         }
         return f"Report logged successfully. Reference number: {row['reference']}. A technician will follow up."
     return log_water_report
@@ -497,11 +515,6 @@ def serve_static(filename):
     return send_from_directory(FRONTEND_DIR, filename)
 
 
-@app.route("/attachments/<path:filename>")
-def serve_attachment(filename):
-    return send_from_directory(ATTACH_DIR, filename)
-
-
 # ---------------------------------------------------------------------------
 # Routes — API
 # ---------------------------------------------------------------------------
@@ -549,16 +562,20 @@ def api_chat():
     parts = []
     if message:
         parts.append(message)
-    saved_attachment_name = ""
+
+    CURRENT_ATTACHMENT.pop(session_id, None)
     for att in attachments:
         try:
             raw = base64.b64decode(att["data_base64"])
         except Exception:
             continue
-        saved_attachment_name = f"{uuid.uuid4().hex[:8]}_{att.get('name', 'upload')}"
-        with open(ATTACH_DIR / saved_attachment_name, "wb") as f:
-            f.write(raw)  # keep the original file on disk for staff review
-        send_bytes, send_mime = _normalize_media_for_gemini(raw, att.get("mime", "application/octet-stream"))
+        mime = att.get("mime", "application/octet-stream")
+        # Keep the ORIGINAL bytes for staff viewing later (any browser can
+        # already play these back directly — no ffmpeg dependency needed
+        # just to look at what a customer sent).
+        CURRENT_ATTACHMENT[session_id] = {"mime": mime, "data_base64": att["data_base64"]}
+        # Separately, normalize a COPY for what we actually send to Gemini.
+        send_bytes, send_mime = _normalize_media_for_gemini(raw, mime)
         parts.append(types.Part.from_bytes(data=send_bytes, mime_type=send_mime))
 
     try:
@@ -586,7 +603,7 @@ def api_chat():
         except Exception:
             reply_text = "Sorry, I wasn't able to generate a reply just now. Could you try again?"
 
-    result = {"session_id": session_id, "reply": reply_text, "attachment": saved_attachment_name or None}
+    result = {"session_id": session_id, "reply": reply_text}
     report_card = LAST_REPORT.pop(session_id, None)
     if report_card:
         result["report_card"] = report_card
@@ -600,21 +617,11 @@ def api_create_report():
     if any(not body.get(f) for f in required):
         return jsonify({"error": "name, phone, location, and issue_type are required."}), 400
 
-    saved_attachment_name = body.get("attachment", "")
-    b64 = body.get("attachment_base64")
-    if b64:
-        try:
-            raw = base64.b64decode(b64)
-            saved_attachment_name = f"{uuid.uuid4().hex[:8]}_{body.get('attachment_name', 'upload')}"
-            with open(ATTACH_DIR / saved_attachment_name, "wb") as f:
-                f.write(raw)
-        except Exception:
-            saved_attachment_name = ""
-
     row = save_report(
         body.get("name"), body.get("phone"), body.get("location"),
         body.get("issue_type"), body.get("description", ""),
-        attachment_name=saved_attachment_name,
+        attachment_mime=body.get("attachment_mime", ""),
+        attachment_data=body.get("attachment_base64", ""),
         severity=body.get("severity", "Unknown"),
     )
     return jsonify(row)
