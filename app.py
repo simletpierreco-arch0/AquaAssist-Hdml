@@ -33,6 +33,14 @@ voice for the native Web Speech API). If ELEVENLABS_API_KEY /
 ELEVENLABS_VOICE_ID aren't set, /api/tts returns a 503 and the frontend
 automatically falls back to the browser's built-in voice, so the app still
 works without this configured — it just won't have the Caribbean accent.
+
+NOTE ON REPORT STATUS LOOKUPS: the Gemini chat session is given two tools —
+log_water_report (write) and check_report_status (read). Previously there
+was only the write tool, so when a customer asked to check on an existing
+report the model had nothing to actually look up and would answer from
+guesswork alone. check_report_status calls the same track_report() helper
+used by the /api/report/<reference> endpoint, so the model's answer reflects
+the real row in reports.csv.
 """
 
 import os
@@ -432,6 +440,7 @@ Use the following facts to answer user questions:
 - IMPORTANT — the phone line and WhatsApp are only staffed by a live representative during business hours (8:00 AM – 4:00 PM, Monday to Friday, Grenada time). Each customer message includes a "CURRENT BUSINESS HOURS STATUS" note telling you whether the office is open or closed right now — this note is for your awareness only, not something to report on unprompted. Do NOT mention business hours, office-closed status, or when the office reopens in a greeting, a general FAQ answer, or any reply where the customer hasn't raised the topic themselves. Only bring it up when the customer explicitly asks to speak with a representative, asks to be transferred, or asks about calling/WhatsApp-ing/contacting NAWASA directly. In that specific case: if the office is CLOSED, tell them plainly that no one will be able to answer the phone or reply on WhatsApp right now, let them know when the office reopens, and offer to log their issue (or take their message) so a representative can follow up as soon as the office is open again — don't just hand them the phone number or WhatsApp link as if someone will answer immediately. If the office is OPEN, you can direct them to call or WhatsApp normally. Logging a report (via log_water_report) works identically regardless of business hours, so don't bring up office hours just because you're about to log something.
 - NAWASA's main office is now located on Lucas Street, St. George's (it moved from its former, over 150-year-old building on the Carenage). Sub-offices are located at Seaton James Street, Grenville; Lower Depradine Street, Gouyave; and additional sub-offices in Sauteurs, St. David's, and Grand Anse.
 - When a customer describes a specific problem and gives at least a location, log it immediately using the log_water_report tool — do not tell the customer to fill out a separate form themselves.
+- When a customer asks to check, track, or get an update on a report — or gives you a reference number (e.g. "NW-9911D93") — call the check_report_status tool with that reference number and answer using exactly what it returns. Never guess, assume, or make up a status. If the tool reports no report was found, tell the customer that plainly and ask them to double-check the reference number. Checking a report's status works identically regardless of business hours — a closed office does not mean the status can't be looked up, so don't bring up office hours just because you're checking a report.
 - When a customer reports a visible physical issue (a leak, burst main, damaged hydrant, water quality concern, etc.), ask them to send a photo of it via the attachment (📎) button in the chat box. This helps our technicians assess severity and prepare before visiting. Ask for this naturally as part of your reply — don't make it a precondition for logging the report, and don't ask for a photo for issues that wouldn't have one (e.g. billing questions or no water supply with nothing to see).
 - If the customer attaches a photo of the issue, look at it before calling log_water_report and set severity based on what you actually see.
 - Use natural understanding, not keyword matching.
@@ -491,6 +500,34 @@ def _make_log_tool(session_id):
     return log_water_report
 
 
+def _make_check_status_tool(session_id):
+    def check_report_status(reference: str) -> str:
+        """Looks up the current status of a previously submitted water service
+        report by its reference number, so the customer can be told exactly
+        where things stand. Call this whenever the customer asks to check,
+        track, or get an update on a report — including when they give you
+        a reference number (e.g. "NW-9911D93") after you asked for one.
+
+        Args:
+            reference: The report reference number the customer gave you,
+                e.g. "NW-9911D93". Matching is case-insensitive.
+
+        Returns:
+            The report's current status and details if found, or a message
+            saying no report was found with that reference number.
+        """
+        row = track_report(reference)
+        if row is None:
+            return (f"No report was found with reference number {reference}. "
+                     "Ask the customer to double check the number, or offer to "
+                     "look it up a different way (e.g. by name/phone) if they're unsure.")
+        return (f"Report {row['reference']}: status is '{row['status']}', "
+                f"issue type '{row['issue_type']}', severity '{row['severity']}', "
+                f"logged on {row['timestamp']} at location: {row['location']}. "
+                f"Description: {row['description'] or 'none provided'}.")
+    return check_report_status
+
+
 def _get_or_create_chat(session_id, territory):
     sess = SESSIONS.get(session_id)
     if sess is None or sess["territory"] != territory:
@@ -499,7 +536,7 @@ def _get_or_create_chat(session_id, territory):
             config=types.GenerateContentConfig(
                 system_instruction=build_system_instruction(territory),
                 temperature=0.7,
-                tools=[_make_log_tool(session_id)],
+                tools=[_make_log_tool(session_id), _make_check_status_tool(session_id)],
             ),
         )
         sess = {"chat": chat, "territory": territory}
