@@ -263,6 +263,17 @@ function renderFAQ(query) {
       const item = document.createElement("div");
       item.className = "faq-item";
       item.innerHTML = `<div class="faq-cat">${f.category}</div><b>${escapeHtml(f.q)}</b><br>${escapeHtml(f.a)}`;
+      // Read-aloud button — reuses the same browser speechSynthesis
+      // helper (and voice preference) already used for chat replies.
+      if ("speechSynthesis" in window) {
+        const speakBtn = document.createElement("button");
+        speakBtn.type = "button";
+        speakBtn.className = "speak-btn";
+        speakBtn.title = "Read this answer aloud";
+        speakBtn.textContent = "🔊";
+        speakBtn.addEventListener("click", () => speakText(`${f.q}. ${f.a}`));
+        item.appendChild(speakBtn);
+      }
       list.appendChild(item);
     });
   });
