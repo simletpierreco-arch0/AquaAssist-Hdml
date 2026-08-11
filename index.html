@@ -10,6 +10,25 @@
 </head>
 <body>
 
+<!-- ===================== WATERY BACKGROUND — NEW =====================
+     Purely decorative, pure-CSS Caribbean water scene. No IDs, no scripts,
+     `pointer-events:none`, and sits at z-index 0 behind everything else —
+     it cannot intercept clicks or affect any existing element/selector
+     that app.js relies on. See "WATERY BACKGROUND — NEW" in style.css. -->
+<div class="ocean-bg" aria-hidden="true">
+  <div class="ocean-caustics"></div>
+  <div class="ocean-bubbles">
+    <span class="bubble"></span><span class="bubble"></span><span class="bubble"></span>
+    <span class="bubble"></span><span class="bubble"></span><span class="bubble"></span>
+    <span class="bubble"></span><span class="bubble"></span><span class="bubble"></span>
+    <span class="bubble"></span><span class="bubble"></span><span class="bubble"></span>
+  </div>
+  <div class="ocean-wave ocean-wave--back"></div>
+  <div class="ocean-wave ocean-wave--mid"></div>
+  <div class="ocean-wave ocean-wave--front"></div>
+</div>
+<!-- =================== END WATERY BACKGROUND — NEW =================== -->
+
 <a id="whatsappFloat" class="whatsapp-float" target="_blank" title="Chat on WhatsApp">💬</a>
 
 <!-- ===================== LOGIN GATE ===================== -->
