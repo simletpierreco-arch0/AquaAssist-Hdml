@@ -104,8 +104,8 @@ input[type="checkbox"], input[type="radio"] {
 .hours-pill.soon::before { background:#F59E0B; }
 .hours-pill.closed::before { background:#FBBF6B; }
 .hero-nawasa-badge {
-  width:52px; height:52px; border-radius:50%; background:#fff; display:flex; align-items:center; justify-content:center;
-  font-size:.5rem; font-weight:800; color: var(--hover); text-align:center; box-shadow:0 4px 14px rgba(0,0,0,.22); flex-shrink:0;
+  width:76px; height:76px; border-radius:50%; background:#fff; display:flex; align-items:center; justify-content:center;
+  font-size:.62rem; font-weight:800; color: var(--hover); text-align:center; box-shadow:0 4px 14px rgba(0,0,0,.22); flex-shrink:0;
 }
 .wave { position:absolute; bottom:-2px; left:0; width:100%; line-height:0; z-index:1; }
 .wave-fill { fill: var(--bg); }
@@ -262,8 +262,8 @@ input[type="checkbox"], input[type="radio"] {
 .dm-toggle { font-size:.78rem; display:flex; align-items:center; gap:.3rem; }
 .login-header { text-align:center; padding: 1.4rem .5rem 1rem; }
 .nawasa-logo-fallback {
-  width:72px; height:72px; border-radius:50%; margin:0 auto .6rem; display:flex; align-items:center; justify-content:center;
-  background: var(--primary); color:#fff; font-weight:800; font-size:.7rem; text-align:center;
+  width:112px; height:112px; border-radius:50%; margin:0 auto .6rem; display:flex; align-items:center; justify-content:center;
+  background: var(--primary); color:#fff; font-weight:800; font-size:.85rem; text-align:center;
 }
 .login-title { font-size:1.6rem; font-weight:800; letter-spacing:-.02em; }
 .login-subtitle { font-size:.85rem; color: var(--primary); font-weight:500; }
@@ -281,7 +281,7 @@ input[type="checkbox"], input[type="radio"] {
 .footer strong { color: var(--primary); }
 
 /* ---------------- Real logo / avatar images ---------------- */
-.brand-logo-wrap { width:72px; height:72px; margin:0 auto .6rem; }
+.brand-logo-wrap { width:112px; height:112px; margin:0 auto .6rem; }
 .brand-logo-img { width:100%; height:100%; border-radius:50%; object-fit:cover; box-shadow:0 4px 14px rgba(0,0,0,.18); }
 .avatar-img { width:100%; height:100%; border-radius:50%; object-fit:cover; }
 .badge-img { width:100%; height:100%; border-radius:50%; object-fit:cover; }
