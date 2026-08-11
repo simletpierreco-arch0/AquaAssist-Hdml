@@ -338,20 +338,66 @@ function appendBubble(role, content, attachmentName, reportCard, attachmentMime,
 // ---------------------------------------------------------------------
 // Text-to-speech (browser-native, no backend call needed)
 // ---------------------------------------------------------------------
+let availableVoices = [];
+
+function loadVoices() {
+  if (!("speechSynthesis" in window)) return;
+  availableVoices = window.speechSynthesis.getVoices();
+  populateVoiceSelect();
+}
+
+function populateVoiceSelect() {
+  const sel = $("#voiceSelect");
+  if (!sel || !availableVoices.length) return;
+  const englishVoices = availableVoices.filter((v) => v.lang && v.lang.toLowerCase().startsWith("en"));
+  const voices = englishVoices.length ? englishVoices : availableVoices;
+
+  const currentValue = sel.value;
+  sel.innerHTML = "";
+  voices.forEach((v) => {
+    const opt = document.createElement("option");
+    opt.value = v.name;
+    opt.textContent = `${v.name} (${v.lang})`;
+    sel.appendChild(opt);
+  });
+
+  const saved = localStorage.getItem("aqua_tts_voice");
+  if (saved && voices.some((v) => v.name === saved)) {
+    sel.value = saved;
+  } else if (currentValue && voices.some((v) => v.name === currentValue)) {
+    sel.value = currentValue;
+  } else if (voices.length) {
+    // Default to a different voice than the browser's usual first/default
+    // pick, so read-aloud sounds distinct out of the box.
+    const defaultIdx = voices.length > 1 ? 1 : 0;
+    sel.value = voices[defaultIdx].name;
+    localStorage.setItem("aqua_tts_voice", voices[defaultIdx].name);
+  }
+}
+
 function speakText(text) {
   if (!("speechSynthesis" in window)) return;
   window.speechSynthesis.cancel();
   const plain = text.replace(/\*\*(.+?)\*\*/g, "$1").replace(/[#_*`]/g, "");
   const utter = new SpeechSynthesisUtterance(plain);
   utter.rate = 1;
+  const savedVoiceName = localStorage.getItem("aqua_tts_voice");
+  const voice = availableVoices.find((v) => v.name === savedVoiceName);
+  if (voice) utter.voice = voice;
   window.speechSynthesis.speak(utter);
 }
 
 function mdLite(text) {
-  // Minimal, safe markdown: escape HTML first, then bold + line breaks.
-  return escapeHtml(text)
+  // Minimal, safe markdown: escape HTML first, then bold + line breaks,
+  // then turn bare URLs into clickable links.
+  let html = escapeHtml(text)
     .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
     .replace(/\n/g, "<br>");
+  html = html.replace(
+    /(https?:\/\/[^\s<]+)/g,
+    (url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`
+  );
+  return html;
 }
 function escapeHtml(s) {
   const div = document.createElement("div");
@@ -745,12 +791,21 @@ function attachCapturedMedia(name, mime, b64) {
 }
 
 function setCameraMode(mode) {
+  const changed = cameraMode !== mode;
   cameraMode = mode;
   $("#cameraModePhotoBtn").classList.toggle("active", mode === "photo");
   $("#cameraModeVideoBtn").classList.toggle("active", mode === "video");
   $("#cameraModalTitle").textContent = mode === "photo" ? "📷 Take a photo" : "🎥 Record a video";
   $("#cameraShotBtn").textContent = mode === "photo" ? "Capture" : "● Record";
   resetCameraCaptureUI();
+  // The initial stream (opened in photo mode) is requested without a mic
+  // track, since photo capture doesn't need audio. Switching into video
+  // mode needs its own getUserMedia call with audio:true, or the recorded
+  // clip plays back silent — restart the stream whenever the mode actually
+  // changes and the modal is already open.
+  if (changed && cameraStream) {
+    startCameraStream();
+  }
 }
 
 function resetCameraCaptureUI() {
@@ -790,6 +845,15 @@ function toggleVideoRecording() {
     return;
   }
   if (!cameraStream) return;
+  if (cameraStream.getAudioTracks().length === 0) {
+    // Safety net: if we somehow still don't have a mic track (e.g. the
+    // browser silently dropped it), grab one now rather than recording
+    // a silent clip.
+    $("#cameraError").textContent = "Recording without audio — microphone wasn't available.";
+    $("#cameraError").style.display = "block";
+  } else {
+    $("#cameraError").style.display = "none";
+  }
   cameraChunks = [];
   const videoMimeType = pickSupportedMimeType(PREFERRED_VIDEO_MIME_TYPES);
   try {
@@ -1035,6 +1099,10 @@ function setupSettings() {
   if (!("speechSynthesis" in window)) {
     readAloud.disabled = true;
     readAloud.parentElement.title = "Not supported in this browser.";
+  } else {
+    loadVoices();
+    // Chrome/Edge populate the voice list asynchronously.
+    window.speechSynthesis.onvoiceschanged = loadVoices;
   }
 
   dark.addEventListener("change", () => { document.body.classList.toggle("dark", dark.checked); localStorage.setItem("aqua_dark", dark.checked ? "1" : "0"); });
@@ -1044,6 +1112,18 @@ function setupSettings() {
     localStorage.setItem("aqua_read_aloud", readAloud.checked ? "1" : "0");
     if (!readAloud.checked && "speechSynthesis" in window) window.speechSynthesis.cancel();
   });
+
+  const voiceSelect = $("#voiceSelect");
+  if (voiceSelect) {
+    if (!("speechSynthesis" in window)) {
+      voiceSelect.disabled = true;
+    } else {
+      voiceSelect.addEventListener("change", () => {
+        localStorage.setItem("aqua_tts_voice", voiceSelect.value);
+        speakText("This is how AquaAssist will sound.");
+      });
+    }
+  }
 
   const parishSelect = $("#customerParishSelect");
   parishSelect.value = localStorage.getItem("aqua_customer_parish") || "";
