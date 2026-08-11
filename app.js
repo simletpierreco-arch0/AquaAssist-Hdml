@@ -346,32 +346,57 @@ function loadVoices() {
   populateVoiceSelect();
 }
 
+// Caribbean English locale codes — NAWASA's own territory (Grenada,
+// en-GD) first, then the wider region. Some platforms (Edge/Windows in
+// particular) ship neural voices for these locales even though they're
+// easy to miss in a long, mostly US/UK/AU list.
+const CARIBBEAN_LOCALES = [
+  "en-gd", // Grenada
+  "en-jm", "en-tt", "en-bb", "en-lc", "en-vc", "en-ag", "en-kn", "en-dm", "en-bs", "en-bz", "en-gy",
+];
+
 function populateVoiceSelect() {
   const sel = $("#voiceSelect");
   if (!sel || !availableVoices.length) return;
   const englishVoices = availableVoices.filter((v) => v.lang && v.lang.toLowerCase().startsWith("en"));
   const voices = englishVoices.length ? englishVoices : availableVoices;
 
+  // Surface any Caribbean-locale voice at the top of the list, tagged, so
+  // it isn't lost in a long alphabetical dropdown.
+  const isCaribbean = (v) => CARIBBEAN_LOCALES.includes((v.lang || "").toLowerCase());
+  const sortedVoices = [...voices].sort((a, b) => (isCaribbean(b) ? 1 : 0) - (isCaribbean(a) ? 1 : 0));
+
   const currentValue = sel.value;
   sel.innerHTML = "";
-  voices.forEach((v) => {
+  sortedVoices.forEach((v) => {
     const opt = document.createElement("option");
     opt.value = v.name;
-    opt.textContent = `${v.name} (${v.lang})`;
+    opt.textContent = isCaribbean(v) ? `🌴 ${v.name} (${v.lang})` : `${v.name} (${v.lang})`;
     sel.appendChild(opt);
   });
 
+  const grenadaVoice = sortedVoices.find((v) => (v.lang || "").toLowerCase() === "en-gd");
+  const anyCaribbeanVoice = sortedVoices.find(isCaribbean);
   const saved = localStorage.getItem("aqua_tts_voice");
-  if (saved && voices.some((v) => v.name === saved)) {
+
+  if (saved && sortedVoices.some((v) => v.name === saved)) {
     sel.value = saved;
-  } else if (currentValue && voices.some((v) => v.name === currentValue)) {
+  } else if (currentValue && sortedVoices.some((v) => v.name === currentValue)) {
     sel.value = currentValue;
-  } else if (voices.length) {
+  } else if (grenadaVoice) {
+    // NAWASA is Grenada's own water authority — prefer a Grenadian voice
+    // as the default whenever the device actually has one.
+    sel.value = grenadaVoice.name;
+    localStorage.setItem("aqua_tts_voice", grenadaVoice.name);
+  } else if (anyCaribbeanVoice) {
+    sel.value = anyCaribbeanVoice.name;
+    localStorage.setItem("aqua_tts_voice", anyCaribbeanVoice.name);
+  } else if (sortedVoices.length) {
     // Default to a different voice than the browser's usual first/default
     // pick, so read-aloud sounds distinct out of the box.
-    const defaultIdx = voices.length > 1 ? 1 : 0;
-    sel.value = voices[defaultIdx].name;
-    localStorage.setItem("aqua_tts_voice", voices[defaultIdx].name);
+    const defaultIdx = sortedVoices.length > 1 ? 1 : 0;
+    sel.value = sortedVoices[defaultIdx].name;
+    localStorage.setItem("aqua_tts_voice", sortedVoices[defaultIdx].name);
   }
 }
 
