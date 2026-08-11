@@ -52,22 +52,25 @@ NAWASA_PHONE = "(473) 440-2155"
 NAWASA_WEBSITE = "https://nawasa.gd/"
 
 # ---------------------------------------------------------------------------
-# Media normalization for Gemini — the model's audio understanding only
-# reliably accepts a specific set of container/codec combos (wav, mp3, aiff,
-# aac, ogg, flac). Browsers record voice notes with MediaRecorder, and on
-# most browsers/OSes the only thing actually available is audio/webm
-# (Opus) — a container Gemini does not recognize for audio understanding.
-# That meant voice notes were uploading fine but being "heard" as nothing:
-# the model got bytes it couldn't decode as audio and just gave a generic
-# reply instead of responding to what the customer said.
+# Media normalization for Gemini — the model's audio/video understanding
+# only reliably accepts specific container/codec combos, and browser-side
+# MediaRecorder output frequently doesn't match what it was labelled as.
 #
-# When ffmpeg is available on the host we remux (NOT re-encode — same Opus
-# audio, different container, so it's instant and lossless) the WebM file
-# into an Ogg container, which Gemini does accept. The frontend also now
-# prefers a Gemini-friendly recording format when the browser supports one,
-# so this server-side step is a safety net, not the only fix.
+# AUDIO: browsers record voice notes as audio/webm (Opus) almost everywhere,
+# and Gemini does not recognize that container for audio understanding. When
+# ffmpeg is available we remux (not re-encode — same Opus audio, different
+# container, so it's instant and lossless) into Ogg, which Gemini accepts.
 #
-# Video is left alone — video/webm is already an accepted video type.
+# VIDEO: MediaRecorder's "video/mp4" output (when a browser claims to
+# support it) is a fragmented/streamed MP4 — the moov atom lands at the end
+# or is split across fragments instead of sitting at the front of the file.
+# Many parsers, including Gemini's ingestion, expect the moov atom up front
+# ("faststart") and will silently fail to read the file otherwise — which is
+# what produces an empty response (no candidates) rather than a clear error.
+# video/webm from MediaRecorder is a normal, non-fragmented container and
+# doesn't have this problem, but to have one reliable, well-formed path for
+# every browser we re-mux/transcode any recorded video into a proper
+# faststart MP4 server-side when ffmpeg is available.
 # ---------------------------------------------------------------------------
 def _ffmpeg_available():
     try:
@@ -83,9 +86,15 @@ _HAS_FFMPEG = _ffmpeg_available()
 
 def _normalize_media_for_gemini(raw: bytes, mime: str):
     """Returns (bytes_to_send, mime_type_to_send) for a chat attachment.
-    Only touches audio/webm (remux to audio/ogg); everything else passes
-    through unchanged."""
+
+    - audio/webm -> remuxed to audio/ogg (same Opus audio, new container).
+    - any video/* -> re-muxed/transcoded into a proper faststart MP4, since
+      MediaRecorder output (regardless of the mime type it reports) is not
+      guaranteed to be laid out the way Gemini's ingestion expects.
+    - everything else passes through unchanged.
+    """
     mime = (mime or "").split(";")[0].strip().lower()
+
     if mime in ("audio/webm", "audio/x-webm") and _HAS_FFMPEG:
         try:
             with tempfile.NamedTemporaryFile(suffix=".webm") as src, \
@@ -102,6 +111,30 @@ def _normalize_media_for_gemini(raw: bytes, mime: str):
                     return converted, "audio/ogg"
         except Exception:
             pass  # fall through and send the original bytes/mime below
+
+    if mime.startswith("video/") and _HAS_FFMPEG:
+        # Guess a source suffix ffmpeg can sniff correctly; it doesn't
+        # actually need to be accurate since ffmpeg probes the real
+        # container, but a matching extension avoids some edge cases.
+        src_suffix = ".mp4" if "mp4" in mime else ".webm"
+        try:
+            with tempfile.NamedTemporaryFile(suffix=src_suffix) as src, \
+                 tempfile.NamedTemporaryFile(suffix=".mp4") as dst:
+                src.write(raw)
+                src.flush()
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", src.name,
+                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                     "-c:a", "aac", "-movflags", "+faststart", dst.name],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    check=True, timeout=60,
+                )
+                converted = Path(dst.name).read_bytes()
+                if converted:
+                    return converted, "video/mp4"
+        except Exception:
+            pass  # fall through and send the original bytes/mime below
+
     return raw, (mime or "application/octet-stream")
 
 
@@ -530,9 +563,28 @@ def api_chat():
 
     try:
         response = chat.send_message(parts if len(parts) > 1 else parts[0])
-        reply_text = response.text
     except Exception as e:
         return jsonify({"error": f"Gemini error: {e}"}), 502
+
+    # response.text raises IndexError ("list index out of range") when
+    # Gemini returns zero candidates — which happens when it couldn't make
+    # sense of an attachment (a malformed/unsupported media file, or a clip
+    # the safety filters rejected) rather than a normal API failure. Treat
+    # that case explicitly instead of letting the raw exception leak to the
+    # customer as a cryptic "list index out of range" message.
+    if not getattr(response, "candidates", None):
+        has_media = any(a.get("mime", "").split("/")[0] in ("audio", "video") for a in attachments)
+        if has_media:
+            reply_text = ("I wasn't able to process that recording — it may not have come through "
+                          "correctly. Could you try sending it again, use a shorter clip, or type a "
+                          "quick summary instead?")
+        else:
+            reply_text = "Sorry, I wasn't able to generate a reply just now. Could you try rephrasing that?"
+    else:
+        try:
+            reply_text = response.text
+        except Exception:
+            reply_text = "Sorry, I wasn't able to generate a reply just now. Could you try again?"
 
     result = {"session_id": session_id, "reply": reply_text, "attachment": saved_attachment_name or None}
     report_card = LAST_REPORT.pop(session_id, None)
