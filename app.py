@@ -2,12 +2,15 @@
 AquaAssist backend — Flask API + Gemini chat, serving a static HTML/CSS/JS
 frontend (see ../frontend). This replaces the Streamlit UI: the browser is
 now a plain client that talks to this server over JSON; the server holds
-the Gemini API key, the CSV "database", and the staff passcode.
+the Gemini API key, the ElevenLabs API key, the CSV "database", and the
+staff passcode.
 
 Run with:
     pip install -r requirements.txt
     export GEMINI_API_KEY=your-key-here
     export STAFF_PASSCODE=change-me
+    export ELEVENLABS_API_KEY=your-elevenlabs-key      # optional, enables Caribbean-accent read-aloud
+    export ELEVENLABS_VOICE_ID=your-chosen-voice-id    # optional, from the ElevenLabs Voice Library
     python app.py
 
 Then open http://localhost:5000
@@ -22,6 +25,14 @@ data does, with nothing extra to configure. The trade-off: reports.csv
 grows faster (base64 is ~33% larger than the raw file) and this won't
 scale gracefully to a high volume of large video reports — if that
 happens, move to a real database + object storage (e.g. Postgres + S3/R2).
+
+NOTE ON TEXT-TO-SPEECH: read-aloud in the frontend now calls /api/tts,
+which proxies to ElevenLabs so the assistant can speak with an actual
+Caribbean-accented voice (browsers essentially never ship a real Caribbean
+voice for the native Web Speech API). If ELEVENLABS_API_KEY /
+ELEVENLABS_VOICE_ID aren't set, /api/tts returns a 503 and the frontend
+automatically falls back to the browser's built-in voice, so the app still
+works without this configured — it just won't have the Caribbean accent.
 """
 
 import os
@@ -35,6 +46,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from functools import wraps
 
+import requests
 from flask import Flask, request, jsonify, send_from_directory
 from google import genai
 from google.genai import types
@@ -48,6 +60,13 @@ DATA_DIR.mkdir(exist_ok=True)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 STAFF_PASSCODE = os.environ.get("STAFF_PASSCODE", "changeme123")
 MODEL_NAME = "gemini-3.1-flash-lite"
+
+# ElevenLabs — used for Caribbean-accented read-aloud (see /api/tts below).
+# Both must be set for TTS to be active; otherwise the frontend silently
+# falls back to the browser's native voice.
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
+ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "")
+ELEVENLABS_MODEL_ID = os.environ.get("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
 
 NAWASA_PHONE = "(473) 440-2155"
 NAWASA_WEBSITE = "https://nawasa.gd/"
@@ -535,6 +554,7 @@ def api_init():
         "nawasa_phone": NAWASA_PHONE,
         "nawasa_website": NAWASA_WEBSITE,
         "gemini_configured": _client is not None,
+        "tts_configured": bool(ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID),
     })
 
 
@@ -711,6 +731,57 @@ def api_staff_login():
     body = request.get_json(force=True)
     ok = body.get("passcode") == STAFF_PASSCODE
     return jsonify({"ok": ok}), (200 if ok else 401)
+
+
+# ---------------------------------------------------------------------------
+# Text-to-speech — proxies to ElevenLabs so AquaAssist can speak with an
+# actual Caribbean-accented voice. The browser's native Web Speech API
+# (used as a fallback in the frontend) essentially never has a real
+# Caribbean voice installed, so this is the only reliable way to get one.
+#
+# The frontend sends plain text; we return raw MP3 bytes directly (no JSON
+# wrapper) so the browser can play them straight from the fetch response.
+# If ElevenLabs isn't configured, or the request to it fails, we return a
+# 503/502 and the frontend automatically falls back to speechSynthesis —
+# so the app still works end-to-end without this configured.
+# ---------------------------------------------------------------------------
+@app.route("/api/tts", methods=["POST"])
+def api_tts():
+    if not ELEVENLABS_API_KEY or not ELEVENLABS_VOICE_ID:
+        return jsonify({"error": "Text-to-speech is not configured on this server."}), 503
+
+    body = request.get_json(force=True)
+    text = (body.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "No text provided."}), 400
+
+    # ElevenLabs charges per character and has a per-request limit well
+    # above anything a chat reply or FAQ answer would need — trim
+    # defensively so a runaway prompt can't produce an oversized bill.
+    text = text[:2000]
+
+    try:
+        resp = requests.post(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}",
+            headers={
+                "xi-api-key": ELEVENLABS_API_KEY,
+                "Content-Type": "application/json",
+                "Accept": "audio/mpeg",
+            },
+            json={
+                "text": text,
+                "model_id": ELEVENLABS_MODEL_ID,
+                "voice_settings": {"stability": 0.45, "similarity_boost": 0.8, "style": 0.3},
+            },
+            timeout=30,
+        )
+    except requests.RequestException as e:
+        return jsonify({"error": f"TTS request failed: {e}"}), 502
+
+    if resp.status_code != 200:
+        return jsonify({"error": f"TTS generation failed ({resp.status_code})."}), 502
+
+    return resp.content, 200, {"Content-Type": "audio/mpeg"}
 
 
 if __name__ == "__main__":
