@@ -26,6 +26,8 @@ import io
 import re
 import uuid
 import base64
+import subprocess
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from functools import wraps
@@ -48,6 +50,60 @@ MODEL_NAME = "gemini-3.1-flash-lite"
 
 NAWASA_PHONE = "(473) 440-2155"
 NAWASA_WEBSITE = "https://nawasa.gd/"
+
+# ---------------------------------------------------------------------------
+# Media normalization for Gemini — the model's audio understanding only
+# reliably accepts a specific set of container/codec combos (wav, mp3, aiff,
+# aac, ogg, flac). Browsers record voice notes with MediaRecorder, and on
+# most browsers/OSes the only thing actually available is audio/webm
+# (Opus) — a container Gemini does not recognize for audio understanding.
+# That meant voice notes were uploading fine but being "heard" as nothing:
+# the model got bytes it couldn't decode as audio and just gave a generic
+# reply instead of responding to what the customer said.
+#
+# When ffmpeg is available on the host we remux (NOT re-encode — same Opus
+# audio, different container, so it's instant and lossless) the WebM file
+# into an Ogg container, which Gemini does accept. The frontend also now
+# prefers a Gemini-friendly recording format when the browser supports one,
+# so this server-side step is a safety net, not the only fix.
+#
+# Video is left alone — video/webm is already an accepted video type.
+# ---------------------------------------------------------------------------
+def _ffmpeg_available():
+    try:
+        subprocess.run(["ffmpeg", "-version"], stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL, check=True, timeout=5)
+        return True
+    except Exception:
+        return False
+
+
+_HAS_FFMPEG = _ffmpeg_available()
+
+
+def _normalize_media_for_gemini(raw: bytes, mime: str):
+    """Returns (bytes_to_send, mime_type_to_send) for a chat attachment.
+    Only touches audio/webm (remux to audio/ogg); everything else passes
+    through unchanged."""
+    mime = (mime or "").split(";")[0].strip().lower()
+    if mime in ("audio/webm", "audio/x-webm") and _HAS_FFMPEG:
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".webm") as src, \
+                 tempfile.NamedTemporaryFile(suffix=".ogg") as dst:
+                src.write(raw)
+                src.flush()
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", src.name, "-c:a", "libopus", dst.name],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    check=True, timeout=25,
+                )
+                converted = Path(dst.name).read_bytes()
+                if converted:
+                    return converted, "audio/ogg"
+        except Exception:
+            pass  # fall through and send the original bytes/mime below
+    return raw, (mime or "application/octet-stream")
+
 
 app = Flask(__name__, static_folder=None)
 
@@ -316,7 +372,7 @@ Use the following facts to answer user questions:
 - If the customer attaches a photo of the issue, look at it before calling log_water_report and set severity based on what you actually see.
 - Use natural understanding, not keyword matching.
 - If a customer shares their GPS location (a message like "My current location is [parish], Grenada (GPS: lat, lng)"), treat that parish as their location for the rest of the conversation — use it for outage/service questions and when logging a report, without asking them to repeat it.
-- Customers may send a voice note (spoken audio) or a short video instead of typing or a photo. Listen to / watch the attachment directly and respond to its content the same way you would a typed message or photo — don't ask them to type it out instead.
+- Customers may send a voice note (spoken audio) or a short video instead of typing or a photo. Always listen to / watch the attachment directly and treat what you actually hear or see as their real message — respond to its actual content (what they said, what the leak or damage looks like, etc.). Never reply with a generic "thanks for the recording" acknowledgement, and never ask them to type it out instead — if for some reason the audio or video truly can't be made out, say so plainly and ask them to also type a quick summary, rather than pretending you understood it.
 
 If a question is unrelated to NAWASA services, politely explain that you can only assist with NAWASA-related topics and invite the user to ask another water service question.
 """
@@ -468,8 +524,9 @@ def api_chat():
             continue
         saved_attachment_name = f"{uuid.uuid4().hex[:8]}_{att.get('name', 'upload')}"
         with open(ATTACH_DIR / saved_attachment_name, "wb") as f:
-            f.write(raw)
-        parts.append(types.Part.from_bytes(data=raw, mime_type=att.get("mime", "application/octet-stream")))
+            f.write(raw)  # keep the original file on disk for staff review
+        send_bytes, send_mime = _normalize_media_for_gemini(raw, att.get("mime", "application/octet-stream"))
+        parts.append(types.Part.from_bytes(data=send_bytes, mime_type=send_mime))
 
     try:
         response = chat.send_message(parts if len(parts) > 1 else parts[0])
