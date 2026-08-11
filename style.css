@@ -10,6 +10,13 @@
      3. Glassmorphism treatment for cards / hero / chat surfaces so content
         stays readable while floating above the water.
    Search for "WATERY BACKGROUND — NEW" to jump straight to the new section.
+
+   DESKTOP WIDTH FIX (this revision): the ".page" application shell was
+   previously hard-capped at max-width:720px, which forced the entire
+   dashboard (header, nav, notice, contact cards, chat) into a narrow
+   centered column regardless of viewport size. ".page" now scales with
+   the viewport instead — see "DESKTOP WIDTH FIX" below for the exact
+   rule and responsive tiers. Search for "DESKTOP WIDTH FIX" to jump there.
    ========================================================================= */
 
 :root {
@@ -83,7 +90,38 @@ input[type="checkbox"], input[type="radio"] {
   width: 1.05rem; height: 1.05rem; flex-shrink: 0; margin: 0; padding: 0; accent-color: var(--primary);
 }
 
-.page { max-width: 720px; margin: 0 auto; padding: 1.2rem 1rem 2rem; animation: fadeUp .35s ease-out; position: relative; z-index: 1; }
+/* =========================================================================
+   DESKTOP WIDTH FIX
+   -------------------------------------------------------------------------
+   ".page" is the wrapper around #app — it directly contains the hero
+   (header), the portal-switch, the tab-nav, and every tab panel (chat,
+   report, faq, notify, settings), so widening this one rule widens the
+   whole dashboard. It no longer hard-caps at 720px; instead it scales
+   with the viewport in tiers, staying centered with comfortable margins:
+     - mobile:  ~94% of viewport
+     - tablet:  ~90-92% of viewport
+     - desktop: ~85-90% of viewport, capped at 1600px so it doesn't get
+                absurdly wide on ultra-large monitors
+   ========================================================================= */
+.page {
+  width: 94%;
+  max-width: none;
+  margin: 0 auto;
+  padding: 1.2rem 1rem 2rem;
+  animation: fadeUp .35s ease-out;
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+}
+@media (min-width: 600px) {
+  .page { width: 92vw; }
+}
+@media (min-width: 1024px) {
+  .page { width: 90vw; padding: 1.4rem 1.5rem 2.4rem; }
+}
+@media (min-width: 1440px) {
+  .page { width: min(88vw, 1600px); padding: 1.6rem 2rem 2.6rem; }
+}
 @keyframes fadeUp { from { opacity:0; transform: translateY(10px);} to {opacity:1; transform:none;} }
 
 /* ---------------- Hero ---------------- */
@@ -196,7 +234,10 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 .msg-row { display:flex; gap:.6rem; align-items:flex-end; animation: fadeUp .25s ease-out; }
 .msg-row.user { flex-direction: row-reverse; }
 .msg-avatar { width:34px; height:34px; border-radius:50%; background: var(--card); display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent); }
-.msg-bubble { max-width: 78%; padding:.7rem 1rem; border-radius: 18px; box-shadow: 0 4px 14px rgba(0,90,156,.08); }
+/* Bubbles keep a comfortable reading width even though the chat container
+   itself is now wide on desktop — capped in px so long lines stay legible
+   instead of stretching edge-to-edge on large monitors. */
+.msg-bubble { max-width: min(78%, 640px); padding:.7rem 1rem; border-radius: 18px; box-shadow: 0 4px 14px rgba(0,90,156,.08); }
 .msg-row.assistant .msg-bubble { background: color-mix(in srgb, var(--card) 88%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border:1px solid color-mix(in srgb, var(--primary) 15%, transparent); border-radius: 6px 18px 18px 18px; }
 .msg-row.user .msg-bubble { background: var(--user-bubble-bg); color: var(--user-bubble-text); border-radius: 18px 6px 18px 18px; }
 .msg-bubble p { margin: 0; white-space: pre-wrap; }
@@ -255,6 +296,15 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 .attachment-preview { font-size:.78rem; margin: .3rem 0 0; color: color-mix(in srgb, var(--text) 70%, transparent); }
 
 .quick-actions-grid { display:grid; grid-template-columns: 1fr 1fr; gap:.6rem; }
+/* Let quick actions use the extra desktop width instead of staying a fixed
+   2-column grid — there are 6 actions today, so 3 then 6 columns reads
+   cleanly as the viewport grows. */
+@media (min-width: 900px) {
+  .quick-actions-grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (min-width: 1280px) {
+  .quick-actions-grid { grid-template-columns: repeat(6, 1fr); }
+}
 .quick-action-btn {
   background: color-mix(in srgb, var(--card) 85%, transparent); border:1px solid color-mix(in srgb, var(--primary) 20%, transparent);
   border-radius:14px; padding:.7rem .5rem; font-size:.85rem; font-weight:600; color: var(--text); text-align:center;
