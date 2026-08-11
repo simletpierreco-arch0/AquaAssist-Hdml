@@ -1,15 +1,14 @@
 /* =========================================================================
    AquaAssist — NAWASA visual theme
    -------------------------------------------------------------------------
-   This file is a superset of the original stylesheet: every original rule,
-   selector, and class name used by app.js / index.html is preserved so no
-   functionality changes. The additions are:
-     1. Updated brand color tokens (NAWASA blues).
-     2. A fixed, pure-CSS "ocean" background layer (gradients + waves +
-        floating bubbles) — no images, GPU-friendly transforms only.
-     3. Glassmorphism treatment for cards / hero / chat surfaces so content
-        stays readable while floating above the water.
-   Search for "WATERY BACKGROUND — NEW" to jump straight to the new section.
+   AquaAssist now renders as a floating popup widget (small launcher bubble
+   -> expands into a chat panel -> closes back down on outside click),
+   rather than owning the full page. Everything that used to be page-level
+   (the watery background, login screen sizing) is now scoped to the
+   widget panel so it can sit on top of any host page without taking over
+   its background or layout. Search for "WIDGET LAUNCHER / POPUP PANEL"
+   to jump straight to the new section, and "DEMO HOST PAGE" for the
+   placeholder site styling used only for previewing the widget in place.
    ========================================================================= */
 
 :root {
@@ -58,17 +57,6 @@ body.large-text { --font-size-base: 1.15rem; }
 html, body {
   margin: 0; padding: 0; width: 100%; min-height: 100%;
   font-family: 'Poppins', 'Inter', sans-serif;
-  font-size: var(--font-size-base);
-  background-color: var(--bg);
-  color: var(--text);
-  transition: background-color .2s ease, color .2s ease;
-}
-body:not(.high-contrast) {
-  background-image:
-    radial-gradient(ellipse 900px 500px at 50% -10%, color-mix(in srgb, var(--accent) 13%, transparent) 0%, transparent 60%),
-    linear-gradient(180deg, var(--bg-soft) 0%, var(--bg) 45%);
-  background-repeat: no-repeat;
-  background-attachment: fixed;
 }
 a { color: var(--primary); }
 button { font-family: inherit; cursor: pointer; }
@@ -294,7 +282,7 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 .attachment-link:hover { text-decoration: underline; }
 
 /* ---------------- Login gate ---------------- */
-.login-wrap { max-width: min(460px, 94vw); width:100%; margin: 0 auto; padding: 1rem; animation: fadeUp .4s ease-out; position: relative; z-index: 1; }
+.login-wrap { width: 100%; max-width: 100%; margin: 0; padding: 1rem; animation: fadeUp .4s ease-out; position: relative; z-index: 1; }
 .login-toggle-row { display:flex; justify-content:flex-end; }
 .dm-toggle { font-size:.78rem; display:flex; align-items:center; gap:.3rem; }
 .login-header { text-align:center; padding: 1.4rem .5rem 1rem; }
@@ -310,15 +298,6 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
   -webkit-backdrop-filter: blur(16px) saturate(150%);
   box-shadow: 0 12px 40px rgba(0,90,156,0.16), inset 0 1px 0 rgba(255,255,255,0.55);
 }
-
-/* ---------------- WhatsApp float ---------------- */
-.whatsapp-float {
-  position: fixed; bottom:24px; right:24px; z-index:999; background: var(--whatsapp); color:#fff !important;
-  text-decoration:none; width:56px; height:56px; border-radius:50%; display:flex; align-items:center; justify-content:center;
-  font-size:1.6rem; box-shadow: 0 4px 16px rgba(37,211,102,.45); animation: pulseRing 2.5s infinite;
-}
-@keyframes pulseRing {0%{box-shadow:0 0 0 0 rgba(37,211,102,.55);} 70%{box-shadow:0 0 0 14px rgba(37,211,102,0);} 100%{box-shadow:0 0 0 0 rgba(37,211,102,0);}}
-.whatsapp-float:hover { animation:none; transform:scale(1.08); }
 
 .footer { text-align:center; font-size:.72rem; color: color-mix(in srgb, var(--text) 65%, transparent); padding: .9rem 0 1.4rem; position: relative; z-index: 1; }
 .footer strong { color: var(--primary); }
@@ -372,33 +351,88 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 }
 
 /* =========================================================================
-   WATERY BACKGROUND — NEW
+   WIDGET LAUNCHER / POPUP PANEL
    -------------------------------------------------------------------------
-   Everything below is additive. It targets a small set of new, purely
-   decorative elements (.ocean-bg, .ocean-layer, .ocean-caustics, .bubble)
-   that are inserted once near the top of <body> in index.html. None of
-   these elements have IDs, so app.js — which only ever queries specific
-   #ids and a fixed set of existing classes — is completely unaffected.
+   AquaAssist sits on the host page as a small floating bubble
+   (.aqua-launcher). Clicking it opens .aqua-widget-panel, a fixed-position
+   card anchored to the bottom-right corner — the host page underneath is
+   never scroll-locked or covered, since the panel is just a normal
+   fixed-position box floating above the page rather than a full-screen
+   takeover. Clicking outside it (handled in app.js) closes it back down
+   to the bubble.
+   ========================================================================= */
 
-   Design choices:
-   - Deep-to-bright blue gradient evokes open Caribbean water, deepening
-     toward the bottom of the viewport like real sea depth.
-   - Three translucent SVG "wave" bands drift at different speeds/opacities
-     (parallax) using only `transform: translateX`, which is cheap for the
-     compositor — no layout thrashing, no filters recalculated per frame.
-   - A soft radial "caustic" light glow drifts slowly to suggest sunlight
-     rippling through water, kept at very low opacity so text stays legible.
-   - Bubbles are a handful of small circles animated with transform+opacity
-     only (translateY + slight sideways drift), respecting
-     prefers-reduced-motion.
-   - The whole layer is `position: fixed`, sits behind `.page`/`.login-wrap`
-     (both given z-index: 1 above), and never intercepts clicks
-     (`pointer-events: none`), so it can't interfere with any button, link,
-     form control, or the Leaflet maps.
+.aqua-launcher {
+  position: fixed; bottom: 24px; right: 24px; z-index: 999;
+  width: 60px; height: 60px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--hover) 100%);
+  border: none; box-shadow: 0 6px 20px rgba(0,90,156,.35);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; padding: 0;
+  transition: transform .18s ease, opacity .18s ease;
+}
+.aqua-launcher:hover { transform: scale(1.06); }
+.aqua-launcher.hidden { opacity: 0; transform: scale(.85); pointer-events: none; }
+.launcher-avatar { width: 62%; height: 62%; border-radius: 50%; object-fit: cover; }
+.launcher-fallback { font-size: 1.6rem; }
+
+.aqua-widget-panel {
+  position: fixed; bottom: 96px; right: 24px; z-index: 998;
+  width: 400px; max-width: calc(100vw - 32px);
+  height: 640px; max-height: calc(100vh - 130px);
+  border-radius: 20px; overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,.28);
+  display: none; opacity: 0; transform: translateY(16px) scale(.98);
+  transition: opacity .18s ease, transform .18s ease;
+}
+.aqua-widget-panel.open {
+  display: block; opacity: 1; transform: translateY(0) scale(1);
+}
+
+.widget-panel-inner {
+  position: relative; width: 100%; height: 100%;
+  overflow-y: auto; overflow-x: hidden;
+  background-color: var(--bg); color: var(--text);
+  font-size: var(--font-size-base);
+  transition: background-color .2s ease, color .2s ease;
+}
+body:not(.high-contrast) .widget-panel-inner {
+  background-image:
+    radial-gradient(ellipse 900px 500px at 50% -10%, color-mix(in srgb, var(--accent) 13%, transparent) 0%, transparent 60%),
+    linear-gradient(180deg, var(--bg-soft) 0%, var(--bg) 45%);
+  background-repeat: no-repeat;
+}
+
+.widget-close-btn {
+  position: sticky; top: 8px; z-index: 6;
+  display: flex; align-items: center; justify-content: center;
+  margin: 8px 8px 0 auto;
+  width: 30px; height: 30px; border-radius: 50%;
+  background: rgba(0,0,0,.32); color: #fff; border: none; font-size: .9rem;
+}
+.widget-close-btn:hover { background: rgba(0,0,0,.48); }
+
+@media (max-width: 480px) {
+  .aqua-widget-panel {
+    right: 10px; left: 10px; width: auto;
+    bottom: 84px; height: calc(100vh - 108px); max-height: none;
+  }
+  .aqua-launcher { right: 16px; bottom: 16px; }
+}
+
+/* =========================================================================
+   WATERY BACKGROUND — decorative, scoped to the widget panel only
+   -------------------------------------------------------------------------
+   Pure-CSS Caribbean water scene sitting behind the panel's own content.
+   Absolutely positioned within .widget-panel-inner (which is
+   position: relative and overflow: hidden via the panel), so it never
+   spills onto the host page underneath. `pointer-events: none` keeps it
+   from intercepting clicks on any button, link, form control, or the
+   Leaflet maps.
    ========================================================================= */
 
 .ocean-bg {
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 0;
   overflow: hidden;
@@ -511,3 +545,31 @@ body.dark .ocean-caustics { opacity: 0.14; }
   .ocean-wave { height: 160px; background-size: 900px 160px; }
   .bubble:nth-child(n+9) { display: none; }
 }
+
+/* =========================================================================
+   DEMO HOST PAGE — placeholder site behind the widget, preview only.
+   -------------------------------------------------------------------------
+   None of this styles AquaAssist itself — it's just enough of a fake site
+   to show the launcher/panel floating over real content and the page
+   still scrolling normally when the widget is closed. Delete this whole
+   block (and the matching HTML block) once embedded on your real site.
+   ========================================================================= */
+
+.demo-host-page { font-family: 'Poppins','Inter',sans-serif; color: #1F2937; background: #F7FAFC; min-height: 100vh; }
+.demo-host-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding: 1rem 2rem; background:#fff; border-bottom:1px solid #E2E8F0;
+  position: sticky; top:0; z-index: 10;
+}
+.demo-host-logo { font-weight:800; color:#0072BC; letter-spacing:.03em; }
+.demo-host-nav { display:flex; gap:1.5rem; font-size:.85rem; color:#4A5568; }
+.demo-host-hero { padding: 3rem 2rem; text-align:center; background: linear-gradient(180deg,#EAF6FD,#F7FAFC); }
+.demo-host-hero h1 { font-size:1.8rem; margin:0 0 .5rem; color:#0B3B5C; }
+.demo-host-hero p { color:#4A5568; max-width:520px; margin:0 auto; }
+.demo-host-section { max-width: 860px; margin: 0 auto; padding: 2.5rem 2rem; }
+.demo-host-section h2 { font-size:1.3rem; color:#0B3B5C; margin:0 0 .6rem; }
+.demo-host-section p { color:#4A5568; line-height:1.7; }
+.demo-host-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:1rem; margin-top:1rem; }
+.demo-host-card { background:#fff; border:1px solid #E2E8F0; border-radius:14px; padding:1.2rem; }
+.demo-host-card h3 { margin:0 0 .4rem; font-size:1rem; color:#0072BC; }
+.demo-host-card p { margin:0; font-size:.85rem; }
