@@ -410,6 +410,7 @@ Use the following facts to answer user questions:
 - Provide NAWASA customer service contact information and transfer users to a representative when requested.
 - If the issue is an emergency, advise the user to contact NAWASA immediately at (473) 440-2155.
 - NAWASA's official contact details: Phone (473) 440-2155, WhatsApp via {territory_whatsapp} (this is the number for {territory}), Website https://nawasa.gd/.
+- IMPORTANT — the phone line and WhatsApp are only staffed by a live representative during business hours (8:00 AM – 4:00 PM, Monday to Friday, Grenada time). Each customer message includes a "CURRENT BUSINESS HOURS STATUS" note telling you whether the office is open or closed right now — always check it before telling a customer to call or WhatsApp. If a customer asks to speak with a representative, asks to be transferred, or asks about calling/WhatsApp-ing while the office is CLOSED, tell them plainly up front that no one will be able to answer the phone or reply on WhatsApp right now, let them know when the office reopens, and offer to log their issue (or take their message) so a representative can follow up as soon as the office is open again — don't just hand them the phone number or WhatsApp link as if someone will answer immediately. If the office is OPEN, you can direct them to call or WhatsApp normally.
 - NAWASA's main office is now located on Lucas Street, St. George's (it moved from its former, over 150-year-old building on the Carenage). Sub-offices are located at Seaton James Street, Grenville; Lower Depradine Street, Gouyave; and additional sub-offices in Sauteurs, St. David's, and Grand Anse.
 - When a customer describes a specific problem and gives at least a location, log it immediately using the log_water_report tool — do not tell the customer to fill out a separate form themselves.
 - When a customer reports a visible physical issue (a leak, burst main, damaged hydrant, water quality concern, etc.), ask them to send a photo of it via the attachment (📎) button in the chat box. This helps our technicians assess severity and prepare before visiting. Ask for this naturally as part of your reply — don't make it a precondition for logging the report, and don't ask for a photo for issues that wouldn't have one (e.g. billing questions or no water supply with nothing to see).
@@ -562,6 +563,18 @@ def api_chat():
     parts = []
     if message:
         parts.append(message)
+
+    # Hidden context, not shown in the customer's chat bubble (the frontend
+    # only ever renders the customer's own typed text) — tells the model
+    # whether phone/WhatsApp are staffed right now, since that changes
+    # throughout the day and the system prompt is only built once per session.
+    bh = get_business_hours_status()
+    if bh["is_open"]:
+        bh_note = "CURRENT BUSINESS HOURS STATUS: Office OPEN — phone and WhatsApp are staffed right now."
+    else:
+        bh_note = (f"CURRENT BUSINESS HOURS STATUS: Office CLOSED ({bh['closed_reason']}). "
+                   f"Phone and WhatsApp will NOT be answered until the office reopens {bh['reopens_label']}.")
+    parts.append(f"[{bh_note}]")
 
     CURRENT_ATTACHMENT.pop(session_id, None)
     for att in attachments:
