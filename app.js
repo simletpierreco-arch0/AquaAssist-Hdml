@@ -708,7 +708,6 @@ function setupReportForm() {
       severity: $("#reportSeverity").value,
     };
     if (pendingReportPhoto) {
-      body.attachment_name = pendingReportPhoto.name;
       body.attachment_mime = pendingReportPhoto.mime;
       body.attachment_base64 = pendingReportPhoto.data_base64;
     }
@@ -1271,14 +1270,36 @@ function renderStatusMetrics(reports) {
 
 function renderReportsTable(reports) {
   const thead = $("#reportsTable thead"), tbody = $("#reportsTable tbody");
-  const cols = ["reference", "timestamp", "name", "phone", "location", "issue_type", "severity", "status"];
+  const cols = ["reference", "timestamp", "name", "phone", "location", "issue_type", "severity", "status", "attachment"];
   thead.innerHTML = `<tr>${cols.map((c) => `<th>${c}</th>`).join("")}</tr>`;
   tbody.innerHTML = "";
   reports.slice().reverse().forEach((r) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = cols.map((c) => `<td>${escapeHtml(String(r[c] ?? ""))}</td>`).join("");
+    tr.innerHTML = cols.map((c) => {
+      if (c === "attachment") return `<td>${buildAttachmentCell(r.attachment_mime, r.attachment_data)}</td>`;
+      return `<td>${escapeHtml(String(r[c] ?? ""))}</td>`;
+    }).join("");
     tbody.appendChild(tr);
   });
+}
+
+// Builds the "attachment" cell for a staff report row directly from the
+// inline base64 stored on the report — no separate file/URL to fetch, so
+// this works the same whether the report was created 5 seconds ago or
+// survives a redeploy.
+function buildAttachmentCell(mime, dataB64) {
+  if (!mime || !dataB64) return `<span class="hint-text">—</span>`;
+  const dataUrl = `data:${mime};base64,${dataB64}`;
+  if (mime.startsWith("image/")) {
+    return `<a href="${dataUrl}" target="_blank" rel="noopener"><img src="${dataUrl}" class="report-thumb" alt="attachment" /></a>`;
+  }
+  if (mime.startsWith("video/")) {
+    return `<a href="${dataUrl}" target="_blank" rel="noopener" class="attachment-link">🎥 View video</a>`;
+  }
+  if (mime.startsWith("audio/")) {
+    return `<a href="${dataUrl}" target="_blank" rel="noopener" class="attachment-link">🎤 Play audio</a>`;
+  }
+  return `<a href="${dataUrl}" target="_blank" rel="noopener" class="attachment-link">📎 View file</a>`;
 }
 
 function renderStaffMap(reports) {
