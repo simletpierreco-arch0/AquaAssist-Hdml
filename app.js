@@ -263,17 +263,15 @@ function renderFAQ(query) {
       const item = document.createElement("div");
       item.className = "faq-item";
       item.innerHTML = `<div class="faq-cat">${f.category}</div><b>${escapeHtml(f.q)}</b><br>${escapeHtml(f.a)}`;
-      // Read-aloud button — reuses the same browser speechSynthesis
-      // helper (and voice preference) already used for chat replies.
-      if ("speechSynthesis" in window) {
-        const speakBtn = document.createElement("button");
-        speakBtn.type = "button";
-        speakBtn.className = "speak-btn";
-        speakBtn.title = "Read this answer aloud";
-        speakBtn.textContent = "🔊";
-        speakBtn.addEventListener("click", () => speakText(`${f.q}. ${f.a}`));
-        item.appendChild(speakBtn);
-      }
+      // Read-aloud button — reuses the same speakText() helper (and voice
+      // preference) already used for chat replies.
+      const speakBtn = document.createElement("button");
+      speakBtn.type = "button";
+      speakBtn.className = "speak-btn";
+      speakBtn.title = "Read this answer aloud";
+      speakBtn.textContent = "🔊";
+      speakBtn.addEventListener("click", () => speakText(`${f.q}. ${f.a}`));
+      item.appendChild(speakBtn);
       list.appendChild(item);
     });
   });
@@ -328,7 +326,7 @@ function appendBubble(role, content, attachmentName, reportCard, attachmentMime,
   if (locationCard) {
     bubble.appendChild(buildLocationCardEl(locationCard));
   }
-  if (role === "assistant" && "speechSynthesis" in window) {
+  if (role === "assistant") {
     const speakBtn = document.createElement("button");
     speakBtn.type = "button";
     speakBtn.className = "speak-btn";
@@ -347,9 +345,28 @@ function appendBubble(role, content, attachmentName, reportCard, attachmentMime,
 }
 
 // ---------------------------------------------------------------------
-// Text-to-speech (browser-native, no backend call needed)
+// Text-to-speech
 // ---------------------------------------------------------------------
+// Primary path: the backend's /api/tts endpoint, which proxies to
+// ElevenLabs so AquaAssist can speak with an actual Caribbean-accented
+// voice (browsers essentially never ship a real Caribbean voice for the
+// native Web Speech API, no matter which one you pick from the list).
+//
+// Fallback path: if /api/tts isn't configured on the server (no
+// ELEVENLABS_API_KEY set) or the request fails for any reason, we fall
+// back to the browser's built-in speechSynthesis so read-aloud still
+// works — just without the Caribbean accent.
 let availableVoices = [];
+let currentAudio = null;
+
+// Caribbean English locale codes — used only by the browser-voice fallback
+// path below. Some platforms (Edge/Windows in particular) ship neural
+// voices for these locales even though they're easy to miss in a long,
+// mostly US/UK/AU list.
+const CARIBBEAN_LOCALES = [
+  "en-gd", // Grenada
+  "en-jm", "en-tt", "en-bb", "en-lc", "en-vc", "en-ag", "en-kn", "en-dm", "en-bs", "en-bz", "en-gy",
+];
 
 function loadVoices() {
   if (!("speechSynthesis" in window)) return;
@@ -357,23 +374,12 @@ function loadVoices() {
   populateVoiceSelect();
 }
 
-// Caribbean English locale codes — NAWASA's own territory (Grenada,
-// en-GD) first, then the wider region. Some platforms (Edge/Windows in
-// particular) ship neural voices for these locales even though they're
-// easy to miss in a long, mostly US/UK/AU list.
-const CARIBBEAN_LOCALES = [
-  "en-gd", // Grenada
-  "en-jm", "en-tt", "en-bb", "en-lc", "en-vc", "en-ag", "en-kn", "en-dm", "en-bs", "en-bz", "en-gy",
-];
-
 function populateVoiceSelect() {
   const sel = $("#voiceSelect");
   if (!sel || !availableVoices.length) return;
   const englishVoices = availableVoices.filter((v) => v.lang && v.lang.toLowerCase().startsWith("en"));
   const voices = englishVoices.length ? englishVoices : availableVoices;
 
-  // Surface any Caribbean-locale voice at the top of the list, tagged, so
-  // it isn't lost in a long alphabetical dropdown.
   const isCaribbean = (v) => CARIBBEAN_LOCALES.includes((v.lang || "").toLowerCase());
   const sortedVoices = [...voices].sort((a, b) => (isCaribbean(b) ? 1 : 0) - (isCaribbean(a) ? 1 : 0));
 
@@ -395,32 +401,56 @@ function populateVoiceSelect() {
   } else if (currentValue && sortedVoices.some((v) => v.name === currentValue)) {
     sel.value = currentValue;
   } else if (grenadaVoice) {
-    // NAWASA is Grenada's own water authority — prefer a Grenadian voice
-    // as the default whenever the device actually has one.
     sel.value = grenadaVoice.name;
     localStorage.setItem("aqua_tts_voice", grenadaVoice.name);
   } else if (anyCaribbeanVoice) {
     sel.value = anyCaribbeanVoice.name;
     localStorage.setItem("aqua_tts_voice", anyCaribbeanVoice.name);
   } else if (sortedVoices.length) {
-    // Default to a different voice than the browser's usual first/default
-    // pick, so read-aloud sounds distinct out of the box.
     const defaultIdx = sortedVoices.length > 1 ? 1 : 0;
     sel.value = sortedVoices[defaultIdx].name;
     localStorage.setItem("aqua_tts_voice", sortedVoices[defaultIdx].name);
   }
 }
 
-function speakText(text) {
+function speakWithBrowserVoice(plainText) {
   if (!("speechSynthesis" in window)) return;
   window.speechSynthesis.cancel();
-  const plain = text.replace(/\*\*(.+?)\*\*/g, "$1").replace(/[#_*`]/g, "");
-  const utter = new SpeechSynthesisUtterance(plain);
+  const utter = new SpeechSynthesisUtterance(plainText);
   utter.rate = 1;
   const savedVoiceName = localStorage.getItem("aqua_tts_voice");
   const voice = availableVoices.find((v) => v.name === savedVoiceName);
   if (voice) utter.voice = voice;
   window.speechSynthesis.speak(utter);
+}
+
+async function speakText(text) {
+  const plain = text.replace(/\*\*(.+?)\*\*/g, "$1").replace(/[#_*`]/g, "");
+
+  // Stop anything currently playing/queued before starting the next clip.
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+
+  try {
+    const res = await fetch(`${API}/api/tts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: plain }),
+    });
+    if (!res.ok) throw new Error("tts unavailable");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    currentAudio = new Audio(url);
+    currentAudio.addEventListener("ended", () => URL.revokeObjectURL(url));
+    await currentAudio.play();
+  } catch (err) {
+    // Server-side TTS isn't configured or the request failed — fall back
+    // to the browser's built-in voice so read-aloud still works.
+    speakWithBrowserVoice(plain);
+  }
 }
 
 function mdLite(text) {
@@ -1131,10 +1161,12 @@ function setupSettings() {
   hc.checked = document.body.classList.contains("high-contrast");
   large.checked = document.body.classList.contains("large-text");
   readAloud.checked = localStorage.getItem("aqua_read_aloud") === "1";
-  if (!("speechSynthesis" in window)) {
-    readAloud.disabled = true;
-    readAloud.parentElement.title = "Not supported in this browser.";
-  } else {
+
+  // The voice picker below only affects the browser-voice fallback path
+  // (used when the server's Caribbean-accent TTS isn't reachable), so it
+  // stays available even on browsers without speechSynthesis support —
+  // it just won't do anything in that case.
+  if ("speechSynthesis" in window) {
     loadVoices();
     // Chrome/Edge populate the voice list asynchronously.
     window.speechSynthesis.onvoiceschanged = loadVoices;
@@ -1145,7 +1177,10 @@ function setupSettings() {
   large.addEventListener("change", () => { document.body.classList.toggle("large-text", large.checked); localStorage.setItem("aqua_large", large.checked ? "1" : "0"); });
   readAloud.addEventListener("change", () => {
     localStorage.setItem("aqua_read_aloud", readAloud.checked ? "1" : "0");
-    if (!readAloud.checked && "speechSynthesis" in window) window.speechSynthesis.cancel();
+    if (!readAloud.checked) {
+      if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    }
   });
 
   const voiceSelect = $("#voiceSelect");
@@ -1155,7 +1190,6 @@ function setupSettings() {
     } else {
       voiceSelect.addEventListener("change", () => {
         localStorage.setItem("aqua_tts_voice", voiceSelect.value);
-        speakText("This is how AquaAssist will sound.");
       });
     }
   }
