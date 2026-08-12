@@ -628,11 +628,13 @@ body.dark .ocean-caustics { opacity: 0.14; }
 
 .widget-header {
   flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
-  gap: .6rem; padding: .8rem .9rem .8rem 1rem;
+  flex-wrap: nowrap; gap: .5rem; padding: .8rem .9rem .8rem 1rem;
   background: linear-gradient(135deg, var(--primary) 0%, var(--hover) 100%);
   color: #fff;
 }
-.widget-header-brand { display:flex; align-items:center; gap:.6rem; min-width:0; }
+.widget-header-brand { display:flex; align-items:center; gap:.6rem; min-width:0; flex: 1 1 auto; overflow: hidden; }
+.widget-header-brand > div { min-width: 0; }
+.widget-header-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .widget-header-avatar {
   width: 38px; height: 38px; border-radius: 50%; background: #fff; flex-shrink: 0;
   display:flex; align-items:center; justify-content:center; overflow:hidden; box-shadow: 0 2px 8px rgba(0,0,0,.18);
