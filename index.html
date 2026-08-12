@@ -8,38 +8,14 @@
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css" />
 </head>
-<body class="aqua-widget-open">
+<body>
 
-<!-- DEMO SELECTION SCREEN -->
-<div id="demoSelectionScreen">
-  <div class="demo-container">
-    <div class="demo-header">
-      <div style="font-size: 3.5rem; margin-bottom:10px;">💧</div>
-      <h1>Welcome to AquaAssist</h1>
-      <p style="font-size:1.1rem; opacity:0.9;">How would you like to experience AquaAssist today?</p>
-    </div>
-    <div class="demo-options">
-      <div class="demo-card" onclick="launchDemo('full')">
-        <div style="font-size: 2.5rem;">💬</div>
-        <h2>Full Chatbot</h2>
-        <p>Experience the complete AquaAssist customer-service system in standalone mode.</p>
-        <button class="btn-demo">OPEN FULL CHAT</button>
-      </div>
-      <div class="demo-card" onclick="launchDemo('web')">
-        <div style="font-size: 2.5rem;">🌐</div>
-        <h2>Website Integration</h2>
-        <p>See how AquaAssist looks when embedded directly on the official NAWASA website.</p>
-        <button class="btn-demo">VIEW INTEGRATION</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- BACK TO DEMO BUTTON -->
-<button id="backToDemoBtn" class="back-to-demo">← Demo Options</button>
-
-<!-- MOCK NAWASA WEBSITE -->
-<div id="mockSiteView" class="mock-site" style="display:none;">
+<!-- =====================================================================
+     MOCK NAWASA WEBSITE — demo backdrop only, so the AquaAssist widget can
+     be previewed the way it would look embedded on the real nawasa.gd site.
+     Nothing in here is wired to app.js; it's static markup for context.
+     ===================================================================== -->
+<div class="mock-site" aria-hidden="false">
   <header class="mock-nav">
     <div class="mock-nav-inner">
       <div class="mock-nav-brand">
@@ -48,7 +24,12 @@
         <span class="mock-nav-name">NAWASA</span>
       </div>
       <nav class="mock-nav-links">
-        <a href="#">Home</a><a href="#">Our Services</a><a href="#">Billing</a><a href="#">Report an Issue</a><a href="#">News</a><a href="#">Contact</a>
+        <a href="#">Home</a>
+        <a href="#">Our Services</a>
+        <a href="#">Billing</a>
+        <a href="#">Report an Issue</a>
+        <a href="#">News</a>
+        <a href="#">Contact</a>
       </nav>
       <a href="#" class="mock-nav-cta">Customer Portal</a>
     </div>
@@ -58,7 +39,7 @@
     <div class="mock-hero-inner">
       <span class="mock-hero-eyebrow">National Water &amp; Sewerage Authority</span>
       <h1>Clean, reliable water for every parish in Grenada</h1>
-      <p>Serving Grenada, Carriacou &amp; Petite Martinique with safe drinking water since 1973.</p>
+      <p>Serving Grenada, Carriacou &amp; Petite Martinique with safe drinking water and modern sewerage services since 1973.</p>
       <div class="mock-hero-actions">
         <a href="#" class="mock-btn mock-btn-primary">Pay My Bill</a>
         <a href="#" class="mock-btn mock-btn-ghost">Report a Leak</a>
@@ -69,32 +50,88 @@
   <section class="mock-content">
     <div class="mock-section-head">
       <h2>Our Services</h2>
-      <p class="mock-section-sub">Everything you need to manage your NAWASA account.</p>
+      <p class="mock-section-sub">Everything you need to manage your NAWASA account, in one place.</p>
     </div>
     <div class="mock-card-grid">
-      <div class="mock-card"><div class="mock-card-icon">💧</div><h3>New Connections</h3><p>Apply for water service.</p></div>
-      <div class="mock-card"><div class="mock-card-icon">📄</div><h3>Billing</h3><p>Pay online safely.</p></div>
-      <div class="mock-card"><div class="mock-card-icon">🛠️</div><h3>Issue Reporting</h3><p>Report leaks or outages.</p></div>
-      <div class="mock-card"><div class="mock-card-icon">📍</div><h3>Locations</h3><p>Find our offices.</p></div>
+      <div class="mock-card">
+        <div class="mock-card-icon">💧</div>
+        <h3>New Connections</h3>
+        <p>Apply for a new water service connection for your home, business, or project site.</p>
+      </div>
+      <div class="mock-card">
+        <div class="mock-card-icon">📄</div>
+        <h3>Billing &amp; Payments</h3>
+        <p>View your balance, understand your consumption, and pay online or in person.</p>
+      </div>
+      <div class="mock-card">
+        <div class="mock-card-icon">🛠️</div>
+        <h3>Leak &amp; Outage Reporting</h3>
+        <p>Report leaks, burst mains, and check for scheduled maintenance in your parish.</p>
+      </div>
+      <div class="mock-card">
+        <div class="mock-card-icon">📍</div>
+        <h3>Office Locations</h3>
+        <p>Find your nearest NAWASA office across St. George's, Grenville, Gouyave, and more.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="mock-content mock-content-alt">
+    <div class="mock-section-head">
+      <h2>Service Notices</h2>
+      <p class="mock-section-sub">Stay informed about planned maintenance in your area.</p>
+    </div>
+    <div class="mock-notice-card">
+      <span class="mock-notice-dot"></span>
+      <div>
+        <b>St. Andrew's — Scheduled Maintenance</b>
+        <p>Routine main line maintenance may cause brief low pressure in some areas this week.</p>
+      </div>
     </div>
   </section>
 
   <footer class="mock-footer">
-    <div class="mock-footer-bottom">© NAWASA. Demo purposes only.</div>
+    <div class="mock-footer-inner">
+      <div>
+        <div class="mock-nav-name" style="color:#fff;">NAWASA</div>
+        <p>National Water &amp; Sewerage Authority — Grenada, Carriacou &amp; Petite Martinique.</p>
+      </div>
+      <div>
+        <h4>Contact</h4>
+        <p>(473) 440-2155</p>
+        <p>Lucas Street, St. George's</p>
+      </div>
+      <div>
+        <h4>Quick Links</h4>
+        <p><a href="#">Terms &amp; Conditions</a></p>
+        <p><a href="#">Privacy Policy</a></p>
+      </div>
+    </div>
+    <div class="mock-footer-bottom">© NAWASA. This demo page exists only to preview the AquaAssist widget below.</div>
   </footer>
 </div>
+<!-- =================== END MOCK NAWASA WEBSITE =================== -->
 
-<!-- AQUAASSIST WIDGET -->
+
+<!-- =====================================================================
+     AQUAASSIST WIDGET — collapsed floating button by default; expands into
+     the full chatbot panel. Everything that was previously the full-page
+     app now lives inside #widgetBody, completely unchanged.
+     ===================================================================== -->
 <div id="aquaWidget" class="aqua-widget collapsed">
 
+  <!-- Collapsed state: floating launcher button -->
   <button id="widgetToggleBtn" class="widget-fab" aria-haspopup="dialog" aria-expanded="false" aria-controls="widgetPanel">
     <span class="widget-fab-icon">💧</span>
     <span class="widget-fab-label">Need Help?</span>
   </button>
 
+  <!-- Expanded state: the chat panel -->
   <div id="widgetPanel" class="widget-panel" role="dialog" aria-modal="false" aria-label="AquaAssist chat" style="display:none;">
 
-    <!-- WATERY BACKGROUND -->
+    <!-- ===================== WATERY BACKGROUND — lives on the panel, not
+         the scrolling body, so it stays put as a backdrop no matter how
+         far the chat is scrolled. ===================== -->
     <div class="ocean-bg" aria-hidden="true">
       <div class="ocean-caustics"></div>
       <div class="ocean-bubbles">
@@ -107,8 +144,8 @@
       <div class="ocean-wave ocean-wave--mid"></div>
       <div class="ocean-wave ocean-wave--front"></div>
     </div>
+    <!-- =================== END WATERY BACKGROUND =================== -->
 
-    <!-- FIXED HEADER (FIXED VISIBILITY) -->
     <div class="widget-header">
       <div class="widget-header-brand">
         <div class="widget-header-avatar">
@@ -117,11 +154,11 @@
         </div>
         <div>
           <div class="widget-header-title">AquaAssist</div>
-          <div class="widget-header-subtitle"><span class="widget-header-dot"></span>NAWASA Support</div>
+          <div class="widget-header-subtitle"><span class="widget-header-dot"></span>NAWASA Customer Support</div>
         </div>
       </div>
       <div class="widget-header-actions">
-        <a id="whatsappFloat" class="widget-header-btn widget-header-whatsapp" target="_blank" title="Chat on WhatsApp">💬</a>
+        <a id="whatsappFloat" class="widget-header-btn widget-header-whatsapp" target="_blank" title="Chat on WhatsApp" aria-label="Chat on WhatsApp">💬</a>
         <button id="widgetMinimizeBtn" class="widget-header-btn" type="button" aria-label="Minimize chat" title="Minimize">–</button>
         <button id="widgetCloseBtn" class="widget-header-btn" type="button" aria-label="Close chat" title="Close">✕</button>
       </div>
@@ -129,14 +166,17 @@
 
     <div id="widgetBody" class="widget-body">
 
-      <!-- LOGIN GATE -->
+      <!-- ===================== LOGIN GATE ===================== -->
       <div id="loginGate" class="login-wrap">
         <div class="login-toggle-row">
-          <label class="dm-toggle"><input type="checkbox" id="loginDarkToggle" /> 🌙 Dark</label>
+          <label class="dm-toggle">
+            <input type="checkbox" id="loginDarkToggle" /> 🌙 Dark
+          </label>
         </div>
         <div class="login-header">
           <div id="loginLogo" class="brand-logo-wrap">
-            <img src="nawasa_logo.png.png" alt="NAWASA" class="brand-logo-img" />
+            <img src="nawasa_logo.png.png" alt="NAWASA" class="brand-logo-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
+            <div class="nawasa-logo-fallback" style="display:none;">NAWASA</div>
           </div>
           <div class="login-title">AquaAssist</div>
           <div class="login-subtitle">Your smart water support assistant</div>
@@ -149,212 +189,297 @@
         </div>
       </div>
 
-      <!-- MAIN APP -->
+      <!-- ===================== MAIN APP ===================== -->
       <div id="app" class="page" style="display:none;">
 
-        <!-- Customer hero -->
+        <!-- Customer portal hero -->
         <div id="customerHero" class="hero">
           <div class="hero-content">
             <div class="hero-brand">
-              <div class="avatar-ring"><div class="avatar-circle"><img src="aquaassist_avatar.png.png" class="avatar-img" /></div></div>
+              <div class="avatar-ring"><div class="avatar-circle"><img src="aquaassist_avatar.png.png" alt="AquaAssist" class="avatar-img" onerror="this.style.display='none';this.nextElementSibling.style.display='block';" /><span style="display:none;">💧</span></div></div>
               <div>
                 <div class="hero-title">AquaAssist</div>
-                <div class="hero-online"><span class="online-dot"></span>Online Support</div>
+                <div class="hero-subtitle">NAWASA Official Virtual Assistant</div>
+                <div class="hero-online"><span class="online-dot"></span>AquaAssist Online</div>
                 <div id="hoursPill" class="hours-pill"></div>
               </div>
             </div>
-            <div class="hero-nawasa-badge"><img src="nawasa_logo.png.png" alt="NAWASA" class="badge-img" /></div>
+            <div class="hero-nawasa-badge"><img src="nawasa_logo.png.png" alt="NAWASA" class="badge-img" onerror="this.style.display='none';this.nextElementSibling.style.display='block';" /><span style="display:none;">NAWASA</span></div>
           </div>
           <svg class="wave" viewBox="0 0 500 40" preserveAspectRatio="none"><path class="wave-fill" d="M0,20 C150,45 350,-5 500,20 L500,40 L0,40 Z"></path></svg>
         </div>
 
-        <!-- Staff hero -->
+        <!-- Staff portal hero -->
         <div id="staffHero" class="hero" style="display:none;">
-          <div class="hero-content"><div><div class="hero-title">🔐 Staff Portal</div><div class="hero-subtitle">Internal Monitoring</div></div></div>
+          <div class="hero-content">
+            <div>
+              <div class="hero-title">🔐 Staff Portal</div>
+              <div class="hero-subtitle">Reports submitted by customers</div>
+            </div>
+          </div>
           <svg class="wave" viewBox="0 0 500 40" preserveAspectRatio="none"><path class="wave-fill" d="M0,20 C150,45 350,-5 500,20 L500,40 L0,40 Z"></path></svg>
         </div>
 
+        <!-- Top-level nav: customer vs staff -->
         <div class="portal-switch">
           <button id="btnCustomerPortal" class="portal-switch-btn active">💬 Customer Portal</button>
           <button id="btnStaffPortal" class="portal-switch-btn">🔐 Staff Portal</button>
         </div>
 
+        <!-- ===================== CUSTOMER PORTAL ===================== -->
         <div id="customerPortal">
           <nav class="tab-nav">
             <button class="tab-btn active" data-tab="chat">💬 Chat</button>
-            <button class="tab-btn" data-tab="report">📋 Report</button>
+            <button class="tab-btn" data-tab="report">📋 Report &amp; Track</button>
             <button class="tab-btn" data-tab="faq">❓ FAQ</button>
             <button class="tab-btn" data-tab="notify">🔔 Notify</button>
             <button class="tab-btn" data-tab="settings">⚙️ Settings</button>
           </nav>
 
-          <!-- CHAT -->
+          <!-- CHAT TAB -->
           <section id="tab-chat" class="tab-panel active">
             <div id="hoursBanner"></div>
             <div class="contact-row">
-              <a id="contactCallCard" class="contact-card" href="#"><span class="contact-icon">📞</span><span class="contact-label">Call</span></a>
-              <a id="contactWhatsappCard" class="contact-card" target="_blank"><span class="contact-icon">💬</span><span class="contact-label">WhatsApp</span></a>
-              <a id="contactWebsiteCard" class="contact-card" target="_blank"><span class="contact-icon">🌐</span><span class="contact-label">Site</span></a>
+              <a id="contactCallCard" class="contact-card" href="#"><span class="contact-icon">📞</span><span class="contact-label">Call Us</span><span class="contact-value">(473) 440-2155</span></a>
+              <a id="contactWhatsappCard" class="contact-card" target="_blank"><span class="contact-icon">💬</span><span class="contact-label">WhatsApp</span><span class="contact-value">Chat now</span></a>
+              <a id="contactWebsiteCard" class="contact-card" target="_blank"><span class="contact-icon">🌐</span><span class="contact-label">Website</span><span class="contact-value">nawasa.gd</span></a>
             </div>
+
             <div id="outageBanners"></div>
+
             <div id="chatMessages" class="chat-messages"></div>
+
             <div id="followupChips" class="chip-row"></div>
+
             <form id="chatForm" class="chat-input-row">
-              <label class="attach-btn">📎<input type="file" id="chatAttachment" hidden /></label>
-              <button type="button" id="chatCameraBtn" class="attach-btn">📷</button>
-              <button type="button" id="chatMicBtn" class="attach-btn">🎤</button>
-              <button type="button" id="chatLocationBtn" class="attach-btn">📍</button>
-              <input id="chatText" type="text" placeholder="Type here..." autocomplete="off" />
+              <label class="attach-btn" title="Attach a photo, video, or file">
+                📎
+                <input type="file" id="chatAttachment" accept="image/*,video/*,.pdf,.doc,.docx" hidden />
+              </label>
+              <button type="button" id="chatCameraBtn" class="attach-btn" title="Take a photo">📷</button>
+              <button type="button" id="chatMicBtn" class="attach-btn" title="Record a voice note">🎤</button>
+              <button type="button" id="chatLocationBtn" class="attach-btn" title="Share my location">📍</button>
+              <input id="chatText" type="text" placeholder="Ask about your water service..." autocomplete="off" />
               <button type="submit" class="send-btn">➤</button>
             </form>
             <div id="attachmentPreview" class="attachment-preview"></div>
             <p id="micStatus" class="hint-text" style="display:none;"></p>
+
+
             <div class="section-label">💧 Quick actions</div>
             <div id="quickActions" class="quick-actions-grid"></div>
           </section>
 
-          <!-- REPORT -->
+          <!-- REPORT & TRACK TAB -->
           <section id="tab-report" class="tab-panel">
+            <div class="section-label">🚿 Report an issue</div>
+
             <div class="card">
-              <div class="section-label">📍 Pin location on map</div>
+              <div class="section-label" style="margin-top:0;">📍 Pin location on map</div>
+              <div class="form-row-2">
+                <div>
+                  <label class="field-label">Parish / Territory</label>
+                  <select id="reportParish"></select>
+                </div>
+                <div>
+                  <label class="field-label">Street / Landmark Address</label>
+                  <input id="reportLandmark" type="text" placeholder="e.g. New Life Grocery, Main road" />
+                </div>
+              </div>
+              <button id="gpsBtn" type="button" class="btn-secondary" style="margin:0.6rem 0;">📡 Use My GPS Location</button>
               <div id="reportMap" class="leaflet-map"></div>
-              <button id="gpsBtn" type="button" class="btn-secondary">📡 Use My GPS</button>
+              <p class="hint-text">Click anywhere on the map to set the pin — the nearest parish fills in automatically.</p>
+            </div>
+
+            <div class="card">
               <form id="reportForm">
-                <label class="field-label">Photo/Video</label>
-                <div class="report-file-row"><input id="reportFile" type="file" /><button type="button" id="reportCameraBtn" class="btn-secondary">📷</button></div>
+                <label class="field-label">Attach a photo, video, or document (optional)</label>
+                <div class="report-file-row">
+                  <input id="reportFile" type="file" accept="image/*,video/*,.pdf,.doc,.docx" />
+                  <button type="button" id="reportCameraBtn" class="btn-secondary" style="flex-shrink:0;">📷 Take photo</button>
+                </div>
                 <p id="reportFilePreview" class="hint-text"></p>
-                <label class="field-label">Name</label><input id="reportName" type="text" required />
-                <label class="field-label">Phone</label><input id="reportPhone" type="text" required />
-                <label class="field-label">Location Description</label><input id="reportLocation" type="text" required />
-                <label class="field-label">Parish</label><select id="reportParish"></select>
-                <input id="reportLandmark" type="hidden" />
-                <label class="field-label">Issue type</label><select id="reportIssueType"></select>
-                <label class="field-label">Description</label><textarea id="reportDescription" rows="3"></textarea>
-                <label class="field-label">Severity</label><select id="reportSeverity"></select>
-                <button type="submit" class="btn-primary" style="width:100%;">Submit report</button>
+
+                <label class="field-label">Your name</label>
+                <input id="reportName" type="text" required />
+
+                <label class="field-label">Phone number</label>
+                <input id="reportPhone" type="text" required />
+
+                <label class="field-label">Location / address of the issue</label>
+                <input id="reportLocation" type="text" required />
+
+                <label class="field-label">Issue type</label>
+                <select id="reportIssueType"></select>
+
+                <label class="field-label">Describe the issue</label>
+                <textarea id="reportDescription" rows="3"></textarea>
+
+                <label class="field-label">Severity</label>
+                <select id="reportSeverity"></select>
+
+                <button type="submit" class="btn-primary" style="margin-top:0.8rem;width:100%;">Submit report</button>
               </form>
               <div id="reportResult"></div>
             </div>
+
             <div class="section-label">📍 Track a report</div>
-            <div class="card"><input id="trackRef" type="text" placeholder="Enter Reference" /><div id="trackResult"></div></div>
+            <div class="card">
+              <input id="trackRef" type="text" placeholder="Enter your reference number (e.g. NW-A1B2C3D)" />
+              <div id="trackResult"></div>
+            </div>
           </section>
 
-          <!-- FAQ -->
+          <!-- FAQ TAB -->
           <section id="tab-faq" class="tab-panel">
-            <input id="faqSearch" type="text" placeholder="Search FAQs..." />
+            <div class="section-label">❓ Frequently Asked Questions</div>
+            <p class="hint-text">Sourced from the official NAWASA FAQ page (nawasa.gd).</p>
+            <input id="faqSearch" type="text" placeholder="Search FAQs — e.g. billing, leak, disconnection..." style="margin-bottom:1rem;" />
             <div id="faqList"></div>
           </section>
 
-          <!-- NOTIFY -->
+          <!-- NOTIFY TAB -->
           <section id="tab-notify" class="tab-panel">
+            <div class="section-label">🔔 Get notified</div>
             <div class="card">
               <form id="notifyForm">
-                <label class="field-label">Email/Phone</label><input id="notifyContact" type="text" required />
-                <label class="field-label">Categories</label><div id="notifyCategories" class="checkbox-group"></div>
-                <button type="submit" class="btn-primary" style="width:100%;">Subscribe</button>
+                <label class="field-label">Email or phone number</label>
+                <input id="notifyContact" type="text" required />
+                <label class="field-label">Notify me about</label>
+                <div id="notifyCategories" class="checkbox-group"></div>
+                <button type="submit" class="btn-primary" style="margin-top:0.8rem;width:100%;">Subscribe</button>
               </form>
               <div id="notifyResult"></div>
             </div>
           </section>
 
-          <!-- SETTINGS -->
+          <!-- SETTINGS TAB -->
           <section id="tab-settings" class="tab-panel">
+            <div class="section-label">📍 Territory</div>
             <div class="card">
-              <label class="toggle-row"><input type="checkbox" id="darkModeToggle" /> 🌙 Dark Mode</label>
-              <label class="toggle-row"><input type="checkbox" id="highContrastToggle" /> 🔲 High Contrast</label>
-              <label class="toggle-row"><input type="checkbox" id="largeTextToggle" /> 🔠 Large Text</label>
-              <label class="toggle-row"><input type="checkbox" id="readAloudToggle" /> 🔊 Read Aloud</label>
-              <label class="field-label">Voice</label><select id="voiceSelect"></select>
-              <label class="field-label">Assisted Parish</label><select id="customerParishSelect"></select>
-              <label class="field-label">Territory</label><select id="settingsTerritorySelect"></select>
+              <label class="field-label" for="settingsTerritorySelect">Your NAWASA territory</label>
+              <select id="settingsTerritorySelect"></select>
+              <p class="hint-text">Changes which WhatsApp number you're connected to and localizes your assistant.</p>
+            </div>
+            <div class="section-label">⚙️ Preferences</div>
+            <div class="card">
+              <label class="toggle-row"><input type="checkbox" id="darkModeToggle" /> 🌙 Dark mode</label>
+              <label class="toggle-row"><input type="checkbox" id="highContrastToggle" /> 🔲 High contrast mode</label>
+              <label class="toggle-row"><input type="checkbox" id="largeTextToggle" /> 🔠 Larger text</label>
+              <label class="toggle-row"><input type="checkbox" id="readAloudToggle" /> 🔊 Read AquaAssist's replies aloud</label>
+              <label class="field-label" for="voiceSelect">Voice for read-aloud</label>
+              <select id="voiceSelect"></select>
+              <p class="hint-text">Accessibility: this app supports keyboard navigation and screen readers natively through standard HTML controls.</p>
+              <label class="field-label">Your parish (for outage alerts)</label>
+              <select id="customerParishSelect"></select>
+            </div>
+            <div class="section-label">💬 Conversation</div>
+            <div class="card">
+              <p id="messageCount" class="hint-text">0 messages in this session.</p>
               <button id="newChatBtn" class="btn-secondary">＋ New chat</button>
             </div>
           </section>
         </div>
 
-        <!-- STAFF PORTAL -->
+        <!-- ===================== STAFF PORTAL ===================== -->
         <div id="staffPortal" style="display:none;">
           <div id="staffLoginCard" class="card">
-            <input id="staffPasscodeInput" type="password" placeholder="Passcode" />
-            <button id="staffLoginBtn" class="btn-primary">Log in</button>
+            <label class="field-label">Enter staff passcode</label>
+            <input id="staffPasscodeInput" type="password" />
+            <button id="staffLoginBtn" class="btn-primary" style="margin-top:0.6rem;">Log in</button>
             <p id="staffLoginError" class="error-text" style="display:none;">Incorrect passcode.</p>
           </div>
+
           <div id="staffDashboard" style="display:none;">
-            <button id="staffLogoutBtn" class="btn-secondary">Log out</button>
+            <button id="staffLogoutBtn" class="btn-secondary" style="margin-bottom:1rem;">Log out</button>
+
+            <div class="section-label">📊 Overview</div>
             <div id="statusMetrics" class="metrics-row"></div>
+
+            <div class="section-label">🗺️ Reports map</div>
             <div id="staffMap" class="leaflet-map"></div>
-            <div class="table-wrap"><table id="reportsTable" class="reports-table"><thead></thead><tbody></tbody></table></div>
+
+            <div class="section-label">📋 All reports</div>
+            <div class="card table-wrap">
+              <table id="reportsTable" class="reports-table">
+                <thead></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+
+            <div class="section-label">🔄 Update a report status</div>
             <div class="card">
               <form id="quickStatusForm" class="form-row-2">
-                <select id="quickStatusRef"></select><select id="quickStatusNew"></select>
-                <button type="submit" class="btn-primary">Update</button>
+                <div>
+                  <label class="field-label">Reference number</label>
+                  <select id="quickStatusRef"></select>
+                </div>
+                <div>
+                  <label class="field-label">New status</label>
+                  <select id="quickStatusNew"></select>
+                </div>
+                <button type="submit" class="btn-primary" style="grid-column:1/-1;">Update status</button>
               </form>
             </div>
+
+            <div class="section-label">📢 Outage announcements</div>
             <div class="card">
               <form id="outageForm">
-                <select id="outageParish"></select><textarea id="outageMessage"></textarea>
-                <input id="outageStart" type="date" /><input id="outageEnd" type="date" />
-                <button type="submit" class="btn-primary">Post</button>
+                <label class="field-label">Parish / Territory</label>
+                <select id="outageParish"></select>
+                <label class="field-label">Message to customers</label>
+                <textarea id="outageMessage" rows="2"></textarea>
+                <div class="form-row-2">
+                  <div><label class="field-label">Start date</label><input id="outageStart" type="date" /></div>
+                  <div><label class="field-label">End date</label><input id="outageEnd" type="date" /></div>
+                </div>
+                <button type="submit" class="btn-primary" style="margin-top:0.6rem;width:100%;">Post announcement</button>
               </form>
             </div>
             <div id="outageList"></div>
-            <div class="table-wrap"><table id="notifyTable" class="reports-table"><thead></thead><tbody></tbody></table></div>
+
+            <div class="section-label">🔔 Notification subscribers</div>
+            <div class="card table-wrap">
+              <table id="notifyTable" class="reports-table"><thead></thead><tbody></tbody></table>
+            </div>
           </div>
         </div>
-      </div>
-      <footer class="footer">Powered by <strong>NAWASA</strong></footer>
-    </div>
-  </div>
-</div>
 
-<!-- CAMERA MODAL -->
+      </div>
+
+      <footer class="footer">Powered by <strong>NAWASA</strong></footer>
+
+    </div><!-- /#widgetBody -->
+  </div><!-- /#widgetPanel -->
+</div><!-- /#aquaWidget -->
+
+<!-- ===================== CAMERA MODAL (shared: chat + report) ===================== -->
 <div id="cameraModal" class="camera-modal" style="display:none;">
   <div class="camera-modal-inner">
-    <div class="camera-modal-head"><span id="cameraModalTitle">📷 Camera</span><button id="cameraCloseBtn" class="camera-close-btn">✕</button></div>
+    <div class="camera-modal-head">
+      <span id="cameraModalTitle">📷 Take a photo</span>
+      <button type="button" id="cameraCloseBtn" class="camera-close-btn">✕</button>
+    </div>
     <div class="camera-mode-row">
-      <button id="cameraModePhotoBtn" class="camera-mode-btn active">Photo</button>
-      <button id="cameraModeVideoBtn" class="camera-mode-btn">Video</button>
+      <button type="button" id="cameraModePhotoBtn" class="camera-mode-btn active">📷 Photo</button>
+      <button type="button" id="cameraModeVideoBtn" class="camera-mode-btn">🎥 Video</button>
     </div>
     <video id="cameraVideo" autoplay playsinline muted></video>
     <canvas id="cameraCanvas" style="display:none;"></canvas>
-    <img id="cameraPreviewImg" style="display:none;" />
+    <img id="cameraPreviewImg" style="display:none;" alt="Captured photo preview" />
     <video id="cameraPreviewVideo" style="display:none;" controls></video>
-    <p id="cameraRecordingStatus" class="hint-text" style="display:none;">🔴 Recording...</p>
+    <p id="cameraRecordingStatus" class="hint-text" style="display:none;">🔴 Recording... tap Stop when done.</p>
     <p id="cameraError" class="error-text" style="display:none;"></p>
     <div class="camera-modal-actions">
-      <button id="cameraSwitchBtn" class="btn-secondary">🔄 Switch</button>
-      <button id="cameraShotBtn" class="btn-primary">Capture</button>
-      <button id="cameraRetakeBtn" class="btn-secondary" style="display:none;">Retake</button>
-      <button id="cameraUseBtn" class="btn-primary" style="display:none;">Use this</button>
+      <button type="button" id="cameraSwitchBtn" class="btn-secondary">🔄 Switch camera</button>
+      <button type="button" id="cameraShotBtn" class="btn-primary">Capture</button>
+      <button type="button" id="cameraRetakeBtn" class="btn-secondary" style="display:none;">Retake</button>
+      <button type="button" id="cameraUseBtn" class="btn-primary" style="display:none;">Use this</button>
     </div>
   </div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script>
-  function launchDemo(mode) {
-    document.getElementById('demoSelectionScreen').style.display = 'none';
-    document.getElementById('backToDemoBtn').style.display = 'block';
-    const widget = document.getElementById('aquaWidget');
-    const panel = document.getElementById('widgetPanel');
-    
-    if (mode === 'full') {
-      document.getElementById('mockSiteView').style.display = 'none';
-      widget.classList.remove('collapsed'); widget.classList.add('expanded');
-      panel.style.display = 'flex';
-      panel.style.width = "100vw"; panel.style.height = "100vh"; 
-      panel.style.right = "0"; panel.style.bottom = "0"; panel.style.borderRadius = "0";
-      document.getElementById('widgetMinimizeBtn').style.display = 'none';
-    } else {
-      document.getElementById('mockSiteView').style.display = 'block';
-      widget.classList.add('collapsed'); panel.style.display = 'none';
-      panel.style.width = ""; panel.style.height = ""; 
-      panel.style.right = ""; panel.style.bottom = ""; panel.style.borderRadius = "";
-      document.getElementById('widgetMinimizeBtn').style.display = 'flex';
-    }
-  }
-  document.getElementById('backToDemoBtn').onclick = () => location.reload();
-</script>
 <script src="app.js"></script>
 </body>
 </html>
