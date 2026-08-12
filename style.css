@@ -1,17 +1,5 @@
 /* =========================================================================
-   AquaAssist — NAWASA visual theme
-   -------------------------------------------------------------------------
-   This file is a superset of the original stylesheet: every original rule,
-   selector, and class name used by app.js / index.html is preserved so no
-   functionality changes. On top of that:
-     1. Original brand color tokens (NAWASA blues) + ocean background.
-     2. Glassmorphism treatment for cards / hero / chat surfaces.
-     3. NEW: a mock NAWASA website backdrop (demo only) so the widget can be
-        previewed as if embedded on the real site.
-     4. NEW: the AquaAssist "widget shell" — collapsed floating button that
-        expands into a fixed bottom-right chat panel (full-screen on mobile).
-   Search for "WIDGET SHELL — NEW" and "MOCK NAWASA WEBSITE — NEW" to jump
-   straight to the additions.
+   AquaAssist — NAWASA visual theme (FULL MERGED VERSION)
    ========================================================================= */
 
 :root {
@@ -34,6 +22,44 @@
   --ocean-bright: #00B5E2;
   --ocean-foam: #E9FBFF;
 }
+
+/* =========================================================================
+   NEW: DEMO SELECTION SCREEN STYLES
+   ========================================================================= */
+#demoSelectionScreen {
+  position: fixed; inset: 0; z-index: 9999;
+  background: linear-gradient(135deg, #0072BC 0%, #003B5C 100%);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: white; padding: 20px; text-align: center; font-family: 'Poppins', sans-serif;
+}
+.demo-container { max-width: 800px; width: 100%; animation: fadeUp 0.5s ease; }
+.demo-header h1 { font-size: 2.8rem; margin: 10px 0; font-weight: 800; letter-spacing: -1px; }
+.demo-options { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 40px; }
+.demo-card {
+  background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 40px 30px; border-radius: 24px; backdrop-filter: blur(12px);
+  transition: transform 0.2s, background 0.2s; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center;
+}
+.demo-card:hover { transform: translateY(-8px); background: rgba(255, 255, 255, 0.18); }
+.demo-card h2 { font-size: 1.5rem; margin: 20px 0 10px; color: white; }
+.demo-card p { font-size: 0.9rem; opacity: 0.85; line-height: 1.5; margin-bottom: 25px; height: 50px; color: white; }
+.btn-demo { 
+  background: white; color: #0072BC; border: none; padding: 14px 30px; 
+  border-radius: 12px; font-weight: 700; width: 100%; cursor: pointer;
+}
+.back-to-demo {
+  position: fixed; top: 20px; left: 20px; z-index: 10001;
+  background: rgba(0,0,0,0.6); color: white; border: none; padding: 10px 18px;
+  border-radius: 50px; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+  backdrop-filter: blur(5px); display: none;
+}
+@media (max-width: 640px) { .demo-options { grid-template-columns: 1fr; } }
+
+/* =========================================================================
+   BASE STYLES (ORIGINAL)
+   ========================================================================= */
+
 body.dark {
   --primary: #2E86C6;
   --hover: #3D97D9;
@@ -626,17 +652,29 @@ body.dark .ocean-caustics { opacity: 0.14; }
 }
 @media (prefers-reduced-motion: reduce) { .widget-panel { animation: none; } }
 
+/* ---------------- Widget header (FIXED: buttons never get pushed out) ---------------- */
 .widget-header {
   flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
   flex-wrap: nowrap; gap: .5rem; padding: .8rem .9rem .8rem 1rem;
   background: linear-gradient(135deg, var(--primary) 0%, var(--hover) 100%);
   color: #fff;
+  min-width: 0;          /* lets children truncate instead of overflowing the header */
+  width: 100%;
+  overflow: hidden;       /* header itself never scrolls/overflows horizontally */
 }
-.widget-header-brand { display:flex; align-items:center; gap:.6rem; min-width:0; flex: 1 1 auto; overflow: hidden; }
-.widget-header-brand > div { min-width: 0; }
-.widget-header-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.widget-header-brand {
+  display:flex; align-items:center; gap:.6rem;
+  min-width:0; flex: 1 1 auto;    /* the ONLY part of the header allowed to shrink */
+  overflow: hidden;
+}
+.widget-header-brand > div { min-width: 0; flex: 1 1 auto; }
+.widget-header-title {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0;
+}
 .widget-header-avatar {
-  width: 38px; height: 38px; border-radius: 50%; background: #fff; flex-shrink: 0;
+  width: 38px; height: 38px; border-radius: 50%; background: #fff;
+  flex: 0 0 38px;          /* explicit basis, never shrinks below this */
   display:flex; align-items:center; justify-content:center; overflow:hidden; box-shadow: 0 2px 8px rgba(0,0,0,.18);
 }
 .widget-header-avatar img { width:100%; height:100%; object-fit:cover; }
@@ -644,18 +682,35 @@ body.dark .ocean-caustics { opacity: 0.14; }
 .widget-header-subtitle {
   font-size: .72rem; font-weight: 500; opacity: .92; display:flex; align-items:center; gap:.35rem;
   white-space: nowrap; overflow:hidden; text-overflow: ellipsis;
+  min-width: 0;
 }
 .widget-header-dot { width:6px; height:6px; border-radius:50%; background:#34D399; flex-shrink:0; animation: onlinePulse 2.2s infinite; }
-.widget-header-actions { display:flex; align-items:center; gap:.3rem; flex-shrink:0; }
+.widget-header-actions {
+  display:flex; align-items:center; gap:.3rem;
+  flex: 0 0 auto;            /* fully locked — never grows or shrinks */
+  min-width: max-content;    /* guarantees the row never gets clipped below natural width */
+  position: relative;
+  z-index: 5;                 /* always sits above the brand/title area */
+  pointer-events: auto;
+}
 .widget-header-btn {
   width: 30px; height: 30px; border-radius: 50%; border: none; background: rgba(255,255,255,.16);
   color: #fff; font-size: 1rem; line-height: 1; display:flex; align-items:center; justify-content:center;
-  text-decoration:none; flex-shrink:0;
+  text-decoration:none; flex: 0 0 30px;
+  pointer-events: auto;
 }
 .widget-header-btn:hover { background: rgba(255,255,255,.28); }
 .widget-header-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .widget-header-whatsapp { background: var(--whatsapp); }
 .widget-header-whatsapp:hover { background: #1fbd5a; }
+
+/* On very narrow screens, trim spacing (never button size) so the header
+   buttons always have room next to a truncated title/subtitle. */
+@media (max-width: 380px) {
+  .widget-header { padding: .7rem .6rem .7rem .7rem; gap: .35rem; }
+  .widget-header-brand { gap: .4rem; }
+  .widget-header-actions { gap: .2rem; }
+}
 
 .widget-body {
   position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
