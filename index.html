@@ -129,6 +129,23 @@
   <!-- Expanded state: the chat panel -->
   <div id="widgetPanel" class="widget-panel" role="dialog" aria-modal="false" aria-label="AquaAssist chat" style="display:none;">
 
+    <!-- ===================== WATERY BACKGROUND — lives on the panel, not
+         the scrolling body, so it stays put as a backdrop no matter how
+         far the chat is scrolled. ===================== -->
+    <div class="ocean-bg" aria-hidden="true">
+      <div class="ocean-caustics"></div>
+      <div class="ocean-bubbles">
+        <span class="bubble"></span><span class="bubble"></span><span class="bubble"></span>
+        <span class="bubble"></span><span class="bubble"></span><span class="bubble"></span>
+        <span class="bubble"></span><span class="bubble"></span><span class="bubble"></span>
+        <span class="bubble"></span><span class="bubble"></span><span class="bubble"></span>
+      </div>
+      <div class="ocean-wave ocean-wave--back"></div>
+      <div class="ocean-wave ocean-wave--mid"></div>
+      <div class="ocean-wave ocean-wave--front"></div>
+    </div>
+    <!-- =================== END WATERY BACKGROUND =================== -->
+
     <div class="widget-header">
       <div class="widget-header-brand">
         <div class="widget-header-avatar">
@@ -148,21 +165,6 @@
     </div>
 
     <div id="widgetBody" class="widget-body">
-
-      <!-- ===================== WATERY BACKGROUND — scoped to widget now ===================== -->
-      <div class="ocean-bg" aria-hidden="true">
-        <div class="ocean-caustics"></div>
-        <div class="ocean-bubbles">
-          <span class="bubble"></span><span class="bubble"></span><span class="bubble"></span>
-          <span class="bubble"></span><span class="bubble"></span><span class="bubble"></span>
-          <span class="bubble"></span><span class="bubble"></span><span class="bubble"></span>
-          <span class="bubble"></span><span class="bubble"></span><span class="bubble"></span>
-        </div>
-        <div class="ocean-wave ocean-wave--back"></div>
-        <div class="ocean-wave ocean-wave--mid"></div>
-        <div class="ocean-wave ocean-wave--front"></div>
-      </div>
-      <!-- =================== END WATERY BACKGROUND =================== -->
 
       <!-- ===================== LOGIN GATE ===================== -->
       <div id="loginGate" class="login-wrap">
