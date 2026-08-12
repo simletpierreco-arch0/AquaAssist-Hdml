@@ -1,17 +1,5 @@
 /* =========================================================================
-   AquaAssist — NAWASA visual theme
-   -------------------------------------------------------------------------
-   This file is a superset of the original stylesheet: every original rule,
-   selector, and class name used by app.js / index.html is preserved so no
-   functionality changes. On top of that:
-     1. Original brand color tokens (NAWASA blues) + ocean background.
-     2. Glassmorphism treatment for cards / hero / chat surfaces.
-     3. NEW: a mock NAWASA website backdrop (demo only) so the widget can be
-        previewed as if embedded on the real site.
-     4. NEW: the AquaAssist "widget shell" — collapsed floating button that
-        expands into a fixed bottom-right chat panel (full-screen on mobile).
-   Search for "WIDGET SHELL — NEW" and "MOCK NAWASA WEBSITE — NEW" to jump
-   straight to the additions.
+   AquaAssist — NAWASA visual theme (FULL MERGED VERSION)
    ========================================================================= */
 
 :root {
@@ -34,6 +22,44 @@
   --ocean-bright: #00B5E2;
   --ocean-foam: #E9FBFF;
 }
+
+/* =========================================================================
+   NEW: DEMO SELECTION SCREEN STYLES
+   ========================================================================= */
+#demoSelectionScreen {
+  position: fixed; inset: 0; z-index: 9999;
+  background: linear-gradient(135deg, #0072BC 0%, #003B5C 100%);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: white; padding: 20px; text-align: center; font-family: 'Poppins', sans-serif;
+}
+.demo-container { max-width: 800px; width: 100%; animation: fadeUp 0.5s ease; }
+.demo-header h1 { font-size: 2.8rem; margin: 10px 0; font-weight: 800; letter-spacing: -1px; }
+.demo-options { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 40px; }
+.demo-card {
+  background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 40px 30px; border-radius: 24px; backdrop-filter: blur(12px);
+  transition: transform 0.2s, background 0.2s; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center;
+}
+.demo-card:hover { transform: translateY(-8px); background: rgba(255, 255, 255, 0.18); }
+.demo-card h2 { font-size: 1.5rem; margin: 20px 0 10px; color: white; }
+.demo-card p { font-size: 0.9rem; opacity: 0.85; line-height: 1.5; margin-bottom: 25px; height: 50px; color: white; }
+.btn-demo { 
+  background: white; color: #0072BC; border: none; padding: 14px 30px; 
+  border-radius: 12px; font-weight: 700; width: 100%; cursor: pointer;
+}
+.back-to-demo {
+  position: fixed; top: 20px; left: 20px; z-index: 10001;
+  background: rgba(0,0,0,0.6); color: white; border: none; padding: 10px 18px;
+  border-radius: 50px; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+  backdrop-filter: blur(5px); display: none;
+}
+@media (max-width: 640px) { .demo-options { grid-template-columns: 1fr; } }
+
+/* =========================================================================
+   BASE STYLES (ORIGINAL)
+   ========================================================================= */
+
 body.dark {
   --primary: #2E86C6;
   --hover: #3D97D9;
@@ -680,3 +706,110 @@ body.aqua-widget-open { overflow: visible; }
   .widget-fab { padding: .85rem; border-radius: 50%; }
   .widget-fab-icon { width: 24px; height: 24px; font-size: .95rem; }
 }
+
+--- END OF FILE ---
+
+--- START OF FILE text/plain ---
+
+# AquaAssist Demo Mode — Two-Option Landing Screen
+
+I need you to make a small addition to my existing AquaAssist project specifically for today's demonstration.
+
+**IMPORTANT: DO NOT CHANGE, DELETE, OR BREAK ANY OF MY EXISTING CHATBOT FEATURES, AI LOGIC, API CONNECTIONS, DATABASE, FUNCTIONS, BUTTONS, STYLING, OR BACKEND.**
+
+Only add a simple demo-selection screen that appears when the website is first opened.
+
+## 1. FIRST SCREEN — DEMO MODE SELECTION
+
+When someone opens the AquaAssist website, show a clean, professional welcome screen before displaying the chatbot.
+
+The screen should say something like:
+
+**💧 Welcome to AquaAssist**
+
+**How would you like to experience AquaAssist?**
+
+Then provide TWO large options:
+
+### Option 1 — Full AquaAssist
+
+**💬 Open Full Chatbot**
+
+Description:
+
+> Experience the complete AquaAssist customer-service system.
+
+This option should open the existing full AquaAssist interface exactly as it currently works.
+
+### Option 2 — Website Integration
+
+**🌐 View Website Integration**
+
+Description:
+
+> See how AquaAssist would look when embedded directly into the official NAWASA website.
+
+This option should open a realistic mock NAWASA webpage with the AquaAssist chatbot appearing as a floating website widget in the bottom-right corner.
+
+## 2. FULL CHATBOT OPTION
+
+When the user clicks:
+
+**💬 Open Full Chatbot**
+
+Take them directly to the existing AquaAssist interface.
+
+DO NOT redesign or modify the existing full chatbot.
+
+All existing functionality must remain exactly as it is.
+
+## 3. WEBSITE INTEGRATION OPTION
+
+When the user clicks:
+
+**🌐 View Website Integration**
+
+Show a realistic NAWASA-style website.
+
+The AquaAssist chatbot should NOT immediately take up the whole screen.
+
+Instead, show the NAWASA website normally, with a small floating:
+
+**💧 AquaAssist**
+
+button/widget in the bottom-right corner.
+
+When clicked, it opens the existing AquaAssist chatbot as a floating chat window.
+
+The user should be able to:
+
+* Open the chatbot
+* Minimize it using the existing "–" button
+* Close it using the existing close button
+* Reopen it from the floating AquaAssist button
+
+The rest of the mock NAWASA website should remain visible behind the chatbot.
+
+## 4. ADD A "BACK TO DEMO OPTIONS" CONTROL
+
+On both experiences, provide a small unobtrusive option such as:
+
+**← Demo Options**
+
+This allows us to return to the first screen and switch between:
+
+💬 Full AquaAssist
+
+and
+
+🌐 Website Integration
+
+Do not interfere with the chatbot's existing navigation.
+
+## 5. DEMO SCREEN DESIGN
+
+Make the first screen look polished and presentation-ready.
+
+Use the existing AquaAssist/NAWASA blue and water-themed branding.
+
+Layout:
