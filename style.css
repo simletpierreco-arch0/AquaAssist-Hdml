@@ -628,28 +628,19 @@ body.dark .ocean-caustics { opacity: 0.14; }
 
 .widget-header {
   flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
-  gap: .6rem; padding: .8rem .9rem .8rem 1rem;
+  flex-wrap: nowrap; gap: .5rem; padding: .8rem .9rem .8rem 1rem;
   background: linear-gradient(135deg, var(--primary) 0%, var(--hover) 100%);
   color: #fff;
 }
-.widget-header-brand { display:flex; align-items:center; gap:.6rem; min-width:0; flex: 1 1 auto; }
-/* FIX: the text-wrapper div (title + subtitle) is a flex item of
-   .widget-header-brand and defaults to min-width:auto, which stops it
-   (and the subtitle's ellipsis) from ever actually shrinking. That forces
-   .widget-header-brand to claim more width than the panel has, which
-   shoves .widget-header-actions (flex-shrink:0) off the right edge where
-   .widget-panel's overflow:hidden clips it — this is why the minimize/
-   close/WhatsApp buttons were invisible on both mobile and desktop. */
+.widget-header-brand { display:flex; align-items:center; gap:.6rem; min-width:0; flex: 1 1 auto; overflow: hidden; }
 .widget-header-brand > div { min-width: 0; }
+.widget-header-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .widget-header-avatar {
   width: 38px; height: 38px; border-radius: 50%; background: #fff; flex-shrink: 0;
   display:flex; align-items:center; justify-content:center; overflow:hidden; box-shadow: 0 2px 8px rgba(0,0,0,.18);
 }
 .widget-header-avatar img { width:100%; height:100%; object-fit:cover; }
-.widget-header-title {
-  font-weight: 800; font-size: 1rem; line-height:1.2;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
+.widget-header-title { font-weight: 800; font-size: 1rem; line-height:1.2; }
 .widget-header-subtitle {
   font-size: .72rem; font-weight: 500; opacity: .92; display:flex; align-items:center; gap:.35rem;
   white-space: nowrap; overflow:hidden; text-overflow: ellipsis;
