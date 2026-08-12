@@ -27,9 +27,60 @@ function saveSession(id) {
 }
 
 // ---------------------------------------------------------------------
+// Widget shell — collapsed floating button <-> expanded chat panel.
+// This wraps the app; nothing below this function had to change to work
+// inside the widget, since the panel is just a fixed-position, scrollable
+// box and the app content inside it is untouched.
+// ---------------------------------------------------------------------
+function setupWidgetToggle() {
+  const widget = $("#aquaWidget");
+  const panel = $("#widgetPanel");
+  const fab = $("#widgetToggleBtn");
+  const closeBtn = $("#widgetCloseBtn");
+  const minimizeBtn = $("#widgetMinimizeBtn");
+
+  function openWidget() {
+    widget.classList.remove("collapsed");
+    widget.classList.add("expanded");
+    panel.style.display = "flex";
+    fab.setAttribute("aria-expanded", "true");
+    document.body.classList.add("aqua-widget-open");
+    // Maps render at 0 size while their container is display:none — force
+    // Leaflet to recalculate now that the panel is actually visible.
+    setTimeout(() => {
+      if (state.reportMap) state.reportMap.invalidateSize();
+      if (state.staffMap) state.staffMap.invalidateSize();
+    }, 260);
+    // Move focus into the panel for keyboard/screen-reader users.
+    setTimeout(() => closeBtn && closeBtn.focus(), 300);
+  }
+
+  function closeWidget() {
+    widget.classList.remove("expanded");
+    widget.classList.add("collapsed");
+    panel.style.display = "none";
+    fab.setAttribute("aria-expanded", "false");
+    document.body.classList.remove("aqua-widget-open");
+    fab.focus();
+  }
+
+  fab.addEventListener("click", () => {
+    if (widget.classList.contains("expanded")) closeWidget();
+    else openWidget();
+  });
+  closeBtn.addEventListener("click", closeWidget);
+  minimizeBtn.addEventListener("click", closeWidget);
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && widget.classList.contains("expanded")) closeWidget();
+  });
+}
+
+// ---------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------
 async function init() {
+  setupWidgetToggle();
   applyPrefsFromStorage();
   const res = await fetch(`${API}/api/init`);
   state.config = await res.json();
