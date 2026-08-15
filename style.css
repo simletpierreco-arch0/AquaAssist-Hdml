@@ -24,40 +24,7 @@
 }
 
 /* =========================================================================
-   NEW: DEMO SELECTION SCREEN STYLES
-   ========================================================================= */
-#demoSelectionScreen {
-  position: fixed; inset: 0; z-index: 9999;
-  background: linear-gradient(135deg, #0072BC 0%, #003B5C 100%);
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  color: white; padding: 20px; text-align: center; font-family: 'Poppins', sans-serif;
-}
-.demo-container { max-width: 800px; width: 100%; animation: fadeUp 0.5s ease; }
-.demo-header h1 { font-size: 2.8rem; margin: 10px 0; font-weight: 800; letter-spacing: -1px; }
-.demo-options { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 40px; }
-.demo-card {
-  background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2);
-  padding: 40px 30px; border-radius: 24px; backdrop-filter: blur(12px);
-  transition: transform 0.2s, background 0.2s; cursor: pointer;
-  display: flex; flex-direction: column; align-items: center;
-}
-.demo-card:hover { transform: translateY(-8px); background: rgba(255, 255, 255, 0.18); }
-.demo-card h2 { font-size: 1.5rem; margin: 20px 0 10px; color: white; }
-.demo-card p { font-size: 0.9rem; opacity: 0.85; line-height: 1.5; margin-bottom: 25px; height: 50px; color: white; }
-.btn-demo { 
-  background: white; color: #0072BC; border: none; padding: 14px 30px; 
-  border-radius: 12px; font-weight: 700; width: 100%; cursor: pointer;
-}
-.back-to-demo {
-  position: fixed; top: 20px; left: 20px; z-index: 10001;
-  background: rgba(0,0,0,0.6); color: white; border: none; padding: 10px 18px;
-  border-radius: 50px; font-size: 0.85rem; font-weight: 600; cursor: pointer;
-  backdrop-filter: blur(5px); display: none;
-}
-@media (max-width: 640px) { .demo-options { grid-template-columns: 1fr; } }
-
-/* =========================================================================
-   BASE STYLES (ORIGINAL)
+   BASE STYLES
    ========================================================================= */
 
 body.dark {
@@ -151,15 +118,7 @@ input[type="checkbox"], input[type="radio"] {
 .wave { position:absolute; bottom:-2px; left:0; width:100%; line-height:0; z-index:1; }
 .wave-fill { fill: var(--bg); }
 
-/* ---------------- Portal switch / nav ---------------- */
-.portal-switch { display:flex; gap:.5rem; margin: 0.8rem 0; }
-.portal-switch-btn {
-  flex:1; padding:.6rem; border-radius:12px; border:1px solid color-mix(in srgb, var(--primary) 30%, transparent);
-  background: color-mix(in srgb, var(--card) 90%, transparent); color: var(--primary); font-weight:600;
-  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-}
-.portal-switch-btn.active { background: var(--primary); color:#fff; border-color: var(--primary); }
-
+/* ---------------- Tabs ---------------- */
 .tab-nav { display:flex; gap:4px; margin-bottom: 1rem; flex-wrap: wrap; }
 .tab-btn {
   flex:1; min-width: 90px; min-height: 3.4rem; border-radius:12px; border:1px solid color-mix(in srgb, var(--primary) 25%, transparent);
@@ -283,6 +242,29 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 }
 .quick-action-btn:hover { background: var(--bg-soft); }
 
+/* ---------------- Water Service Tip card ---------------- */
+.water-tip-card {
+  display: flex;
+  align-items: flex-start;
+  gap: .6rem;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--card) 90%, transparent), color-mix(in srgb, var(--bg-soft) 90%, transparent));
+  border: 1px solid color-mix(in srgb, var(--primary) 18%, transparent);
+  border-radius: 14px;
+  padding: .7rem .9rem;
+  margin-bottom: .8rem;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.water-tip-icon { font-size: 1.15rem; line-height: 1; flex-shrink: 0; margin-top: .1rem; }
+.water-tip-body { flex: 1; min-width: 0; }
+.water-tip-label {
+  font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--accent); margin-bottom: .15rem;
+}
+.water-tip-text { font-size: .83rem; color: var(--text); line-height: 1.45; opacity: 0; }
+.water-tip-text.tip-fade-in { animation: tipFadeIn .6s ease forwards; }
+@keyframes tipFadeIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
 /* ---------------- FAQ ---------------- */
 .faq-cat-heading { font-weight:700; margin: .8rem 0 .3rem; }
 .faq-item { background: color-mix(in srgb, var(--card) 85%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border:1px solid color-mix(in srgb, var(--primary) 15%, transparent); border-radius:14px; padding:.8rem 1rem; margin-bottom:.6rem; }
@@ -306,6 +288,20 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 .status-select { padding:.2rem .4rem; margin:0; }
 .outage-row { display:flex; justify-content:space-between; align-items:center; background: color-mix(in srgb, var(--card) 85%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border:1px solid color-mix(in srgb, var(--primary) 15%, transparent); border-radius:12px; padding:.6rem .8rem; margin-bottom:.5rem; gap:.6rem; }
 .outage-row button { background: #D6454518; color:#D64545; border:1px solid #D6454540; border-radius:8px; padding:.3rem .6rem; font-size:.78rem; }
+
+/* ---------------- Staff: Water Service Tips management ---------------- */
+.tip-manage-list { margin-top: .8rem; display: flex; flex-direction: column; gap: .5rem; }
+.tip-manage-row {
+  display: flex; align-items: center; justify-content: space-between; gap: .8rem;
+  background: color-mix(in srgb, var(--card) 85%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 15%, transparent);
+  border-radius: 12px; padding: .6rem .8rem; flex-wrap: wrap;
+}
+.tip-manage-text { font-size: .84rem; flex: 1 1 220px; min-width: 0; }
+.tip-manage-text.tip-disabled { opacity: .5; text-decoration: line-through; }
+.tip-manage-actions { display: flex; gap: .4rem; flex-shrink: 0; flex-wrap: wrap; }
+.tip-manage-actions button { padding: .3rem .6rem; font-size: .76rem; }
+.tip-delete-btn { color: #D64545 !important; border-color: #D6454540 !important; }
 
 /* Attachment cell in the staff reports table — inline thumbnail for
    images, a plain link for video/audio/other files. Data comes straight
@@ -386,9 +382,9 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 /* =========================================================================
    WATERY BACKGROUND
    -------------------------------------------------------------------------
-   Purely decorative. Now scoped to the inside of the widget body (absolute,
+   Purely decorative. Scoped to the inside of the widget body (absolute,
    filling its scroll container) rather than the whole viewport, since the
-   viewport itself is the mock website. Behavior/animations unchanged.
+   viewport itself is the mock website.
    ========================================================================= */
 
 .ocean-bg {
@@ -498,12 +494,8 @@ body.dark .ocean-caustics { opacity: 0.14; }
   .bubble:nth-child(n+9) { display: none; }
 }
 
-
 /* =========================================================================
-   MOCK NAWASA WEBSITE — NEW
-   -------------------------------------------------------------------------
-   Purely a demo backdrop so the widget can be previewed as if it were
-   embedded on nawasa.gd. Nothing here is referenced by app.js.
+   MOCK NAWASA WEBSITE
    ========================================================================= */
 .mock-site { background: var(--bg); color: var(--text); }
 
@@ -523,13 +515,28 @@ body.dark .ocean-caustics { opacity: 0.14; }
   font-size:.6rem; font-weight:800; align-items:center; justify-content:center;
 }
 .mock-nav-name { font-weight: 800; font-size: 1.1rem; color: var(--primary); letter-spacing: -.01em; }
-.mock-nav-links { display:flex; gap: 1.4rem; flex-wrap: wrap; }
+.mock-nav-links { display:flex; gap: 1.4rem; flex-wrap: wrap; align-items: center; }
 .mock-nav-links a { font-size: .88rem; font-weight: 600; color: var(--text); text-decoration: none; opacity: .8; }
 .mock-nav-links a:hover { opacity: 1; color: var(--primary); }
+.mock-nav-links a.active { opacity: 1; color: var(--primary); }
 .mock-nav-cta {
   background: var(--primary); color:#fff !important; text-decoration:none; font-weight:700; font-size:.85rem;
   padding: .55rem 1.1rem; border-radius: 10px; flex-shrink:0;
 }
+
+/* Staff Portal nav link — deliberately distinct from the ordinary marketing
+   links so it reads as an internal/admin entry point, not a customer page. */
+.nav-staff-link {
+  color: var(--hover) !important;
+  font-weight: 800 !important;
+  opacity: 1 !important;
+  padding: .3rem .7rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
+}
+.nav-staff-link:hover { background: color-mix(in srgb, var(--primary) 18%, transparent); }
+.nav-staff-link.active { background: var(--primary); color:#fff !important; border-color: var(--primary); }
 
 .mock-hero {
   background: linear-gradient(135deg, var(--primary) 0%, var(--hover) 100%);
@@ -584,7 +591,7 @@ body.dark .ocean-caustics { opacity: 0.14; }
 }
 
 @media (max-width: 900px) {
-  .mock-nav-links { display: none; }
+  .mock-nav-links a:not(.nav-staff-link) { display: none; }
   .mock-card-grid { grid-template-columns: 1fr 1fr; }
   .mock-footer-inner { grid-template-columns: 1fr; }
 }
@@ -593,15 +600,28 @@ body.dark .ocean-caustics { opacity: 0.14; }
   .mock-card-grid { grid-template-columns: 1fr; }
 }
 
+/* =========================================================================
+   STAFF PORTAL — SITE SECTION
+   -------------------------------------------------------------------------
+   Moved out of the AquaAssist widget entirely; this is now a normal page
+   section on the demo site, reached via the "Staff Portal" nav link, and
+   toggled with #mockSiteMain by setupSiteNav() in app.js.
+   ========================================================================= */
+.staff-site-section {
+  background: var(--bg);
+  min-height: 70vh;
+  padding: 2rem 1.5rem 4rem;
+}
+.staff-site-inner { max-width: 900px; margin: 0 auto; }
+.staff-site-hero { border-radius: 20px; margin-bottom: 1.5rem; padding: 1.6rem 1.6rem 2.4rem; }
 
 /* =========================================================================
-   WIDGET SHELL — NEW
+   WIDGET SHELL
    -------------------------------------------------------------------------
    Collapsed: a small floating launcher button, bottom-right, fixed.
    Expanded: a fixed chat panel (desktop: ~400x680, bottom-right; mobile:
-   near-full-screen). The panel's content (#widgetBody) is exactly the old
-   full-page app, now scrollable inside a fixed-size box instead of filling
-   the viewport.
+   near-full-screen). The panel's content (#widgetBody) is the customer-
+   facing app only — the Staff Portal no longer lives inside it.
    ========================================================================= */
 
 .aqua-widget { position: fixed; z-index: 1000; bottom: 20px; right: 20px; }
@@ -652,19 +672,19 @@ body.dark .ocean-caustics { opacity: 0.14; }
 }
 @media (prefers-reduced-motion: reduce) { .widget-panel { animation: none; } }
 
-/* ---------------- Widget header (FIXED: buttons never get pushed out) ---------------- */
+/* ---------------- Widget header ---------------- */
 .widget-header {
   flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
   flex-wrap: nowrap; gap: .5rem; padding: .8rem .9rem .8rem 1rem;
   background: linear-gradient(135deg, var(--primary) 0%, var(--hover) 100%);
   color: #fff;
-  min-width: 0;          /* lets children truncate instead of overflowing the header */
+  min-width: 0;
   width: 100%;
-  overflow: hidden;       /* header itself never scrolls/overflows horizontally */
+  overflow: hidden;
 }
 .widget-header-brand {
   display:flex; align-items:center; gap:.6rem;
-  min-width:0; flex: 1 1 auto;    /* the ONLY part of the header allowed to shrink */
+  min-width:0; flex: 1 1 auto;
   overflow: hidden;
 }
 .widget-header-brand > div { min-width: 0; flex: 1 1 auto; }
@@ -674,7 +694,7 @@ body.dark .ocean-caustics { opacity: 0.14; }
 }
 .widget-header-avatar {
   width: 38px; height: 38px; border-radius: 50%; background: #fff;
-  flex: 0 0 38px;          /* explicit basis, never shrinks below this */
+  flex: 0 0 38px;
   display:flex; align-items:center; justify-content:center; overflow:hidden; box-shadow: 0 2px 8px rgba(0,0,0,.18);
 }
 .widget-header-avatar img { width:100%; height:100%; object-fit:cover; }
@@ -687,10 +707,10 @@ body.dark .ocean-caustics { opacity: 0.14; }
 .widget-header-dot { width:6px; height:6px; border-radius:50%; background:#34D399; flex-shrink:0; animation: onlinePulse 2.2s infinite; }
 .widget-header-actions {
   display:flex; align-items:center; gap:.3rem;
-  flex: 0 0 auto;            /* fully locked — never grows or shrinks */
-  min-width: max-content;    /* guarantees the row never gets clipped below natural width */
+  flex: 0 0 auto;
+  min-width: max-content;
   position: relative;
-  z-index: 5;                 /* always sits above the brand/title area */
+  z-index: 5;
   pointer-events: auto;
 }
 .widget-header-btn {
@@ -704,8 +724,6 @@ body.dark .ocean-caustics { opacity: 0.14; }
 .widget-header-whatsapp { background: var(--whatsapp); }
 .widget-header-whatsapp:hover { background: #1fbd5a; }
 
-/* On very narrow screens, trim spacing (never button size) so the header
-   buttons always have room next to a truncated title/subtitle. */
 @media (max-width: 380px) {
   .widget-header { padding: .7rem .6rem .7rem .7rem; gap: .35rem; }
   .widget-header-brand { gap: .4rem; }
@@ -716,7 +734,6 @@ body.dark .ocean-caustics { opacity: 0.14; }
   position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
 }
-/* Content that used to fill the whole viewport now just fills the panel body */
 .widget-body .page { max-width: none; margin: 0; padding: 1rem 1rem 1.5rem; position: relative; z-index: 1; }
 .widget-body .login-wrap { max-width: none; margin: 0; padding: 1rem; position: relative; z-index: 1; }
 .widget-body .footer { padding-bottom: 1rem; }
