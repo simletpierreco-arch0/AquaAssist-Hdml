@@ -24,17 +24,19 @@
         <span class="mock-nav-name">NAWASA</span>
       </div>
       <nav class="mock-nav-links">
-        <a href="#">Home</a>
+        <a href="#" id="navHomeLink" class="active">Home</a>
         <a href="#">Our Services</a>
         <a href="#">Billing</a>
         <a href="#">Report an Issue</a>
         <a href="#">News</a>
         <a href="#">Contact</a>
+        <a href="#" id="navStaffPortalLink" class="nav-staff-link">🔐 Staff Portal</a>
       </nav>
-      <a href="#" class="mock-nav-cta">Customer Portal</a>
+      <a href="#" id="navCustomerPortalCta" class="mock-nav-cta">Customer Portal</a>
     </div>
   </header>
 
+  <div id="mockSiteMain">
   <section class="mock-hero">
     <div class="mock-hero-inner">
       <span class="mock-hero-eyebrow">National Water &amp; Sewerage Authority</span>
@@ -89,6 +91,7 @@
       </div>
     </div>
   </section>
+  </div><!-- /#mockSiteMain -->
 
   <footer class="mock-footer">
     <div class="mock-footer-inner">
@@ -209,24 +212,9 @@
           <svg class="wave" viewBox="0 0 500 40" preserveAspectRatio="none"><path class="wave-fill" d="M0,20 C150,45 350,-5 500,20 L500,40 L0,40 Z"></path></svg>
         </div>
 
-        <!-- Staff portal hero -->
-        <div id="staffHero" class="hero" style="display:none;">
-          <div class="hero-content">
-            <div>
-              <div class="hero-title">🔐 Staff Portal</div>
-              <div class="hero-subtitle">Reports submitted by customers</div>
-            </div>
-          </div>
-          <svg class="wave" viewBox="0 0 500 40" preserveAspectRatio="none"><path class="wave-fill" d="M0,20 C150,45 350,-5 500,20 L500,40 L0,40 Z"></path></svg>
-        </div>
-
-        <!-- Top-level nav: customer vs staff -->
-        <div class="portal-switch">
-          <button id="btnCustomerPortal" class="portal-switch-btn active">💬 Customer Portal</button>
-          <button id="btnStaffPortal" class="portal-switch-btn">🔐 Staff Portal</button>
-        </div>
-
-        <!-- ===================== CUSTOMER PORTAL ===================== -->
+        <!-- CUSTOMER PORTAL (the Staff Portal used to live here too — it has
+             moved to its own tab on the demo site; see the "Staff Portal"
+             section near the end of <body>.) -->
         <div id="customerPortal">
           <nav class="tab-nav">
             <button class="tab-btn active" data-tab="chat">💬 Chat</button>
@@ -246,6 +234,16 @@
             </div>
 
             <div id="outageBanners"></div>
+
+            <!-- Water Service Tip card — rotates through active tips every
+                 25s. Hidden entirely when staff disable "Water Tips". -->
+            <div id="waterTipCard" class="water-tip-card" style="display:none;">
+              <span class="water-tip-icon">💧</span>
+              <div class="water-tip-body">
+                <div class="water-tip-label">Water Service Tip</div>
+                <div id="waterTipText" class="water-tip-text"></div>
+              </div>
+            </div>
 
             <div id="chatMessages" class="chat-messages"></div>
 
@@ -381,70 +379,6 @@
           </section>
         </div>
 
-        <!-- ===================== STAFF PORTAL ===================== -->
-        <div id="staffPortal" style="display:none;">
-          <div id="staffLoginCard" class="card">
-            <label class="field-label">Enter staff passcode</label>
-            <input id="staffPasscodeInput" type="password" />
-            <button id="staffLoginBtn" class="btn-primary" style="margin-top:0.6rem;">Log in</button>
-            <p id="staffLoginError" class="error-text" style="display:none;">Incorrect passcode.</p>
-          </div>
-
-          <div id="staffDashboard" style="display:none;">
-            <button id="staffLogoutBtn" class="btn-secondary" style="margin-bottom:1rem;">Log out</button>
-
-            <div class="section-label">📊 Overview</div>
-            <div id="statusMetrics" class="metrics-row"></div>
-
-            <div class="section-label">🗺️ Reports map</div>
-            <div id="staffMap" class="leaflet-map"></div>
-
-            <div class="section-label">📋 All reports</div>
-            <div class="card table-wrap">
-              <table id="reportsTable" class="reports-table">
-                <thead></thead>
-                <tbody></tbody>
-              </table>
-            </div>
-
-            <div class="section-label">🔄 Update a report status</div>
-            <div class="card">
-              <form id="quickStatusForm" class="form-row-2">
-                <div>
-                  <label class="field-label">Reference number</label>
-                  <select id="quickStatusRef"></select>
-                </div>
-                <div>
-                  <label class="field-label">New status</label>
-                  <select id="quickStatusNew"></select>
-                </div>
-                <button type="submit" class="btn-primary" style="grid-column:1/-1;">Update status</button>
-              </form>
-            </div>
-
-            <div class="section-label">📢 Outage announcements</div>
-            <div class="card">
-              <form id="outageForm">
-                <label class="field-label">Parish / Territory</label>
-                <select id="outageParish"></select>
-                <label class="field-label">Message to customers</label>
-                <textarea id="outageMessage" rows="2"></textarea>
-                <div class="form-row-2">
-                  <div><label class="field-label">Start date</label><input id="outageStart" type="date" /></div>
-                  <div><label class="field-label">End date</label><input id="outageEnd" type="date" /></div>
-                </div>
-                <button type="submit" class="btn-primary" style="margin-top:0.6rem;width:100%;">Post announcement</button>
-              </form>
-            </div>
-            <div id="outageList"></div>
-
-            <div class="section-label">🔔 Notification subscribers</div>
-            <div class="card table-wrap">
-              <table id="notifyTable" class="reports-table"><thead></thead><tbody></tbody></table>
-            </div>
-          </div>
-        </div>
-
       </div>
 
       <footer class="footer">Powered by <strong>NAWASA</strong></footer>
@@ -452,6 +386,104 @@
     </div><!-- /#widgetBody -->
   </div><!-- /#widgetPanel -->
 </div><!-- /#aquaWidget -->
+
+<!-- =====================================================================
+     STAFF PORTAL — lives on the demo website itself (NOT inside the
+     customer chat widget). Reached via the "Staff Portal" link in the
+     mock site's nav. This is the same dashboard that previously lived
+     inside the widget's "Staff Portal" tab, moved out wholesale.
+     ===================================================================== -->
+<section id="staffPortalSection" class="staff-site-section" style="display:none;">
+  <div class="staff-site-inner">
+    <div class="hero staff-site-hero">
+      <div class="hero-content">
+        <div>
+          <div class="hero-title">🔐 AquaAssist Staff Portal</div>
+          <div class="hero-subtitle">Internal dashboard — reports, outages, tips &amp; feature controls</div>
+        </div>
+      </div>
+      <svg class="wave" viewBox="0 0 500 40" preserveAspectRatio="none"><path class="wave-fill" d="M0,20 C150,45 350,-5 500,20 L500,40 L0,40 Z"></path></svg>
+    </div>
+
+    <div id="staffLoginCard" class="card">
+      <label class="field-label">Enter staff passcode</label>
+      <input id="staffPasscodeInput" type="password" />
+      <button id="staffLoginBtn" class="btn-primary" style="margin-top:0.6rem;">Log in</button>
+      <p id="staffLoginError" class="error-text" style="display:none;">Incorrect passcode.</p>
+    </div>
+
+    <div id="staffDashboard" style="display:none;">
+      <button id="staffLogoutBtn" class="btn-secondary" style="margin-bottom:1rem;">Log out</button>
+
+      <div class="section-label">📊 Overview</div>
+      <div id="statusMetrics" class="metrics-row"></div>
+
+      <div class="section-label">🗺️ Reports map</div>
+      <div id="staffMap" class="leaflet-map"></div>
+
+      <div class="section-label">📋 All reports</div>
+      <div class="card table-wrap">
+        <table id="reportsTable" class="reports-table">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="section-label">🔄 Update a report status</div>
+      <div class="card">
+        <form id="quickStatusForm" class="form-row-2">
+          <div>
+            <label class="field-label">Reference number</label>
+            <select id="quickStatusRef"></select>
+          </div>
+          <div>
+            <label class="field-label">New status</label>
+            <select id="quickStatusNew"></select>
+          </div>
+          <button type="submit" class="btn-primary" style="grid-column:1/-1;">Update status</button>
+        </form>
+      </div>
+
+      <div class="section-label">📢 Outage announcements</div>
+      <div class="card">
+        <form id="outageForm">
+          <label class="field-label">Parish / Territory</label>
+          <select id="outageParish"></select>
+          <label class="field-label">Message to customers</label>
+          <textarea id="outageMessage" rows="2"></textarea>
+          <div class="form-row-2">
+            <div><label class="field-label">Start date</label><input id="outageStart" type="date" /></div>
+            <div><label class="field-label">End date</label><input id="outageEnd" type="date" /></div>
+          </div>
+          <button type="submit" class="btn-primary" style="margin-top:0.6rem;width:100%;">Post announcement</button>
+        </form>
+      </div>
+      <div id="outageList"></div>
+
+      <div class="section-label">💧 Water Service Tips</div>
+      <div class="card">
+        <form id="tipForm">
+          <label class="field-label">Tip text</label>
+          <textarea id="tipText" rows="2" placeholder="e.g. Turn off all taps and check your meter dial — if it's still moving, you may have a leak."></textarea>
+          <button type="submit" class="btn-primary" style="margin-top:0.6rem;width:100%;">Add tip</button>
+        </form>
+        <div id="tipList" class="tip-manage-list"></div>
+      </div>
+
+      <div class="section-label">🎛️ Customer Interface Controls</div>
+      <div class="card">
+        <p class="hint-text">Toggle which features customers can see and use in AquaAssist right now.</p>
+        <div id="featureToggleList" class="checkbox-group"></div>
+      </div>
+
+      <div class="section-label">🔔 Notification subscribers</div>
+      <div class="card table-wrap">
+        <table id="notifyTable" class="reports-table"><thead></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </div>
+</section>
+<!-- =================== END STAFF PORTAL =================== -->
 
 <!-- ===================== CAMERA MODAL (shared: chat + report) ===================== -->
 <div id="cameraModal" class="camera-modal" style="display:none;">
