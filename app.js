@@ -13,6 +13,10 @@ const state = {
   reportMap: null,
   reportMarker: null,
   staffMap: null,
+  features: {}, // feature flag id -> bool, e.g. {faqs: true, water_tips: true, ...}
+  tips: [], // active water service tips for the customer rotation
+  tipIndex: 0,
+  tipTimer: null,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -88,6 +92,15 @@ async function init() {
   populateSelect($("#territorySelect"), state.config.territories);
   $("#territorySelect").value = state.territory;
 
+  // The Staff Portal now lives on the demo site itself, completely
+  // separate from the customer chat widget — it doesn't depend on the
+  // customer having "logged in" to the widget, so it's wired up here.
+  setupSiteNav();
+  setupStaffPortal();
+
+  await loadFeatureFlags();
+  applyFeatureVisibility();
+
   if (localStorage.getItem("aqua_auth_done") === "1") {
     startApp();
   }
@@ -106,6 +119,38 @@ async function init() {
     localStorage.setItem("aqua_territory", territory);
     localStorage.setItem("aqua_auth_done", "1");
     startApp();
+  });
+}
+
+// ---------------------------------------------------------------------
+// Site nav — switches the demo website between its normal customer-facing
+// content and the Staff Portal section. The Staff Portal is intentionally
+// NOT part of the AquaAssist chat widget; it's reached from the mock
+// site's own nav, same as any other admin area would be on a real site.
+// ---------------------------------------------------------------------
+function setupSiteNav() {
+  const showSite = () => {
+    $("#mockSiteMain").style.display = "";
+    $("#staffPortalSection").style.display = "none";
+    $("#navStaffPortalLink").classList.remove("active");
+    $("#navHomeLink").classList.add("active");
+  };
+  const showStaffPortal = () => {
+    $("#mockSiteMain").style.display = "none";
+    $("#staffPortalSection").style.display = "block";
+    $("#navStaffPortalLink").classList.add("active");
+    $("#navHomeLink").classList.remove("active");
+    window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
+  };
+  $("#navStaffPortalLink").addEventListener("click", (e) => { e.preventDefault(); showStaffPortal(); });
+  $("#navHomeLink").addEventListener("click", (e) => { e.preventDefault(); showSite(); });
+  $("#navCustomerPortalCta").addEventListener("click", (e) => {
+    e.preventDefault();
+    showSite();
+    // Also pop the AquaAssist chat widget open, since "Customer Portal" on
+    // a real NAWASA site would point a visitor at the chat/service widget.
+    const widget = $("#aquaWidget");
+    if (!widget.classList.contains("expanded")) $("#widgetToggleBtn").click();
   });
 }
 
@@ -146,16 +191,15 @@ function startApp() {
   setupReportMap();
 
   setupTabs();
-  setupPortalSwitch();
   setupChatForm();
   setupReportForm();
   setupTrackForm();
   setupNotifyForm();
   setupSettings();
-  setupStaffPortal();
   setupCamera();
   setupMic();
   setupLocationShare();
+  loadTips();
 
   setInterval(async () => {
     const res = await fetch(`${API}/api/business-hours`);
@@ -200,7 +244,124 @@ function renderContactRow() {
 }
 
 // ---------------------------------------------------------------------
-// Tabs / portal switch
+// Feature flags — staff can flip these in the Staff Portal to show/hide
+// customer-facing features (FAQs, Water Tips, Report an Issue, WhatsApp,
+// Voice Notes) without touching code. Flags are public (GET /api/features
+// needs no passcode) so the customer widget can read them on every load;
+// only writing them (PATCH) requires the staff passcode.
+// ---------------------------------------------------------------------
+const FEATURE_DEFS = [
+  { id: "faqs", label: "FAQs" },
+  { id: "water_tips", label: "Water Tips" },
+  { id: "report_issue", label: "Report an Issue" },
+  { id: "whatsapp", label: "WhatsApp" },
+  { id: "voice_notes", label: "Voice Notes" },
+];
+
+async function loadFeatureFlags() {
+  try {
+    const res = await fetch(`${API}/api/features`);
+    state.features = await res.json();
+  } catch (err) {
+    // If the endpoint isn't reachable for some reason, default everything
+    // on so the demo degrades gracefully rather than hiding features.
+    state.features = {};
+    FEATURE_DEFS.forEach((f) => { state.features[f.id] = true; });
+  }
+}
+
+function featureEnabled(id) {
+  return state.features[id] !== false; // default ON unless explicitly disabled
+}
+
+// Applies the current feature flags to the customer-facing UI: hides the
+// relevant tab/button/card entirely (rather than just disabling it) so a
+// turned-off feature really disappears for customers, per the NAWASA
+// requirement that Staff Portal toggles control what customers can see.
+function applyFeatureVisibility() {
+  const faqTab = $('.tab-btn[data-tab="faq"]');
+  if (faqTab) faqTab.style.display = featureEnabled("faqs") ? "" : "none";
+
+  const reportTab = $('.tab-btn[data-tab="report"]');
+  if (reportTab) reportTab.style.display = featureEnabled("report_issue") ? "" : "none";
+
+  const waterTipCard = $("#waterTipCard");
+  if (waterTipCard) {
+    if (featureEnabled("water_tips")) {
+      if (state.tips.length) waterTipCard.style.display = "flex";
+      startTipRotation();
+    } else {
+      waterTipCard.style.display = "none";
+      stopTipRotation();
+    }
+  }
+
+  const waEls = [$("#contactWhatsappCard"), $("#whatsappFloat")];
+  waEls.forEach((el) => { if (el) el.style.display = featureEnabled("whatsapp") ? "" : "none"; });
+
+  const micBtn = $("#chatMicBtn");
+  if (micBtn) micBtn.style.display = featureEnabled("voice_notes") ? "" : "none";
+
+  // If a now-hidden tab was the active one, fall back to the Chat tab so
+  // the customer never lands on a blank panel.
+  const activeTab = $(".tab-btn.active");
+  if (activeTab && activeTab.style.display === "none") {
+    const chatTab = $('.tab-btn[data-tab="chat"]');
+    if (chatTab) chatTab.click();
+  }
+}
+
+// ---------------------------------------------------------------------
+// Water Service Tips — small rotating tip card on the Chat tab. Only the
+// tips staff have left enabled are ever sent to the customer; rotation is
+// purely client-side (no reload needed) with a soft cross-fade.
+// ---------------------------------------------------------------------
+async function loadTips() {
+  try {
+    const res = await fetch(`${API}/api/tips`);
+    state.tips = await res.json();
+  } catch (err) {
+    state.tips = [];
+  }
+  state.tipIndex = 0;
+  const card = $("#waterTipCard");
+  if (state.tips.length && featureEnabled("water_tips")) {
+    card.style.display = "flex";
+    renderCurrentTip();
+    startTipRotation();
+  } else {
+    card.style.display = "none";
+  }
+}
+
+function renderCurrentTip() {
+  const textEl = $("#waterTipText");
+  if (!textEl || !state.tips.length) return;
+  textEl.classList.remove("tip-fade-in");
+  // Force a reflow so the fade-in animation restarts on every tip change.
+  void textEl.offsetWidth;
+  textEl.textContent = state.tips[state.tipIndex % state.tips.length].text;
+  textEl.classList.add("tip-fade-in");
+}
+
+function startTipRotation() {
+  stopTipRotation();
+  if (!state.tips.length || !featureEnabled("water_tips")) return;
+  state.tipTimer = setInterval(() => {
+    state.tipIndex = (state.tipIndex + 1) % state.tips.length;
+    renderCurrentTip();
+  }, 25000);
+}
+
+function stopTipRotation() {
+  if (state.tipTimer) {
+    clearInterval(state.tipTimer);
+    state.tipTimer = null;
+  }
+}
+
+// ---------------------------------------------------------------------
+// Tabs
 // ---------------------------------------------------------------------
 function setupTabs() {
   $$(".tab-btn").forEach((btn) => {
@@ -213,28 +374,6 @@ function setupTabs() {
         setTimeout(() => state.reportMap.invalidateSize(), 50);
       }
     });
-  });
-}
-
-function setupPortalSwitch() {
-  $("#btnCustomerPortal").addEventListener("click", () => {
-    $("#btnCustomerPortal").classList.add("active");
-    $("#btnStaffPortal").classList.remove("active");
-    $("#customerHero").style.display = "block";
-    $("#staffHero").style.display = "none";
-    $("#customerPortal").style.display = "block";
-    $("#staffPortal").style.display = "none";
-  });
-  $("#btnStaffPortal").addEventListener("click", () => {
-    $("#btnStaffPortal").classList.add("active");
-    $("#btnCustomerPortal").classList.remove("active");
-    $("#customerHero").style.display = "none";
-    $("#staffHero").style.display = "block";
-    $("#customerPortal").style.display = "none";
-    $("#staffPortal").style.display = "block";
-    if (state.staffPasscode) {
-      staffLoginSuccess();
-    }
   });
 }
 
@@ -261,33 +400,46 @@ function renderQuickActions() {
   });
 }
 
+// Intelligent follow-up suggestions: only offered when the most recent
+// exchange actually touched a topic that has a natural next step. Unlike
+// a chatbot that tacks the same "anything else?" chips onto every reply,
+// this returns null (no chips at all) when nothing relevant matched, so
+// suggestions stay occasional and useful rather than repetitive.
 function suggestFollowupChips() {
-  const recent = state.messages.slice(-3).map((m) => m.content).join(" ").toLowerCase();
+  const lastAssistant = [...state.messages].reverse().find((m) => m.role === "assistant");
+  const lastUser = [...state.messages].reverse().find((m) => m.role === "user");
+  const recent = `${lastUser ? lastUser.content : ""} ${lastAssistant ? lastAssistant.content : ""}`.toLowerCase();
+
   const topics = [
     { keys: ["leak", "burst", "hydrant", "drip"], chips: [
       ["📷 Send a photo", "I'd like to send a photo of the issue."],
-      ["📍 Update location", "I need to update the location of my report."],
+      ["📍 Share my location", null, "location"],
       ["👤 Talk to an agent", "I'd like to speak with a customer service representative."],
     ]},
-    { keys: ["bill", "payment", "arrears", "invoice"], chips: [
+    { keys: ["bill", "payment", "arrears", "invoice", "estimated bill"], chips: [
       ["📄 Check my balance", "How can I check my current NAWASA bill balance and consumption?"],
       ["💳 Payment options", "What are my options for paying my NAWASA bill?"],
-      ["👤 Talk to an agent", "I'd like to speak with a customer service representative."],
+      ["❓ Another billing question", "I have another billing question."],
     ]},
-    { keys: ["outage", "no water", "supply", "maintenance"], chips: [
-      ["🚰 Any updates?", "Are there any updates on the outage in my area?"],
+    { keys: ["outage", "no water", "supply", "maintenance", "interruption", "low pressure"], chips: [
+      ["🚰 Any reported interruptions?", "Would there be any reported interruption or outage in my area right now?"],
       ["📍 Office locations", "Where are NAWASA's office locations?"],
       ["👤 Talk to an agent", "I'd like to speak with a customer service representative."],
     ]},
+    { keys: ["new connection", "new service", "connect my"], chips: [
+      ["💰 Connection costs", "What does a new connection cost?"],
+      ["⏱️ How long does it take?", "How long does it take NAWASA to install a new connection?"],
+    ]},
+    { keys: ["report logged", "reference number", "nw-"], chips: [
+      ["📍 Track this report", null, "track"],
+      ["📷 Add a photo later", "Can I add a photo to my report after submitting it?"],
+    ]},
   ];
+
   for (const t of topics) {
     if (t.keys.some((k) => recent.includes(k))) return t.chips;
   }
-  return [
-    ["👷 Report a leak", "I'd like to report a water leak."],
-    ["💳 Billing help", "What are my options for paying my NAWASA bill?"],
-    ["👤 Talk to an agent", "I'd like to speak with a customer service representative."],
-  ];
+  return null; // nothing topical matched — don't force a generic follow-up
 }
 
 // ---------------------------------------------------------------------
@@ -563,11 +715,17 @@ function renderFollowupChips() {
   const wrap = $("#followupChips");
   wrap.innerHTML = "";
   if (!state.messages.length || state.messages[state.messages.length - 1].role !== "assistant") return;
-  suggestFollowupChips().forEach(([label, prompt]) => {
+  const chips = suggestFollowupChips();
+  if (!chips) return;
+  chips.forEach(([label, prompt, action]) => {
     const btn = document.createElement("button");
     btn.className = "chip-btn";
     btn.textContent = label;
-    btn.addEventListener("click", () => sendMessage(prompt));
+    btn.addEventListener("click", () => {
+      if (action === "location") { $("#chatLocationBtn").click(); return; }
+      if (action === "track") { $('.tab-btn[data-tab="report"]').click(); return; }
+      sendMessage(prompt);
+    });
     wrap.appendChild(btn);
   });
 }
@@ -1319,6 +1477,15 @@ function setupStaffPortal() {
     await staffFetch(`/api/reports/${encodeURIComponent(ref)}`, { method: "PATCH", body: JSON.stringify({ status }) });
     loadReports();
   });
+
+  $("#tipForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = $("#tipText").value.trim();
+    if (!text) return;
+    await staffFetch("/api/tips", { method: "POST", body: JSON.stringify({ text }) });
+    $("#tipForm").reset();
+    loadTipsAdmin();
+  });
 }
 
 function staffLoginSuccess() {
@@ -1327,6 +1494,106 @@ function staffLoginSuccess() {
   loadReports();
   loadOutages();
   loadNotifySubscribers();
+  loadTipsAdmin();
+  loadFeaturesAdmin();
+}
+
+// ---------------------------------------------------------------------
+// Staff: Water Service Tips management
+// ---------------------------------------------------------------------
+async function loadTipsAdmin() {
+  const res = await staffFetch("/api/tips/all");
+  if (res.status === 401) { staffLogout(); return; }
+  const tips = await res.json();
+  renderTipManageList(tips);
+}
+
+function renderTipManageList(tips) {
+  const wrap = $("#tipList");
+  wrap.innerHTML = "";
+  if (!tips.length) {
+    wrap.innerHTML = `<p class="hint-text">No tips added yet.</p>`;
+    return;
+  }
+  tips.forEach((tip) => {
+    const row = document.createElement("div");
+    row.className = "tip-manage-row";
+
+    const textEl = document.createElement("span");
+    textEl.className = "tip-manage-text" + (tip.enabled ? "" : " tip-disabled");
+    textEl.textContent = tip.text;
+    row.appendChild(textEl);
+
+    const actions = document.createElement("div");
+    actions.className = "tip-manage-actions";
+
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "btn-secondary";
+    editBtn.textContent = "Edit";
+    editBtn.addEventListener("click", async () => {
+      const updated = prompt("Edit tip text:", tip.text);
+      if (updated === null) return;
+      const trimmed = updated.trim();
+      if (!trimmed) return;
+      await staffFetch(`/api/tips/${tip.id}`, { method: "PATCH", body: JSON.stringify({ text: trimmed }) });
+      loadTipsAdmin();
+    });
+
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "btn-secondary";
+    toggleBtn.textContent = tip.enabled ? "Disable" : "Enable";
+    toggleBtn.addEventListener("click", async () => {
+      await staffFetch(`/api/tips/${tip.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !tip.enabled }) });
+      loadTipsAdmin();
+    });
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "btn-secondary tip-delete-btn";
+    deleteBtn.textContent = "Remove";
+    deleteBtn.addEventListener("click", async () => {
+      await staffFetch(`/api/tips/${tip.id}`, { method: "DELETE" });
+      loadTipsAdmin();
+    });
+
+    actions.appendChild(editBtn);
+    actions.appendChild(toggleBtn);
+    actions.appendChild(deleteBtn);
+    row.appendChild(actions);
+    wrap.appendChild(row);
+  });
+}
+
+// ---------------------------------------------------------------------
+// Staff: Customer Interface feature toggles
+// ---------------------------------------------------------------------
+async function loadFeaturesAdmin() {
+  const res = await staffFetch("/api/features");
+  if (res.status === 401) { staffLogout(); return; }
+  const flags = await res.json();
+  state.features = flags;
+  renderFeatureToggleList(flags);
+}
+
+function renderFeatureToggleList(flags) {
+  const wrap = $("#featureToggleList");
+  wrap.innerHTML = "";
+  FEATURE_DEFS.forEach((f) => {
+    const label = document.createElement("label");
+    label.className = "toggle-row";
+    const checked = flags[f.id] !== false;
+    label.innerHTML = `<input type="checkbox" data-feature="${f.id}" ${checked ? "checked" : ""} /> ${f.label}`;
+    label.querySelector("input").addEventListener("change", async (e) => {
+      const enabled = e.target.checked;
+      await staffFetch("/api/features", { method: "PATCH", body: JSON.stringify({ [f.id]: enabled }) });
+      state.features[f.id] = enabled;
+      applyFeatureVisibility();
+      if (f.id === "water_tips") loadTips();
+    });
+    wrap.appendChild(label);
+  });
 }
 
 async function staffFetch(path, opts = {}) {
