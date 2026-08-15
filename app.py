@@ -45,6 +45,7 @@ the real row in reports.csv.
 
 import os
 import csv
+import json
 import re
 import uuid
 import base64
@@ -79,33 +80,6 @@ ELEVENLABS_MODEL_ID = os.environ.get("ELEVENLABS_MODEL_ID", "eleven_multilingual
 NAWASA_PHONE = "(473) 440-2155"
 NAWASA_WEBSITE = "https://nawasa.gd/"
 
-# ---------------------------------------------------------------------------
-# Media normalization for Gemini — the model's audio/video understanding
-# only reliably accepts specific container/codec combos, and browser-side
-# MediaRecorder output frequently doesn't match what it was labelled as.
-#
-# AUDIO: browsers record voice notes as audio/webm (Opus) almost everywhere,
-# and Gemini does not recognize that container for audio understanding. When
-# ffmpeg is available we remux (not re-encode — same Opus audio, different
-# container, so it's instant and lossless) into Ogg, which Gemini accepts.
-#
-# VIDEO: MediaRecorder's "video/mp4" output (when a browser claims to
-# support it) is a fragmented/streamed MP4 — the moov atom lands at the end
-# or is split across fragments instead of sitting at the front of the file.
-# Many parsers, including Gemini's ingestion, expect the moov atom up front
-# ("faststart") and will silently fail to read the file otherwise — which is
-# what produces an empty response (no candidates) rather than a clear error.
-# video/webm from MediaRecorder is a normal, non-fragmented container and
-# doesn't have this problem, but to have one reliable, well-formed path for
-# every browser we re-mux/transcode any recorded video into a proper
-# faststart MP4 server-side when ffmpeg is available.
-#
-# NOTE: this normalized version is ONLY used for what we send to Gemini.
-# What we store for staff viewing (attachment_mime / attachment_data on the
-# report row) is always the ORIGINAL bytes the browser sent — that's the
-# format any regular browser can already play back directly, so there's no
-# reason to make staff depend on ffmpeg being installed just to view a clip.
-# ---------------------------------------------------------------------------
 def _ffmpeg_available():
     try:
         subprocess.run(["ffmpeg", "-version"], stdout=subprocess.DEVNULL,
@@ -119,14 +93,6 @@ _HAS_FFMPEG = _ffmpeg_available()
 
 
 def _normalize_media_for_gemini(raw: bytes, mime: str):
-    """Returns (bytes_to_send, mime_type_to_send) for what Gemini sees.
-
-    - audio/webm -> remuxed to audio/ogg (same Opus audio, new container).
-    - any video/* -> re-muxed/transcoded into a proper faststart MP4, since
-      MediaRecorder output (regardless of the mime type it reports) is not
-      guaranteed to be laid out the way Gemini's ingestion expects.
-    - everything else passes through unchanged.
-    """
     mime = (mime or "").split(";")[0].strip().lower()
 
     if mime in ("audio/webm", "audio/x-webm") and _HAS_FFMPEG:
@@ -144,12 +110,9 @@ def _normalize_media_for_gemini(raw: bytes, mime: str):
                 if converted:
                     return converted, "audio/ogg"
         except Exception:
-            pass  # fall through and send the original bytes/mime below
+            pass
 
     if mime.startswith("video/") and _HAS_FFMPEG:
-        # Guess a source suffix ffmpeg can sniff correctly; it doesn't
-        # actually need to be accurate since ffmpeg probes the real
-        # container, but a matching extension avoids some edge cases.
         src_suffix = ".mp4" if "mp4" in mime else ".webm"
         try:
             with tempfile.NamedTemporaryFile(suffix=src_suffix) as src, \
@@ -167,27 +130,47 @@ def _normalize_media_for_gemini(raw: bytes, mime: str):
                 if converted:
                     return converted, "video/mp4"
         except Exception:
-            pass  # fall through and send the original bytes/mime below
+            pass
 
     return raw, (mime or "application/octet-stream")
 
 
 app = Flask(__name__, static_folder=None)
 
-# ---------------------------------------------------------------------------
-# CSV storage — same shape as the Streamlit app's data/*.csv files, plain
-# csv module instead of pandas (one less heavy dependency for a small API).
-# Attachments live inline as attachment_mime / attachment_data (base64) —
-# see the module docstring for why.
-# ---------------------------------------------------------------------------
 REPORTS_PATH = DATA_DIR / "reports.csv"
 NOTIFY_PATH = DATA_DIR / "notifications.csv"
 OUTAGES_PATH = DATA_DIR / "outages.csv"
+TIPS_PATH = DATA_DIR / "tips.csv"
+FEATURES_PATH = DATA_DIR / "features.json"
 
 REPORTS_FIELDS = ["reference", "timestamp", "name", "phone", "location", "issue_type",
                    "description", "attachment_mime", "attachment_data", "status", "severity"]
 NOTIFY_FIELDS = ["timestamp", "contact", "categories"]
 OUTAGE_FIELDS = ["id", "parish", "message", "start_date", "end_date", "created_at"]
+TIP_FIELDS = ["id", "text", "enabled", "created_at"]
+
+# Default Water Service Tips — seeded into tips.csv the first time it's
+# read, so the demo/competition build always has a rotation ready to show
+# without staff needing to add tips manually first.
+DEFAULT_TIPS = [
+    "Check for hidden leaks: turn off every tap in your home, then watch your meter dial. If it's still moving, water is escaping somewhere.",
+    "Conserve water during dry months by fixing dripping taps promptly — a single slow drip can waste over 15 gallons a day.",
+    "Protect your water storage tank by keeping the lid securely closed to prevent debris, insects, and contamination.",
+    "During a scheduled interruption, store enough water for drinking, cooking, and sanitation, and avoid running your pump dry.",
+    "Spot a leak on the street, a burst main, or a damaged hydrant? Report it to NAWASA right away via AquaAssist or call (473) 440-2155.",
+    "Regularly check your faucets and toilets for silent leaks — a toilet that keeps running after flushing can waste hundreds of gallons a month.",
+]
+
+# Feature flags customers see in the AquaAssist widget. Staff can flip any
+# of these off from the Staff Portal, and the change takes effect for
+# customers immediately (the widget re-checks /api/features on load).
+DEFAULT_FEATURES = {
+    "faqs": True,
+    "water_tips": True,
+    "report_issue": True,
+    "whatsapp": True,
+    "voice_notes": True,
+}
 STATUS_STAGES = ["Received", "Assigned", "Crew Dispatched", "In Progress", "Resolved"]
 SEVERITY_LEVELS = ["Unknown", "Low", "Medium", "High"]
 ISSUE_TYPES = ["Leak", "No water supply", "Low pressure", "Billing issue",
@@ -296,6 +279,89 @@ def get_active_outages_for_parish(parish):
             if r["parish"] == parish and r["start_date"] <= today <= r["end_date"]]
 
 
+# ---------------------------------------------------------------------------
+# Water Service Tips — CRUD over tips.csv. Seeded once at startup with
+# DEFAULT_TIPS so the customer rotation always has content on a fresh
+# deploy; after that, an empty tips.csv (e.g. staff deleted everything) is
+# left empty rather than being silently reseeded.
+# ---------------------------------------------------------------------------
+def _seed_tips_if_empty():
+    _ensure_csv(TIPS_PATH, TIP_FIELDS)
+    if _read_csv(TIPS_PATH, TIP_FIELDS):
+        return
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    seeded = [{"id": uuid.uuid4().hex[:8], "text": t, "enabled": "1", "created_at": now}
+              for t in DEFAULT_TIPS]
+    _write_csv(TIPS_PATH, TIP_FIELDS, seeded)
+
+
+def _tip_out(row):
+    return {"id": row["id"], "text": row["text"], "enabled": row.get("enabled") == "1",
+            "created_at": row.get("created_at", "")}
+
+
+def load_tips():
+    return [_tip_out(r) for r in _read_csv(TIPS_PATH, TIP_FIELDS)]
+
+
+def save_tip(text):
+    row = {"id": uuid.uuid4().hex[:8], "text": text, "enabled": "1",
+           "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+    with open(TIPS_PATH, "a", newline="", encoding="utf-8") as f:
+        csv.DictWriter(f, fieldnames=TIP_FIELDS).writerow(row)
+    return _tip_out(row)
+
+
+def update_tip(tip_id, text=None, enabled=None):
+    rows = _read_csv(TIPS_PATH, TIP_FIELDS)
+    found = None
+    for r in rows:
+        if r["id"] == tip_id:
+            if text is not None:
+                r["text"] = text
+            if enabled is not None:
+                r["enabled"] = "1" if enabled else "0"
+            found = r
+    if found is None:
+        return None
+    _write_csv(TIPS_PATH, TIP_FIELDS, rows)
+    return _tip_out(found)
+
+
+def delete_tip(tip_id):
+    rows = _read_csv(TIPS_PATH, TIP_FIELDS)
+    remaining = [r for r in rows if r["id"] != tip_id]
+    _write_csv(TIPS_PATH, TIP_FIELDS, remaining)
+    return len(remaining) != len(rows)
+
+
+# ---------------------------------------------------------------------------
+# Feature flags — staff-controlled on/off switches for customer-facing
+# features (FAQs, Water Tips, Report an Issue, WhatsApp, Voice Notes).
+# Stored as a small JSON file rather than a CSV since it's a single
+# object, not a list of rows.
+# ---------------------------------------------------------------------------
+def load_features():
+    saved = {}
+    if FEATURES_PATH.exists():
+        try:
+            saved = json.loads(FEATURES_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            saved = {}
+    merged = dict(DEFAULT_FEATURES)
+    merged.update({k: bool(v) for k, v in saved.items() if k in DEFAULT_FEATURES})
+    return merged
+
+
+def save_features(updates):
+    current = load_features()
+    for k, v in (updates or {}).items():
+        if k in DEFAULT_FEATURES:
+            current[k] = bool(v)
+    FEATURES_PATH.write_text(json.dumps(current), encoding="utf-8")
+    return current
+
+
 def parse_report_coords(location_text):
     if not isinstance(location_text, str):
         return None
@@ -308,9 +374,6 @@ def parse_report_coords(location_text):
         return None
 
 
-# ---------------------------------------------------------------------------
-# Business hours — identical logic to the Streamlit version.
-# ---------------------------------------------------------------------------
 BUSINESS_HOURS_START = 8
 BUSINESS_HOURS_END = 16
 CLOSING_SOON_WINDOW_MINUTES = 60
@@ -356,9 +419,6 @@ def get_business_hours_status():
             "closing_soon": closing_soon, "minutes_until_close": minutes_until_close}
 
 
-# ---------------------------------------------------------------------------
-# NAWASA reference data
-# ---------------------------------------------------------------------------
 TERRITORIES = ["Grenada", "Carriacou", "Petit Martinique"]
 TERRITORY_WHATSAPP = {
     "Grenada": "https://wa.link/rt9dj1",
@@ -451,16 +511,12 @@ If a question is unrelated to NAWASA services, politely explain that you can onl
 """
 
 
-# ---------------------------------------------------------------------------
-# Gemini chat sessions — kept in memory, one per browser session id. Good
-# enough for a single-process dev/small-deployment server; for production
-# scale-out, swap this dict for a shared store (e.g. Redis) keyed the same
-# way.
-# ---------------------------------------------------------------------------
+_seed_tips_if_empty()
+
 _client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
-SESSIONS = {}       # session_id -> {"chat": chat_obj, "territory": str}
-LAST_REPORT = {}    # session_id -> report dict, set by the tool call for that turn
-CURRENT_ATTACHMENT = {}  # session_id -> {"mime": str, "data_base64": str} for the in-flight turn
+SESSIONS = {}
+LAST_REPORT = {}
+CURRENT_ATTACHMENT = {}
 
 
 def _make_log_tool(session_id):
@@ -544,11 +600,6 @@ def _get_or_create_chat(session_id, territory):
     return sess["chat"]
 
 
-# ---------------------------------------------------------------------------
-# Staff auth — a simple passcode check. The frontend sends the passcode back
-# on every staff request via the X-Staff-Passcode header rather than a
-# session cookie, which keeps the server stateless for staff auth.
-# ---------------------------------------------------------------------------
 def require_staff(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -559,9 +610,6 @@ def require_staff(fn):
     return wrapper
 
 
-# ---------------------------------------------------------------------------
-# Routes — static frontend
-# ---------------------------------------------------------------------------
 @app.route("/")
 def serve_index():
     return send_from_directory(FRONTEND_DIR, "index.html")
@@ -572,9 +620,6 @@ def serve_static(filename):
     return send_from_directory(FRONTEND_DIR, filename)
 
 
-# ---------------------------------------------------------------------------
-# Routes — API
-# ---------------------------------------------------------------------------
 @app.route("/api/init")
 def api_init():
     return jsonify({
@@ -609,7 +654,7 @@ def api_chat():
     session_id = body.get("session_id") or str(uuid.uuid4())
     territory = body.get("territory", "Grenada")
     message = (body.get("message") or "").strip()
-    attachments = body.get("attachments") or []  # [{name, mime, data_base64}]
+    attachments = body.get("attachments") or []
 
     if not message and not attachments:
         return jsonify({"error": "Empty message."}), 400
@@ -621,13 +666,6 @@ def api_chat():
     if message:
         parts.append(message)
 
-    # Hidden context, not shown in the customer's chat bubble (the frontend
-    # only ever renders the customer's own typed text) — tells the model
-    # whether phone/WhatsApp are staffed right now, since that changes
-    # throughout the day and the system prompt is only built once per session.
-    # NOTE: this is background context only — the system instruction tells
-    # the model not to volunteer it unless the customer actually asks about
-    # calling, WhatsApp, or speaking with a representative.
     bh = get_business_hours_status()
     if bh["is_open"]:
         bh_note = "CURRENT BUSINESS HOURS STATUS: Office OPEN — phone and WhatsApp are staffed right now."
@@ -643,11 +681,7 @@ def api_chat():
         except Exception:
             continue
         mime = att.get("mime", "application/octet-stream")
-        # Keep the ORIGINAL bytes for staff viewing later (any browser can
-        # already play these back directly — no ffmpeg dependency needed
-        # just to look at what a customer sent).
         CURRENT_ATTACHMENT[session_id] = {"mime": mime, "data_base64": att["data_base64"]}
-        # Separately, normalize a COPY for what we actually send to Gemini.
         send_bytes, send_mime = _normalize_media_for_gemini(raw, mime)
         parts.append(types.Part.from_bytes(data=send_bytes, mime_type=send_mime))
 
@@ -656,12 +690,6 @@ def api_chat():
     except Exception as e:
         return jsonify({"error": f"Gemini error: {e}"}), 502
 
-    # response.text raises IndexError ("list index out of range") when
-    # Gemini returns zero candidates — which happens when it couldn't make
-    # sense of an attachment (a malformed/unsupported media file, or a clip
-    # the safety filters rejected) rather than a normal API failure. Treat
-    # that case explicitly instead of letting the raw exception leak to the
-    # customer as a cryptic "list index out of range" message.
     if not getattr(response, "candidates", None):
         has_media = any(a.get("mime", "").split("/")[0] in ("audio", "video") for a in attachments)
         if has_media:
@@ -730,7 +758,6 @@ def api_update_report(reference):
 def api_outages():
     if request.method == "GET":
         return jsonify(load_outages())
-    # POST — staff only
     if request.headers.get("X-Staff-Passcode", "") != STAFF_PASSCODE:
         return jsonify({"error": "Invalid or missing staff passcode."}), 401
     body = request.get_json(force=True)
@@ -763,6 +790,66 @@ def api_notify():
     return jsonify({"ok": True})
 
 
+@app.route("/api/tips", methods=["GET"])
+def api_tips_list():
+    # Public — only enabled tips, and only id/text (no need to expose
+    # created_at/enabled internals to the customer widget).
+    tips = [t for t in load_tips() if t["enabled"]]
+    return jsonify([{"id": t["id"], "text": t["text"]} for t in tips])
+
+
+@app.route("/api/tips", methods=["POST"])
+@require_staff
+def api_tips_create():
+    body = request.get_json(force=True)
+    text = (body.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "Tip text is required."}), 400
+    return jsonify(save_tip(text))
+
+
+@app.route("/api/tips/all")
+@require_staff
+def api_tips_all():
+    return jsonify(load_tips())
+
+
+@app.route("/api/tips/<tip_id>", methods=["PATCH"])
+@require_staff
+def api_tips_update(tip_id):
+    body = request.get_json(force=True) or {}
+    text = body.get("text")
+    enabled = body.get("enabled")
+    if text is not None and not text.strip():
+        return jsonify({"error": "Tip text cannot be empty."}), 400
+    row = update_tip(tip_id, text=text.strip() if text is not None else None, enabled=enabled)
+    if row is None:
+        return jsonify({"error": "Tip not found."}), 404
+    return jsonify(row)
+
+
+@app.route("/api/tips/<tip_id>", methods=["DELETE"])
+@require_staff
+def api_tips_delete(tip_id):
+    if not delete_tip(tip_id):
+        return jsonify({"error": "Tip not found."}), 404
+    return jsonify({"deleted": tip_id})
+
+
+@app.route("/api/features", methods=["GET"])
+def api_features_get():
+    # Public — the customer widget reads this on every load (and while
+    # open) to know which features to show right now.
+    return jsonify(load_features())
+
+
+@app.route("/api/features", methods=["PATCH"])
+@require_staff
+def api_features_update():
+    body = request.get_json(force=True) or {}
+    return jsonify(save_features(body))
+
+
 @app.route("/api/staff/login", methods=["POST"])
 def api_staff_login():
     body = request.get_json(force=True)
@@ -770,18 +857,6 @@ def api_staff_login():
     return jsonify({"ok": ok}), (200 if ok else 401)
 
 
-# ---------------------------------------------------------------------------
-# Text-to-speech — proxies to ElevenLabs so AquaAssist can speak with an
-# actual Caribbean-accented voice. The browser's native Web Speech API
-# (used as a fallback in the frontend) essentially never has a real
-# Caribbean voice installed, so this is the only reliable way to get one.
-#
-# The frontend sends plain text; we return raw MP3 bytes directly (no JSON
-# wrapper) so the browser can play them straight from the fetch response.
-# If ElevenLabs isn't configured, or the request to it fails, we return a
-# 503/502 and the frontend automatically falls back to speechSynthesis —
-# so the app still works end-to-end without this configured.
-# ---------------------------------------------------------------------------
 @app.route("/api/tts", methods=["POST"])
 def api_tts():
     if not ELEVENLABS_API_KEY or not ELEVENLABS_VOICE_ID:
@@ -792,9 +867,6 @@ def api_tts():
     if not text:
         return jsonify({"error": "No text provided."}), 400
 
-    # ElevenLabs charges per character and has a per-request limit well
-    # above anything a chat reply or FAQ answer would need — trim
-    # defensively so a runaway prompt can't produce an oversized bill.
     text = text[:2000]
 
     try:
