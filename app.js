@@ -246,8 +246,9 @@ function renderContactRow() {
 // ---------------------------------------------------------------------
 // Feature flags — staff can flip these in the Staff Portal to show/hide
 // customer-facing features (FAQs, Water Tips, Report an Issue, WhatsApp,
-// Voice Notes, Get Notified, Camera) without touching code. Flags are
-// public (GET /api/features
+// Voice Notes, Get Notified, Camera, Quick Actions, and the Dark Mode /
+// High Contrast / Larger Text / Read Aloud accessibility toggles) without
+// touching code. Flags are public (GET /api/features
 // needs no passcode) so the customer widget can read them on every load;
 // only writing them (PATCH) requires the staff passcode.
 // ---------------------------------------------------------------------
@@ -259,6 +260,11 @@ const FEATURE_DEFS = [
   { id: "voice_notes", label: "Voice Notes" },
   { id: "notify", label: "Get Notified" },
   { id: "camera", label: "Camera" },
+  { id: "quick_actions", label: "Quick Actions" },
+  { id: "dark_mode", label: "Dark Mode Option" },
+  { id: "high_contrast", label: "High Contrast Option" },
+  { id: "large_text", label: "Larger Text Option" },
+  { id: "read_aloud", label: "Read Aloud Option" },
 ];
 
 async function loadFeatureFlags() {
@@ -315,6 +321,27 @@ function applyFeatureVisibility() {
 
   const micBtn = $("#chatMicBtn");
   if (micBtn) micBtn.style.display = featureEnabled("voice_notes") ? "" : "none";
+
+  // Quick actions grid on the Chat tab (label + button grid together).
+  const qaLabel = $("#quickActionsLabel"), qaGrid = $("#quickActions");
+  [qaLabel, qaGrid].forEach((el) => { if (el) el.style.display = featureEnabled("quick_actions") ? "" : "none"; });
+
+  // Settings-tab accessibility/preference toggles — each hidden by
+  // removing its whole row (checkbox + label text), not just the input,
+  // so no orphaned label is left behind.
+  const toggleRow = (inputId) => { const input = $(inputId); return input ? input.closest("label") : null; };
+  const darkRow = toggleRow("#darkModeToggle");
+  if (darkRow) darkRow.style.display = featureEnabled("dark_mode") ? "" : "none";
+  const hcRow = toggleRow("#highContrastToggle");
+  if (hcRow) hcRow.style.display = featureEnabled("high_contrast") ? "" : "none";
+  const largeRow = toggleRow("#largeTextToggle");
+  if (largeRow) largeRow.style.display = featureEnabled("large_text") ? "" : "none";
+  const readAloudRow = toggleRow("#readAloudToggle");
+  if (readAloudRow) readAloudRow.style.display = featureEnabled("read_aloud") ? "" : "none";
+  // The voice picker is only meaningful alongside Read Aloud, so it rides
+  // on the same flag.
+  const voiceLabel = $("#voiceSelectLabel"), voiceSelectEl = $("#voiceSelect");
+  [voiceLabel, voiceSelectEl].forEach((el) => { if (el) el.style.display = featureEnabled("read_aloud") ? "" : "none"; });
 
   // If a now-hidden tab was the active one, fall back to the Chat tab so
   // the customer never lands on a blank panel.
