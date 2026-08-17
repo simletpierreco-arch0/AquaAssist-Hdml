@@ -246,7 +246,8 @@ function renderContactRow() {
 // ---------------------------------------------------------------------
 // Feature flags — staff can flip these in the Staff Portal to show/hide
 // customer-facing features (FAQs, Water Tips, Report an Issue, WhatsApp,
-// Voice Notes) without touching code. Flags are public (GET /api/features
+// Voice Notes, Get Notified, Camera) without touching code. Flags are
+// public (GET /api/features
 // needs no passcode) so the customer widget can read them on every load;
 // only writing them (PATCH) requires the staff passcode.
 // ---------------------------------------------------------------------
@@ -256,6 +257,8 @@ const FEATURE_DEFS = [
   { id: "report_issue", label: "Report an Issue" },
   { id: "whatsapp", label: "WhatsApp" },
   { id: "voice_notes", label: "Voice Notes" },
+  { id: "notify", label: "Get Notified" },
+  { id: "camera", label: "Camera" },
 ];
 
 async function loadFeatureFlags() {
@@ -284,6 +287,17 @@ function applyFeatureVisibility() {
 
   const reportTab = $('.tab-btn[data-tab="report"]');
   if (reportTab) reportTab.style.display = featureEnabled("report_issue") ? "" : "none";
+
+  const notifyTab = $('.tab-btn[data-tab="notify"]');
+  if (notifyTab) notifyTab.style.display = featureEnabled("notify") ? "" : "none";
+
+  // Camera buttons (live photo/video capture) — only shown when both the
+  // staff toggle is on AND the device actually supports getUserMedia.
+  // Plain file attachment (the 📎 button) is untouched by this flag; it
+  // only controls the live camera capture entry points.
+  const hasCameraSupport = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  const cameraEls = [$("#chatCameraBtn"), $("#reportCameraBtn")];
+  cameraEls.forEach((el) => { if (el) el.style.display = (featureEnabled("camera") && hasCameraSupport) ? "" : "none"; });
 
   const waterTipCard = $("#waterTipCard");
   if (waterTipCard) {
