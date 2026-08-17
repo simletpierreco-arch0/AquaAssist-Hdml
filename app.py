@@ -622,6 +622,15 @@ def serve_index():
     return send_from_directory(FRONTEND_DIR, "index.html")
 
 
+@app.route("/admin")
+def serve_admin():
+    # Same single-page app as "/" — app.js checks the URL path on load and
+    # jumps straight to the Staff Portal view when it's "/admin", so this
+    # gives staff a real, bookmarkable URL without standing up a second
+    # site or a second deploy.
+    return send_from_directory(FRONTEND_DIR, "index.html")
+
+
 @app.route("/<path:filename>")
 def serve_static(filename):
     return send_from_directory(FRONTEND_DIR, filename)
