@@ -170,6 +170,8 @@ DEFAULT_FEATURES = {
     "report_issue": True,
     "whatsapp": True,
     "voice_notes": True,
+    "notify": True,
+    "camera": True,
 }
 STATUS_STAGES = ["Received", "Assigned", "Crew Dispatched", "In Progress", "Resolved"]
 SEVERITY_LEVELS = ["Unknown", "Low", "Medium", "High"]
