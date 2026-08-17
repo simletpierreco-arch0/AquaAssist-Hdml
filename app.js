@@ -129,18 +129,24 @@ async function init() {
 // site's own nav, same as any other admin area would be on a real site.
 // ---------------------------------------------------------------------
 function setupSiteNav() {
-  const showSite = () => {
+  const showSite = (pushUrl = true) => {
     $("#mockSiteMain").style.display = "";
     $("#staffPortalSection").style.display = "none";
     $("#navStaffPortalLink").classList.remove("active");
     $("#navHomeLink").classList.add("active");
+    if (pushUrl && window.location.pathname !== "/") {
+      history.pushState({ view: "site" }, "", "/");
+    }
   };
-  const showStaffPortal = () => {
+  const showStaffPortal = (pushUrl = true) => {
     $("#mockSiteMain").style.display = "none";
     $("#staffPortalSection").style.display = "block";
     $("#navStaffPortalLink").classList.add("active");
     $("#navHomeLink").classList.remove("active");
     window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
+    if (pushUrl && window.location.pathname !== "/admin") {
+      history.pushState({ view: "admin" }, "", "/admin");
+    }
   };
   $("#navStaffPortalLink").addEventListener("click", (e) => { e.preventDefault(); showStaffPortal(); });
   $("#navHomeLink").addEventListener("click", (e) => { e.preventDefault(); showSite(); });
@@ -152,6 +158,21 @@ function setupSiteNav() {
     const widget = $("#aquaWidget");
     if (!widget.classList.contains("expanded")) $("#widgetToggleBtn").click();
   });
+
+  // Keep the browser's back/forward buttons working correctly between the
+  // marketing site and the Staff Portal.
+  window.addEventListener("popstate", () => {
+    if (window.location.pathname === "/admin") showStaffPortal(false);
+    else showSite(false);
+  });
+
+  // Deep-link support: visiting /admin directly (bookmark, typed URL, a
+  // link staff share with each other) lands straight on the Staff Portal
+  // login instead of the marketing homepage. pushUrl=false since the URL
+  // is already correct — no need to rewrite history on the very first load.
+  if (window.location.pathname === "/admin") {
+    showStaffPortal(false);
+  }
 }
 
 function applyPrefsFromStorage() {
