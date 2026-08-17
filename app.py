@@ -172,6 +172,11 @@ DEFAULT_FEATURES = {
     "voice_notes": True,
     "notify": True,
     "camera": True,
+    "quick_actions": True,
+    "dark_mode": True,
+    "high_contrast": True,
+    "large_text": True,
+    "read_aloud": True,
 }
 STATUS_STAGES = ["Received", "Assigned", "Crew Dispatched", "In Progress", "Resolved"]
 SEVERITY_LEVELS = ["Unknown", "Low", "Medium", "High"]
