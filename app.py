@@ -34,18 +34,22 @@ ELEVENLABS_VOICE_ID aren't set, /api/tts returns a 503 and the frontend
 automatically falls back to the browser's built-in voice, so the app still
 works without this configured — it just won't have the Caribbean accent.
 
-NOTE ON REPORT STATUS LOOKUPS: the Gemini chat session is given two tools —
-log_water_report (write) and check_report_status (read). Previously there
-was only the write tool, so when a customer asked to check on an existing
-report the model had nothing to actually look up and would answer from
-guesswork alone. check_report_status calls the same track_report() helper
-used by the /api/report/<reference> endpoint, so the model's answer reflects
-the real row in reports.csv.
+NOTE ON REPORT STATUS LOOKUPS: the Gemini chat session is given three tools —
+log_water_report (write), check_report_status (read), and
+check_active_outages (read). Previously there was only the write tool, so
+when a customer asked to check on an existing report, or whether there was
+an active outage in their area, the model had nothing to actually look up
+and would answer from guesswork alone. check_report_status calls the same
+track_report() helper used by the /api/report/<reference> endpoint, and
+check_active_outages calls get_active_outages_for_parish(), so the model's
+answers reflect the real rows in reports.csv / outages.csv rather than a
+guess.
 """
 
 import os
 import csv
 import json
+import logging
 import re
 import uuid
 import base64
@@ -136,6 +140,8 @@ def _normalize_media_for_gemini(raw: bytes, mime: str):
 
 
 app = Flask(__name__, static_folder=None)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("aquaassist")
 
 REPORTS_PATH = DATA_DIR / "reports.csv"
 NOTIFY_PATH = DATA_DIR / "notifications.csv"
@@ -479,6 +485,17 @@ FAQS = [
 ]
 
 
+def _format_faqs_for_prompt():
+    lines = []
+    current_cat = None
+    for f in FAQS:
+        if f["category"] != current_cat:
+            current_cat = f["category"]
+            lines.append(f"\n[{current_cat}]")
+        lines.append(f"Q: {f['q']}\nA: {f['a']}")
+    return "\n".join(lines)
+
+
 def build_system_instruction(territory):
     territory_whatsapp = TERRITORY_WHATSAPP.get(territory, TERRITORY_WHATSAPP["Grenada"])
     return f"""
@@ -496,17 +513,34 @@ Sound like an experienced, caring NAWASA customer service representative — not
 - When a customer reports a problem, show empathy first, then guide them calmly through the next steps.
 - Keep responses concise, clear, and easy to understand.
 
+EMPATHY & FRUSTRATION:
+- If a customer sounds frustrated, upset, or describes a bad prior experience (a leak that's gone unresolved, repeated estimated bills, a missed appointment), explicitly acknowledge that frustration in your own words before moving to solutions — don't jump straight to troubleshooting as if nothing was said.
+- Apologize when it's genuinely warranted (a delay, an error on NAWASA's side) — but don't apologize reflexively for things that aren't NAWASA's fault (e.g. weather-related interruptions).
+- If a customer is clearly not being helped by the conversation, or asks for a person, offer to connect them with a representative rather than continuing to loop on the same answer.
+
+ADAPTING TO DIFFERENT CUSTOMERS:
+Recognize which kind of customer you're likely speaking with and adapt accordingly, while keeping the same warm, competent tone throughout:
+- Residential customers: everyday language, straightforward next steps, no unnecessary detail.
+- Business/commercial account holders: they may mention higher volume, larger connections, or account-management needs — be a little more precise and formal, and reference the differentiated commercial connection costs or security deposit where relevant.
+- A customer reporting an active emergency (burst main, major leak, a water-quality danger): prioritize urgency over anything else — acknowledge the seriousness immediately, advise calling (473) 440-2155 right away if it sounds dangerous, and log the report without delay rather than working through a long list of questions first.
+
+WHAT YOU DO NOT HAVE ACCESS TO:
+AquaAssist is not connected to NAWASA's billing or account systems. You do not have access to any individual customer's actual account balance, consumption figures, or meter readings, and you must never state or estimate a number for these. If a customer asks for their specific balance or reading, say plainly that you can't pull up their account directly, and explain how they can check it instead (their NAWASA bill, the office, or by phone) using the knowledge base below.
+
+OFFICIAL KNOWLEDGE BASE:
+This is the same approved information shown to customers on the FAQ tab of this app. Treat it as authoritative for these topics — prefer it over general knowledge, and never contradict it. Paraphrase naturally in your own words rather than reciting it verbatim; you don't need to mention every FAQ, just draw on whichever ones are relevant to what the customer asked.
+{_format_faqs_for_prompt()}
+
 Use the following facts to answer user questions:
 - Help customers report water leaks by collecting the location and relevant details.
-- Provide information about water supply issues and service interruptions.
-- Help customers check for planned maintenance and scheduled outages.
+- When a customer asks about outages, low water pressure, "no water", or scheduled maintenance in their area, call the check_active_outages tool with their parish (from what they've told you, or shared earlier via GPS) rather than answering from general knowledge — it returns real, currently-active notices. If you don't know their parish yet, ask for it first.
 - Explain the available methods for paying NAWASA bills.
 - Provide NAWASA customer service contact information and transfer users to a representative when requested.
 - If the issue is an emergency, advise the user to contact NAWASA immediately at (473) 440-2155.
 - NAWASA's official contact details: Phone (473) 440-2155, WhatsApp via {territory_whatsapp} (this is the number for {territory}), Website https://nawasa.gd/.
 - IMPORTANT — the phone line and WhatsApp are only staffed by a live representative during business hours (8:00 AM – 4:00 PM, Monday to Friday, Grenada time). Each customer message includes a "CURRENT BUSINESS HOURS STATUS" note telling you whether the office is open or closed right now — this note is for your awareness only, not something to report on unprompted. Do NOT mention business hours, office-closed status, or when the office reopens in a greeting, a general FAQ answer, or any reply where the customer hasn't raised the topic themselves. Only bring it up when the customer explicitly asks to speak with a representative, asks to be transferred, or asks about calling/WhatsApp-ing/contacting NAWASA directly. In that specific case: if the office is CLOSED, tell them plainly that no one will be able to answer the phone or reply on WhatsApp right now, let them know when the office reopens, and offer to log their issue (or take their message) so a representative can follow up as soon as the office is open again — don't just hand them the phone number or WhatsApp link as if someone will answer immediately. If the office is OPEN, you can direct them to call or WhatsApp normally. Logging a report (via log_water_report) works identically regardless of business hours, so don't bring up office hours just because you're about to log something.
 - NAWASA's main office is now located on Lucas Street, St. George's (it moved from its former, over 150-year-old building on the Carenage). Sub-offices are located at Seaton James Street, Grenville; Lower Depradine Street, Gouyave; and additional sub-offices in Sauteurs, St. David's, and Grand Anse.
-- When a customer describes a specific problem and gives at least a location, log it immediately using the log_water_report tool — do not tell the customer to fill out a separate form themselves.
+- When a customer describes a specific problem and gives at least a location, log it immediately using the log_water_report tool — do not tell the customer to fill out a separate form themselves. Before logging, if a key detail is genuinely ambiguous or missing (e.g. the location is too vague to act on, or the issue type isn't clear), ask one quick clarifying question rather than guessing — but don't add a confirmation round-trip for details that are already clear. Once logged, always state back the key details you captured (issue type, location, severity) alongside the reference number in the same reply, so the customer can immediately flag anything that's wrong.
 - When a customer asks to check, track, or get an update on a report — or gives you a reference number (e.g. "NW-9911D93") — call the check_report_status tool with that reference number and answer using exactly what it returns. Never guess, assume, or make up a status. If the tool reports no report was found, tell the customer that plainly and ask them to double-check the reference number. Checking a report's status works identically regardless of business hours — a closed office does not mean the status can't be looked up, so don't bring up office hours just because you're checking a report.
 - When a customer reports a visible physical issue (a leak, burst main, damaged hydrant, water quality concern, etc.), ask them to send a photo of it via the attachment (📎) button in the chat box. This helps our technicians assess severity and prepare before visiting. Ask for this naturally as part of your reply — don't make it a precondition for logging the report, and don't ask for a photo for issues that wouldn't have one (e.g. billing questions or no water supply with nothing to see).
 - If the customer attaches a photo of the issue, look at it before calling log_water_report and set severity based on what you actually see.
@@ -582,13 +616,43 @@ def _make_check_status_tool(session_id):
         row = track_report(reference)
         if row is None:
             return (f"No report was found with reference number {reference}. "
-                     "Ask the customer to double check the number, or offer to "
-                     "look it up a different way (e.g. by name/phone) if they're unsure.")
+                     "There is no lookup by name or phone number available — ask "
+                     "the customer to double check the reference number, or offer "
+                     "to log a fresh report if they can't locate it.")
         return (f"Report {row['reference']}: status is '{row['status']}', "
                 f"issue type '{row['issue_type']}', severity '{row['severity']}', "
                 f"logged on {row['timestamp']} at location: {row['location']}. "
                 f"Description: {row['description'] or 'none provided'}.")
     return check_report_status
+
+
+def _make_check_outages_tool(session_id):
+    def check_active_outages(parish: str) -> str:
+        """Looks up any currently active, staff-posted service notices (planned
+        maintenance, outages, or interruptions) for a specific parish/territory,
+        so the customer gets a real, current answer instead of a guess. Call
+        this whenever a customer asks about outages, low pressure, "no water",
+        or scheduled maintenance in their area — including when they've already
+        shared their parish via GPS location earlier in the conversation.
+
+        Args:
+            parish: The parish or territory to check, e.g. "St. George's
+                (Capital area)" or "Carriacou and Petite Martinique". Use the
+                customer's stated or shared location — do not guess one.
+
+        Returns:
+            A description of any active notices for that parish, or a message
+            confirming there are none currently posted.
+        """
+        active = get_active_outages_for_parish(parish)
+        if not active:
+            return (f"No active service notices are currently posted for {parish}. "
+                     "Tell the customer service in their area is not currently "
+                     "reported as interrupted, and that they're welcome to report "
+                     "a specific issue if they're experiencing one.")
+        lines = [f"- {o['message']} (in effect {o['start_date']} to {o['end_date']})" for o in active]
+        return f"Active service notice(s) for {parish}:\n" + "\n".join(lines)
+    return check_active_outages
 
 
 def _get_or_create_chat(session_id, territory):
@@ -599,7 +663,8 @@ def _get_or_create_chat(session_id, territory):
             config=types.GenerateContentConfig(
                 system_instruction=build_system_instruction(territory),
                 temperature=0.7,
-                tools=[_make_log_tool(session_id), _make_check_status_tool(session_id)],
+                tools=[_make_log_tool(session_id), _make_check_status_tool(session_id),
+                       _make_check_outages_tool(session_id)],
             ),
         )
         sess = {"chat": chat, "territory": territory}
@@ -704,7 +769,9 @@ def api_chat():
     try:
         response = chat.send_message(parts if len(parts) > 1 else parts[0])
     except Exception as e:
-        return jsonify({"error": f"Gemini error: {e}"}), 502
+        logger.error("Gemini chat.send_message failed for session %s: %s", session_id, e)
+        return jsonify({"error": "I'm having trouble connecting right now. Please try again in a "
+                                  "moment, or call/WhatsApp NAWASA directly if it's urgent."}), 502
 
     if not getattr(response, "candidates", None):
         has_media = any(a.get("mime", "").split("/")[0] in ("audio", "video") for a in attachments)
@@ -901,7 +968,8 @@ def api_tts():
             timeout=30,
         )
     except requests.RequestException as e:
-        return jsonify({"error": f"TTS request failed: {e}"}), 502
+        logger.error("ElevenLabs TTS request failed: %s", e)
+        return jsonify({"error": "Text-to-speech request failed."}), 502
 
     if resp.status_code != 200:
         return jsonify({"error": f"TTS generation failed ({resp.status_code})."}), 502
