@@ -8,11 +8,16 @@ reports and outages — all wrapped in NAWASA's branding.
 
 ## Architecture
 
-Three pieces, one deploy:
+Four pieces, one deploy:
 
 - **`app.py`** — Flask backend. Serves the static frontend, exposes a small
-  JSON API, holds the Gemini chat sessions, and talks to Gemini + (optionally)
-  ElevenLabs.
+  JSON API, and owns the CSV "database" (reports, outages, notify signups,
+  tips) plus the ElevenLabs TTS proxy.
+- **`agent.py`** — the AI orchestration layer. Builds and runs the AquaAssist
+  conversational agent using **LangChain + LangGraph**, with **Pinecone**
+  as the vector store behind a genuine retrieval-augmented-generation (RAG)
+  tool over the FAQ knowledge base. See "How the assistant is grounded"
+  below for the full picture.
 - **`index.html` / `app.js` / `style.css`** — a single-page frontend with no
   build step (plain `fetch` + DOM, Leaflet from a CDN for maps). One page
   serves two audiences:
@@ -33,16 +38,23 @@ without a persistent disk (e.g. Render's free tier) — every CSV resets to
 empty (tips reseed to the defaults; reports/outages/subscribers are lost).
 If this needs to survive production redeploys, attach a persistent disk at
 the `data/` path, or move to Postgres + object storage (S3/R2) for
-attachments.
+attachments. (Pinecone, by contrast, genuinely does persist across
+redeploys — see the RAG section below.)
 
-### Why is chat state in memory (`SESSIONS = {}`)?
+### Why is chat state partly in memory?
 
-Same reasoning — fine for a single-process demo, but two real
-consequences in production: a server restart wipes every in-progress
-conversation, and if the host ever runs more than one instance, a
-customer's next message could land on a different instance with no memory
-of the conversation so far. Swap for a shared store (e.g. Redis) if this
-needs to scale past a single dyno/instance.
+`app.py` keeps a small `SESSIONS` dict mapping `session_id → compiled
+LangGraph agent`, rebuilt only when a session's territory changes (the
+system prompt is territory-specific). The actual conversation history
+lives in `agent.py`'s LangGraph checkpointer (`InMemorySaver`, keyed by
+`session_id` as the LangGraph `thread_id`) — also in-process memory. Fine
+for a single-process demo, but two real consequences in production: a
+server restart wipes every in-progress conversation, and if the host ever
+runs more than one instance, a customer's next message could land on a
+different instance with no memory of the conversation so far. LangGraph
+supports swapping in a persistent checkpointer (e.g. Postgres-backed) as a
+drop-in replacement for `InMemorySaver` if this needs to scale past a
+single dyno/instance.
 
 ## Running locally
 
@@ -52,28 +64,38 @@ export GEMINI_API_KEY=your-key-here
 export STAFF_PASSCODE=change-me
 export ELEVENLABS_API_KEY=your-elevenlabs-key      # optional — enables Caribbean-accent read-aloud
 export ELEVENLABS_VOICE_ID=your-chosen-voice-id    # optional — from the ElevenLabs Voice Library
+export PINECONE_API_KEY=your-pinecone-key          # optional — enables real RAG retrieval (see below)
 python app.py
 ```
 
 Then open <http://localhost:5000>. Without `GEMINI_API_KEY` set, the app
 still runs — every other feature works, but `/api/chat` returns a clean
 503 instead of crashing. Without the ElevenLabs vars set, read-aloud
-silently falls back to the browser's built-in voice.
+silently falls back to the browser's built-in voice. Without
+`PINECONE_API_KEY` set, the knowledge-base tool still works, just via a
+static FAQ dump instead of live vector retrieval — see "How the assistant
+is grounded."
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `GEMINI_API_KEY` | for chat | Powers the AquaAssist conversation |
+| `GEMINI_API_KEY` | for chat | Powers the AquaAssist conversation (via LangChain's `ChatGoogleGenerativeAI`) and, when RAG is enabled, the embedding calls too |
 | `STAFF_PASSCODE` | recommended | Gates the Staff Portal and all write APIs |
 | `ELEVENLABS_API_KEY` / `ELEVENLABS_VOICE_ID` | optional | Caribbean-accented read-aloud |
 | `ELEVENLABS_MODEL_ID` | optional | Defaults to `eleven_multilingual_v2` |
+| `PINECONE_API_KEY` | optional | Enables live RAG retrieval over the FAQ knowledge base |
+| `PINECONE_INDEX_NAME` | optional | Defaults to `aquaassist-knowledge-base`; created automatically if it doesn't exist |
+| `PINECONE_CLOUD` / `PINECONE_REGION` | optional | Defaults to `aws` / `us-east-1` — only matters the first time the index is created |
 | `PORT` | optional | Defaults to `5000` |
+
+New Python dependencies beyond Flask/requests: `langchain`,
+`langchain-google-genai`, `langgraph`, `langchain-pinecone`, `pinecone`.
 
 ## Customer-facing features
 
-- **Chat** — Gemini-powered assistant, grounded in NAWASA's real FAQ
-  content (see "How the assistant is grounded" below), with 3 tools:
-  logging a report, checking a report's status, and checking real,
-  currently-active outage notices for a parish.
+- **Chat** — a LangGraph agent (see "How the assistant is grounded" below)
+  with 4 tools: logging a report, checking a report's status, checking
+  real currently-active outage notices for a parish, and searching the
+  official FAQ knowledge base.
 - **Attachments** — photo/video/document upload, live camera capture,
   voice notes (recorded audio, not just transcribed), and GPS location
   sharing — all sent to Gemini natively (see "Media handling" below).
@@ -112,14 +134,53 @@ From the Staff Portal, staff can:
 
 ## How the assistant is grounded
 
-The Gemini system prompt (built fresh per session in
-`build_system_instruction()`) includes the **exact same FAQ content**
-shown on the customer FAQ tab (`FAQS` in `app.py`), so the chat and the
-FAQ tab can't drift out of sync with each other. It's explicitly told to
-prefer this content over general knowledge and never contradict it, and
-to say plainly when it doesn't have access to something (e.g. a
-customer's actual account balance — AquaAssist isn't connected to
-NAWASA's billing system, so it's instructed to never invent a number).
+**Orchestration:** `agent.py` builds the conversation using
+**LangChain's `ChatGoogleGenerativeAI`** as the model and
+**`langchain.agents.create_agent`** (LangGraph under the hood) as the
+agent loop — replacing what used to be a direct, hand-rolled call to the
+raw `google-genai` SDK. Conversation memory is a LangGraph
+`InMemorySaver` checkpointer, keyed by `session_id`. `app.py` supplies 3
+domain tools (report logging, status lookup, outage lookup — each
+built as a closure capturing the current `session_id`, then wrapped with
+LangChain's `@tool(..., parse_docstring=True)` so per-argument
+descriptions carry over from the existing docstrings) and `agent.py`
+supplies a 4th: `search_knowledge_base`.
+
+**Retrieval (RAG):** `search_knowledge_base` is genuine
+retrieval-augmented generation, not a keyword match. FAQ entries
+(`FAQS` in `app.py`) are embedded once with Gemini's `gemini-embedding-2-preview`
+model (truncated to 768 dimensions — one of Google's recommended sizes,
+keeps the index small) and stored as vectors in a **Pinecone** index
+(`agent.seed_knowledge_base()`, called once at startup — idempotent, so a
+restart doesn't re-embed and re-bill the same content). At query time, the
+model calls the tool with the customer's actual question; it's embedded
+and the top-k most semantically similar FAQ chunks come back — not the
+entire FAQ list stuffed into context regardless of relevance.
+
+**Graceful degradation:** if `PINECONE_API_KEY` isn't set (or Pinecone
+setup fails for any reason), `search_knowledge_base` doesn't break — it
+falls back to returning the full static FAQ text instead of a live
+vector-search result, and everything else keeps working exactly as before.
+This mirrors the same fail-soft philosophy already used for ElevenLabs TTS
+and `ffmpeg` media normalization elsewhere in this app: an optional
+integration being unavailable should degrade gracefully, never crash the
+customer-facing experience.
+
+Beyond FAQ-type questions, the system prompt also tells the model plainly
+when it doesn't have access to something (e.g. a customer's actual account
+balance — AquaAssist isn't connected to NAWASA's billing system, so it's
+instructed to never invent a number).
+
+**⚠️ Testing note:** this sandbox's network egress doesn't reach Google's
+or Pinecone's APIs, so the LangChain/LangGraph/Pinecone integration has
+been verified structurally — every function signature, message format,
+and tool-wrapping pattern checked directly against the actually-installed
+package versions, and a real request pushed through the full Flask route
+up to (but not past) the live network call, confirming it reaches the
+correct endpoint with the correct payload. It has **not** been confirmed
+against an actual model response or a live Pinecone index. Run one real
+end-to-end chat exchange with real `GEMINI_API_KEY`/`PINECONE_API_KEY`
+values before demo day.
 
 ## Media handling for Gemini
 
@@ -147,14 +208,22 @@ some browser/format combinations.
 
 ## Known limitations / next steps
 
-- CSV storage and in-memory chat sessions don't survive a redeploy /
-  multi-instance host without extra infrastructure (see above).
+- CSV storage and in-memory LangGraph chat checkpointing don't survive a
+  redeploy / multi-instance host without extra infrastructure (see above).
+  Pinecone, notably, does **not** have this problem — it persists on its
+  own.
 - Notify subscribers are collected but never actually notified — no
   email/SMS dispatch exists yet.
 - The chatbot replies in Standard English only, even when it understands
   a customer writing in Creole/patois — a deliberate client decision, not
   a bug, but worth knowing if that requirement changes.
+- The LangChain/LangGraph/Pinecone integration has only been verified
+  structurally in this environment (no network access to Google/Pinecone
+  from here) — see the testing note above. Confirm one real chat exchange
+  end-to-end with live keys before relying on it for a demo.
 - No automated test suite — testing so far has been manual + live
   end-to-end checks against a running server (booting the app, hitting
   every endpoint with `curl`, cross-checking every HTML `id` referenced
-  by the JS actually exists in the markup).
+  by the JS actually exists in the markup, and — for the agent pipeline —
+  pushing real requests through the full Flask route up to the network
+  boundary to confirm correct wiring).
