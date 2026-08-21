@@ -1,4 +1,4 @@
 flask>=3.0
 google-genai>=0.3
 requests>=2.31.0
-pip show langchain langchain-core langchain-google-genai langgraph langchain-pinecone pinecone 2>&1 | grep -E "^Name|^Version"
+
