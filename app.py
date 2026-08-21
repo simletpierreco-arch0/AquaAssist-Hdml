@@ -1,8 +1,9 @@
 """
-AquaAssist backend — Flask API + Gemini chat, serving a static HTML/CSS/JS
-frontend (see ../frontend). This replaces the Streamlit UI: the browser is
-now a plain client that talks to this server over JSON; the server holds
-the Gemini API key, the ElevenLabs API key, the CSV "database", and the
+AquaAssist backend — Flask API + a LangChain/LangGraph conversational agent
+(see agent.py), serving a static HTML/CSS/JS frontend (see ../frontend).
+This replaces the Streamlit UI: the browser is now a plain client that
+talks to this server over JSON; the server holds the Gemini API key, the
+Pinecone API key, the ElevenLabs API key, the CSV "database", and the
 staff passcode.
 
 Run with:
@@ -11,6 +12,7 @@ Run with:
     export STAFF_PASSCODE=change-me
     export ELEVENLABS_API_KEY=your-elevenlabs-key      # optional, enables Caribbean-accent read-aloud
     export ELEVENLABS_VOICE_ID=your-chosen-voice-id    # optional, from the ElevenLabs Voice Library
+    export PINECONE_API_KEY=your-pinecone-key          # optional, enables live RAG retrieval (see agent.py)
     python app.py
 
 Then open http://localhost:5000
@@ -34,12 +36,15 @@ ELEVENLABS_VOICE_ID aren't set, /api/tts returns a 503 and the frontend
 automatically falls back to the browser's built-in voice, so the app still
 works without this configured — it just won't have the Caribbean accent.
 
-NOTE ON REPORT STATUS LOOKUPS: the Gemini chat session is given three tools —
-log_water_report (write), check_report_status (read), and
-check_active_outages (read). Previously there was only the write tool, so
-when a customer asked to check on an existing report, or whether there was
-an active outage in their area, the model had nothing to actually look up
-and would answer from guesswork alone. check_report_status calls the same
+NOTE ON THE AGENT: chat is handled by agent.py, which builds a LangGraph
+agent (via LangChain's ChatGoogleGenerativeAI + langchain.agents.create_agent)
+bound to 4 tools: log_water_report (write) and check_report_status (read)
+and check_active_outages (read), all defined here in app.py as
+session-scoped closures wrapped with @tool(parse_docstring=True); and
+search_knowledge_base (read), defined in agent.py, which does genuine
+Pinecone-backed RAG retrieval over the FAQ list — falling back to a static
+FAQ dump if PINECONE_API_KEY isn't set, so the bot never breaks because
+this integration is unavailable. check_report_status calls the same
 track_report() helper used by the /api/report/<reference> endpoint, and
 check_active_outages calls get_active_outages_for_parish(), so the model's
 answers reflect the real rows in reports.csv / outages.csv rather than a
@@ -61,8 +66,9 @@ from functools import wraps
 
 import requests
 from flask import Flask, request, jsonify, send_from_directory
-from google import genai
-from google.genai import types
+from langchain_core.tools import tool
+
+import agent
 
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
@@ -72,7 +78,6 @@ DATA_DIR.mkdir(exist_ok=True)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 STAFF_PASSCODE = os.environ.get("STAFF_PASSCODE", "changeme123")
-MODEL_NAME = "gemini-3.1-flash-lite"
 
 # ElevenLabs — used for Caribbean-accented read-aloud (see /api/tts below).
 # Both must be set for TTS to be active; otherwise the frontend silently
@@ -485,17 +490,6 @@ FAQS = [
 ]
 
 
-def _format_faqs_for_prompt():
-    lines = []
-    current_cat = None
-    for f in FAQS:
-        if f["category"] != current_cat:
-            current_cat = f["category"]
-            lines.append(f"\n[{current_cat}]")
-        lines.append(f"Q: {f['q']}\nA: {f['a']}")
-    return "\n".join(lines)
-
-
 def build_system_instruction(territory):
     territory_whatsapp = TERRITORY_WHATSAPP.get(territory, TERRITORY_WHATSAPP["Grenada"])
     return f"""
@@ -525,11 +519,10 @@ Recognize which kind of customer you're likely speaking with and adapt according
 - A customer reporting an active emergency (burst main, major leak, a water-quality danger): prioritize urgency over anything else — acknowledge the seriousness immediately, advise calling (473) 440-2155 right away if it sounds dangerous, and log the report without delay rather than working through a long list of questions first.
 
 WHAT YOU DO NOT HAVE ACCESS TO:
-AquaAssist is not connected to NAWASA's billing or account systems. You do not have access to any individual customer's actual account balance, consumption figures, or meter readings, and you must never state or estimate a number for these. If a customer asks for their specific balance or reading, say plainly that you can't pull up their account directly, and explain how they can check it instead (their NAWASA bill, the office, or by phone) using the knowledge base below.
+AquaAssist is not connected to NAWASA's billing or account systems. You do not have access to any individual customer's actual account balance, consumption figures, or meter readings, and you must never state or estimate a number for these. If a customer asks for their specific balance or reading, say plainly that you can't pull up their account directly, and explain how they can check it instead (their NAWASA bill, the office, or by phone).
 
-OFFICIAL KNOWLEDGE BASE:
-This is the same approved information shown to customers on the FAQ tab of this app. Treat it as authoritative for these topics — prefer it over general knowledge, and never contradict it. Paraphrase naturally in your own words rather than reciting it verbatim; you don't need to mention every FAQ, just draw on whichever ones are relevant to what the customer asked.
-{_format_faqs_for_prompt()}
+KNOWLEDGE BASE — use the search_knowledge_base tool, don't guess:
+NAWASA's official FAQ knowledge base (new connections, billing, disconnections, water usage & leaks, general info) is NOT pre-loaded into this prompt — it lives in a searchable knowledge base. Whenever a customer asks something that sounds like a policy, cost, process, or general-information question, call the search_knowledge_base tool with their question (or a short paraphrase of it) and answer using what it returns. Treat what it returns as authoritative — prefer it over general knowledge, and never contradict it. Paraphrase naturally in your own words rather than reciting it verbatim. If it returns no close match, say so plainly rather than guessing.
 
 Use the following facts to answer user questions:
 - Help customers report water leaks by collecting the location and relevant details.
@@ -553,9 +546,9 @@ If a question is unrelated to NAWASA services, politely explain that you can onl
 
 
 _seed_tips_if_empty()
+agent.seed_knowledge_base(FAQS)
 
-_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
-SESSIONS = {}
+SESSIONS = {}  # session_id -> {"graph": compiled LangGraph agent, "territory": str}
 LAST_REPORT = {}
 CURRENT_ATTACHMENT = {}
 
@@ -594,7 +587,7 @@ def _make_log_tool(session_id):
             "attachment_mime": att.get("mime", ""),
         }
         return f"Report logged successfully. Reference number: {row['reference']}. A technician will follow up."
-    return log_water_report
+    return tool(log_water_report, parse_docstring=True)
 
 
 def _make_check_status_tool(session_id):
@@ -623,7 +616,7 @@ def _make_check_status_tool(session_id):
                 f"issue type '{row['issue_type']}', severity '{row['severity']}', "
                 f"logged on {row['timestamp']} at location: {row['location']}. "
                 f"Description: {row['description'] or 'none provided'}.")
-    return check_report_status
+    return tool(check_report_status, parse_docstring=True)
 
 
 def _make_check_outages_tool(session_id):
@@ -652,24 +645,27 @@ def _make_check_outages_tool(session_id):
                      "a specific issue if they're experiencing one.")
         lines = [f"- {o['message']} (in effect {o['start_date']} to {o['end_date']})" for o in active]
         return f"Active service notice(s) for {parish}:\n" + "\n".join(lines)
-    return check_active_outages
+    return tool(check_active_outages, parse_docstring=True)
 
 
-def _get_or_create_chat(session_id, territory):
+def _get_or_create_agent(session_id, territory):
+    """Returns a compiled LangGraph agent for this session, rebuilding it if
+    the territory changed (the system prompt is territory-specific). Chat
+    history itself is NOT lost on rebuild — that lives in agent.py's shared
+    checkpointer, keyed by session_id (used as the LangGraph thread_id), not
+    in this per-session graph object."""
     sess = SESSIONS.get(session_id)
     if sess is None or sess["territory"] != territory:
-        chat = _client.chats.create(
-            model=MODEL_NAME,
-            config=types.GenerateContentConfig(
-                system_instruction=build_system_instruction(territory),
-                temperature=0.7,
-                tools=[_make_log_tool(session_id), _make_check_status_tool(session_id),
-                       _make_check_outages_tool(session_id)],
-            ),
-        )
-        sess = {"chat": chat, "territory": territory}
+        tools = [
+            _make_log_tool(session_id),
+            _make_check_status_tool(session_id),
+            _make_check_outages_tool(session_id),
+            agent.make_search_knowledge_base_tool(),
+        ]
+        graph = agent.build_agent(tools, build_system_instruction(territory))
+        sess = {"graph": graph, "territory": territory}
         SESSIONS[session_id] = sess
-    return sess["chat"]
+    return sess["graph"]
 
 
 def require_staff(fn):
@@ -716,8 +712,9 @@ def api_init():
         "business_hours": get_business_hours_status(),
         "nawasa_phone": NAWASA_PHONE,
         "nawasa_website": NAWASA_WEBSITE,
-        "gemini_configured": _client is not None,
+        "gemini_configured": bool(GEMINI_API_KEY),
         "tts_configured": bool(ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID),
+        "rag_configured": bool(agent.PINECONE_API_KEY),
     })
 
 
@@ -728,7 +725,7 @@ def api_business_hours():
 
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
-    if _client is None:
+    if not GEMINI_API_KEY:
         return jsonify({"error": "Server is missing GEMINI_API_KEY."}), 503
 
     body = request.get_json(force=True)
@@ -740,12 +737,12 @@ def api_chat():
     if not message and not attachments:
         return jsonify({"error": "Empty message."}), 400
 
-    chat = _get_or_create_chat(session_id, territory)
+    graph = _get_or_create_agent(session_id, territory)
     LAST_REPORT.pop(session_id, None)
 
-    parts = []
+    content_blocks = []
     if message:
-        parts.append(message)
+        content_blocks.append({"type": "text", "text": message})
 
     bh = get_business_hours_status()
     if bh["is_open"]:
@@ -753,39 +750,42 @@ def api_chat():
     else:
         bh_note = (f"CURRENT BUSINESS HOURS STATUS: Office CLOSED ({bh['closed_reason']}). "
                    f"Phone and WhatsApp will NOT be answered until the office reopens {bh['reopens_label']}.")
-    parts.append(f"[{bh_note}]")
+    content_blocks.append({"type": "text", "text": f"[{bh_note}]"})
 
     CURRENT_ATTACHMENT.pop(session_id, None)
+    has_media = False
     for att in attachments:
         try:
             raw = base64.b64decode(att["data_base64"])
         except Exception:
             continue
         mime = att.get("mime", "application/octet-stream")
+        # Keep the ORIGINAL bytes for staff viewing later (any browser can
+        # already play these back directly — no ffmpeg dependency needed
+        # just to look at what a customer sent).
         CURRENT_ATTACHMENT[session_id] = {"mime": mime, "data_base64": att["data_base64"]}
+        # Separately, normalize a COPY for what we actually send to Gemini.
         send_bytes, send_mime = _normalize_media_for_gemini(raw, mime)
-        parts.append(types.Part.from_bytes(data=send_bytes, mime_type=send_mime))
+        if send_mime.split("/")[0] in ("audio", "video"):
+            has_media = True
+        content_blocks.append({"type": "media", "mime_type": send_mime, "data": send_bytes})
 
+    # invoke_agent() raises on any failure (network, auth, malformed media,
+    # etc.) rather than returning a Gemini-SDK-specific "empty candidates"
+    # object, so all of that collapses into one try/except here.
     try:
-        response = chat.send_message(parts if len(parts) > 1 else parts[0])
+        reply_text = agent.invoke_agent(graph, session_id, content_blocks)
+        if not reply_text or not str(reply_text).strip():
+            raise ValueError("Empty reply from agent")
     except Exception as e:
-        logger.error("Gemini chat.send_message failed for session %s: %s", session_id, e)
-        return jsonify({"error": "I'm having trouble connecting right now. Please try again in a "
-                                  "moment, or call/WhatsApp NAWASA directly if it's urgent."}), 502
-
-    if not getattr(response, "candidates", None):
-        has_media = any(a.get("mime", "").split("/")[0] in ("audio", "video") for a in attachments)
+        logger.error("Agent invocation failed for session %s: %s", session_id, e)
         if has_media:
             reply_text = ("I wasn't able to process that recording — it may not have come through "
                           "correctly. Could you try sending it again, use a shorter clip, or type a "
                           "quick summary instead?")
         else:
-            reply_text = "Sorry, I wasn't able to generate a reply just now. Could you try rephrasing that?"
-    else:
-        try:
-            reply_text = response.text
-        except Exception:
-            reply_text = "Sorry, I wasn't able to generate a reply just now. Could you try again?"
+            return jsonify({"error": "I'm having trouble connecting right now. Please try again in a "
+                                      "moment, or call/WhatsApp NAWASA directly if it's urgent."}), 502
 
     result = {"session_id": session_id, "reply": reply_text}
     report_card = LAST_REPORT.pop(session_id, None)
