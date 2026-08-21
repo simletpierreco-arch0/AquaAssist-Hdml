@@ -364,6 +364,20 @@ function applyFeatureVisibility() {
   const voiceLabel = $("#voiceSelectLabel"), voiceSelectEl = $("#voiceSelect");
   [voiceLabel, voiceSelectEl].forEach((el) => { if (el) el.style.display = featureEnabled("read_aloud") ? "" : "none"; });
 
+  // Defense in depth: appendBubble()/renderFAQ() already skip creating
+  // 🔊 buttons at all when this flag is off, but if either ever rendered
+  // before flags were loaded (or a future change adds live polling while
+  // content is already on screen), sweep any that already exist too — the
+  // Read Aloud feature should mean NO read-aloud entry points anywhere,
+  // not just the Settings toggle.
+  document.querySelectorAll(".speak-btn").forEach((btn) => {
+    btn.style.display = featureEnabled("read_aloud") ? "" : "none";
+  });
+  if (!featureEnabled("read_aloud")) {
+    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  }
+
   // If a now-hidden tab was the active one, fall back to the Chat tab so
   // the customer never lands on a blank panel.
   const activeTab = $(".tab-btn.active");
@@ -529,14 +543,17 @@ function renderFAQ(query) {
       item.className = "faq-item";
       item.innerHTML = `<div class="faq-cat">${f.category}</div><b>${escapeHtml(f.q)}</b><br>${escapeHtml(f.a)}`;
       // Read-aloud button — reuses the same speakText() helper (and voice
-      // preference) already used for chat replies.
-      const speakBtn = document.createElement("button");
-      speakBtn.type = "button";
-      speakBtn.className = "speak-btn";
-      speakBtn.title = "Read this answer aloud";
-      speakBtn.textContent = "🔊";
-      speakBtn.addEventListener("click", () => speakText(`${f.q}. ${f.a}`));
-      item.appendChild(speakBtn);
+      // preference) already used for chat replies. Only shown when staff
+      // have the Read Aloud feature enabled.
+      if (featureEnabled("read_aloud")) {
+        const speakBtn = document.createElement("button");
+        speakBtn.type = "button";
+        speakBtn.className = "speak-btn";
+        speakBtn.title = "Read this answer aloud";
+        speakBtn.textContent = "🔊";
+        speakBtn.addEventListener("click", () => speakText(`${f.q}. ${f.a}`));
+        item.appendChild(speakBtn);
+      }
       list.appendChild(item);
     });
   });
@@ -591,7 +608,7 @@ function appendBubble(role, content, attachmentName, reportCard, attachmentMime,
   if (locationCard) {
     bubble.appendChild(buildLocationCardEl(locationCard));
   }
-  if (role === "assistant") {
+  if (role === "assistant" && featureEnabled("read_aloud")) {
     const speakBtn = document.createElement("button");
     speakBtn.type = "button";
     speakBtn.className = "speak-btn";
@@ -604,7 +621,7 @@ function appendBubble(role, content, attachmentName, reportCard, attachmentMime,
   row.appendChild(bubble);
   $("#chatMessages").appendChild(row);
   $("#chatMessages").scrollTop = $("#chatMessages").scrollHeight;
-  if (role === "assistant" && localStorage.getItem("aqua_read_aloud") === "1") {
+  if (role === "assistant" && featureEnabled("read_aloud") && localStorage.getItem("aqua_read_aloud") === "1") {
     speakText(content);
   }
 }
