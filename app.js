@@ -404,39 +404,27 @@ function applyFeatureVisibility() {
 // send a message, so customers aren't left typing into a dead end. The
 // backend enforces this independently too (see /api/chat in app.py) —
 // this is the UI half of that same switch, not the only thing guarding it.
+// Staff-controlled kill switch for the chatbot itself (not the whole
+// widget — Report & Track, FAQ, etc. don't depend on the AI and keep
+// working normally, since those are separate tabs entirely). When off:
+// a clean takeover screen replaces the ENTIRE Chat tab — contact cards,
+// tips, message history, input, quick actions, all of it — showing only
+// the staff-editable message, per NAWASA's ask that nothing else compete
+// with it for attention. The backend enforces this independently too
+// (see /api/chat in app.py) — this is the UI half of that same switch.
 function applyMaintenanceMode() {
   const available = featureEnabled("chatbot_available");
-  const banner = $("#maintenanceBanner");
-  if (banner) {
-    if (available) {
-      banner.style.display = "none";
-      banner.innerHTML = "";
-    } else {
+  const screen = $("#maintenanceScreen");
+  const normalContent = $("#chatNormalContent");
+  if (normalContent) normalContent.style.display = available ? "" : "none";
+  if (screen) {
+    screen.style.display = available ? "none" : "flex";
+    if (!available) {
       const msg = (state.features && state.features.maintenance_message) ||
         "AquaAssist is temporarily unavailable.";
-      banner.innerHTML = `<div class="maintenance-banner">🚧 ${escapeHtml(msg)}</div>`;
-      banner.style.display = "block";
+      const textEl = $("#maintenanceScreenText");
+      if (textEl) textEl.textContent = msg;
     }
-  }
-
-  const disableEls = [
-    $("#chatText"), $("#chatForm .send-btn"), $("#chatAttachment"),
-    $("#chatCameraBtn"), $("#chatMicBtn"), $("#chatLocationBtn"),
-  ];
-  disableEls.forEach((el) => { if (el) el.disabled = !available; });
-  const attachLabel = document.querySelector("label.attach-btn");
-  if (attachLabel) attachLabel.classList.toggle("disabled-control", !available);
-
-  const qaGrid = $("#quickActions");
-  if (qaGrid) {
-    qaGrid.querySelectorAll("button").forEach((b) => { b.disabled = !available; });
-  }
-
-  // Stale follow-up chips from before maintenance was switched on
-  // shouldn't linger as clickable dead ends.
-  if (!available) {
-    const chipRow = $("#followupChips");
-    if (chipRow) chipRow.innerHTML = "";
   }
 }
 
