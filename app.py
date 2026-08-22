@@ -191,6 +191,7 @@ DEFAULT_FEATURES = {
     "call_us": True,
     "website": True,
     "chatbot_available": True,
+    "settings": True,
 }
 
 # Shown to customers on the Chat tab (and returned directly by /api/chat,
