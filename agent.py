@@ -222,6 +222,33 @@ def build_agent(tools, system_prompt):
     )
 
 
+def _extract_reply_text(content):
+    """LangChain's AIMessage.content is typed as str | list[str | dict], and
+    for Gemini 3+ models specifically (confirmed directly against the
+    installed langchain-google-genai's _parse_response_candidate — it
+    wraps text as {"type": "text", "text": "..."} blocks in a list rather
+    than returning a plain string), it's the list form. Every caller of
+    invoke_agent() expects a plain string, so this normalizes either shape.
+    Returning the raw list/dict here instead is what previously showed up
+    to customers as the literal text "[object Object]" — the frontend
+    doing an implicit toString() on a non-string value.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text") or "")
+            # Other block types (e.g. "thinking") are intentionally
+            # skipped — only actual reply text should ever reach the
+            # customer, never an internal reasoning trace.
+        return "".join(parts)
+    return str(content) if content is not None else ""
+
+
 def invoke_agent(graph, thread_id, content_blocks):
     """Runs one turn of the agent. content_blocks is a list of LangChain
     multimodal content blocks (text / image_url / file), already built by
@@ -231,4 +258,4 @@ def invoke_agent(graph, thread_id, content_blocks):
         {"configurable": {"thread_id": thread_id}},
     )
     final_message = result["messages"][-1]
-    return final_message.content
+    return _extract_reply_text(final_message.content)
