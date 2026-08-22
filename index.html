@@ -226,47 +226,57 @@
 
           <!-- CHAT TAB -->
           <section id="tab-chat" class="tab-panel active">
-            <div id="maintenanceBanner" style="display:none;"></div>
-            <div id="hoursBanner"></div>
-            <div class="contact-row">
-              <a id="contactCallCard" class="contact-card" href="#"><span class="contact-icon">📞</span><span class="contact-label">Call Us</span><span class="contact-value">(473) 440-2155</span></a>
-              <a id="contactWhatsappCard" class="contact-card" target="_blank"><span class="contact-icon">💬</span><span class="contact-label">WhatsApp</span><span class="contact-value">Chat now</span></a>
-              <a id="contactWebsiteCard" class="contact-card" target="_blank"><span class="contact-icon">🌐</span><span class="contact-label">Website</span><span class="contact-value">nawasa.gd</span></a>
+            <!-- Shown INSTEAD of everything below when staff turn "Chatbot
+                 Available" off — a clean takeover, not a banner layered on
+                 top of a still-visible (if disabled) chat UI. -->
+            <div id="maintenanceScreen" class="maintenance-screen" style="display:none;">
+              <div class="maintenance-screen-icon">🚧</div>
+              <div class="maintenance-screen-title">AquaAssist is Currently Unavailable</div>
+              <div id="maintenanceScreenText" class="maintenance-screen-text"></div>
             </div>
 
-            <div id="outageBanners"></div>
-
-            <!-- Water Service Tip card — rotates through active tips every
-                 25s. Hidden entirely when staff disable "Water Tips". -->
-            <div id="waterTipCard" class="water-tip-card" style="display:none;">
-              <span class="water-tip-icon">💧</span>
-              <div class="water-tip-body">
-                <div class="water-tip-label">Water Service Tip</div>
-                <div id="waterTipText" class="water-tip-text"></div>
+            <div id="chatNormalContent">
+              <div id="hoursBanner"></div>
+              <div class="contact-row">
+                <a id="contactCallCard" class="contact-card" href="#"><span class="contact-icon">📞</span><span class="contact-label">Call Us</span><span class="contact-value">(473) 440-2155</span></a>
+                <a id="contactWhatsappCard" class="contact-card" target="_blank"><span class="contact-icon">💬</span><span class="contact-label">WhatsApp</span><span class="contact-value">Chat now</span></a>
+                <a id="contactWebsiteCard" class="contact-card" target="_blank"><span class="contact-icon">🌐</span><span class="contact-label">Website</span><span class="contact-value">nawasa.gd</span></a>
               </div>
+
+              <div id="outageBanners"></div>
+
+              <!-- Water Service Tip card — rotates through active tips every
+                   25s. Hidden entirely when staff disable "Water Tips". -->
+              <div id="waterTipCard" class="water-tip-card" style="display:none;">
+                <span class="water-tip-icon">💧</span>
+                <div class="water-tip-body">
+                  <div class="water-tip-label">Water Service Tip</div>
+                  <div id="waterTipText" class="water-tip-text"></div>
+                </div>
+              </div>
+
+              <div id="chatMessages" class="chat-messages"></div>
+
+              <div id="followupChips" class="chip-row"></div>
+
+              <form id="chatForm" class="chat-input-row">
+                <label class="attach-btn" title="Attach a photo, video, or file">
+                  📎
+                  <input type="file" id="chatAttachment" accept="image/*,video/*,.pdf,.doc,.docx" hidden />
+                </label>
+                <button type="button" id="chatCameraBtn" class="attach-btn" title="Take a photo">📷</button>
+                <button type="button" id="chatMicBtn" class="attach-btn" title="Record a voice note">🎤</button>
+                <button type="button" id="chatLocationBtn" class="attach-btn" title="Share my location">📍</button>
+                <input id="chatText" type="text" placeholder="Ask about your water service..." autocomplete="off" />
+                <button type="submit" class="send-btn">➤</button>
+              </form>
+              <div id="attachmentPreview" class="attachment-preview"></div>
+              <p id="micStatus" class="hint-text" style="display:none;"></p>
+
+
+              <div id="quickActionsLabel" class="section-label">💧 Quick actions</div>
+              <div id="quickActions" class="quick-actions-grid"></div>
             </div>
-
-            <div id="chatMessages" class="chat-messages"></div>
-
-            <div id="followupChips" class="chip-row"></div>
-
-            <form id="chatForm" class="chat-input-row">
-              <label class="attach-btn" title="Attach a photo, video, or file">
-                📎
-                <input type="file" id="chatAttachment" accept="image/*,video/*,.pdf,.doc,.docx" hidden />
-              </label>
-              <button type="button" id="chatCameraBtn" class="attach-btn" title="Take a photo">📷</button>
-              <button type="button" id="chatMicBtn" class="attach-btn" title="Record a voice note">🎤</button>
-              <button type="button" id="chatLocationBtn" class="attach-btn" title="Share my location">📍</button>
-              <input id="chatText" type="text" placeholder="Ask about your water service..." autocomplete="off" />
-              <button type="submit" class="send-btn">➤</button>
-            </form>
-            <div id="attachmentPreview" class="attachment-preview"></div>
-            <p id="micStatus" class="hint-text" style="display:none;"></p>
-
-
-            <div id="quickActionsLabel" class="section-label">💧 Quick actions</div>
-            <div id="quickActions" class="quick-actions-grid"></div>
           </section>
 
           <!-- REPORT & TRACK TAB -->
