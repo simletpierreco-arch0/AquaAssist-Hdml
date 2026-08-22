@@ -226,6 +226,7 @@
 
           <!-- CHAT TAB -->
           <section id="tab-chat" class="tab-panel active">
+            <div id="maintenanceBanner" style="display:none;"></div>
             <div id="hoursBanner"></div>
             <div class="contact-row">
               <a id="contactCallCard" class="contact-card" href="#"><span class="contact-icon">📞</span><span class="contact-label">Call Us</span><span class="contact-value">(473) 440-2155</span></a>
@@ -474,6 +475,14 @@
       <div class="card">
         <p class="hint-text">Toggle which features customers can see and use in AquaAssist right now.</p>
         <div id="featureToggleList" class="checkbox-group"></div>
+      </div>
+
+      <div class="section-label">🚧 Chatbot Maintenance Message</div>
+      <div class="card">
+        <p class="hint-text">Shown to customers on the Chat tab whenever "Chatbot Available" above is turned off. The rest of the app (Report &amp; Track, FAQ, etc.) keeps working normally — this only replaces the chat itself.</p>
+        <textarea id="maintenanceMessageText" rows="3" placeholder="e.g. We're sorry, AquaAssist is temporarily unavailable. Please contact NAWASA at (473) 440-2155."></textarea>
+        <button type="button" id="saveMaintenanceMessageBtn" class="btn-primary" style="margin-top:0.6rem;">Save message</button>
+        <p id="maintenanceMessageSaved" class="hint-text" style="display:none;color:#2E9E5B;">✓ Saved.</p>
       </div>
 
       <div class="section-label">🔔 Notification subscribers</div>
