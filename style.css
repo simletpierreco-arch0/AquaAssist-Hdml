@@ -213,6 +213,36 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 .location-card-link:hover { text-decoration:underline; }
 
 .chip-row { display:flex; gap:.5rem; margin: .3rem 0 .8rem; flex-wrap: wrap; }
+
+/* ---------------- Maintenance mode banner ---------------- */
+.maintenance-banner {
+  display: flex; align-items: flex-start; gap: .6rem;
+  background: linear-gradient(135deg, #D6454522, #D6454510);
+  border: 1px solid #D6454550;
+  border-left: 4px solid #D64545;
+  border-radius: 12px;
+  padding: .8rem 1rem;
+  margin-bottom: .8rem;
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+/* Chat controls dimmed (not hidden) while chatbot_available is off, so it
+   reads as "temporarily off" rather than a rendering bug. */
+.attach-btn.disabled-control,
+button:disabled.attach-btn,
+.chat-input-row button:disabled,
+.chat-input-row input:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.quick-action-btn:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
 .chip-btn {
   border-radius:999px; font-size:.78rem; padding:.35rem .8rem; background: color-mix(in srgb, var(--primary) 8%, transparent);
   border:1px solid color-mix(in srgb, var(--primary) 30%, transparent); color: var(--primary); font-weight:600;
