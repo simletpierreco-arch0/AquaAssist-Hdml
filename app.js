@@ -420,7 +420,24 @@ function applyMaintenanceMode() {
   const available = featureEnabled("chatbot_available");
   const screen = $("#maintenanceScreen");
   const normalContent = $("#chatNormalContent");
+  const tabNav = $(".tab-nav");
+
   if (normalContent) normalContent.style.display = available ? "" : "none";
+  if (tabNav) tabNav.style.display = available ? "" : "none";
+
+  if (!available) {
+    // With the tab bar hidden there's no way to navigate to another tab
+    // anyway, but force Chat to be the only "active" panel too, in case
+    // the customer was already sitting on FAQ/Report/etc. when this
+    // switched on (e.g. a page reload while maintenance was already set).
+    $$(".tab-btn").forEach((b) => b.classList.remove("active"));
+    $$(".tab-panel").forEach((p) => p.classList.remove("active"));
+    const chatTabBtn = $('.tab-btn[data-tab="chat"]');
+    const chatPanel = $("#tab-chat");
+    if (chatTabBtn) chatTabBtn.classList.add("active");
+    if (chatPanel) chatPanel.classList.add("active");
+  }
+
   if (screen) {
     screen.style.display = available ? "none" : "flex";
     if (!available) {
@@ -429,21 +446,20 @@ function applyMaintenanceMode() {
       const textEl = $("#maintenanceScreenText");
       if (textEl) textEl.textContent = msg;
 
-      // Mirrors the same URL logic renderContactRow() uses for the normal
-      // contact cards — computed directly here rather than copied from
-      // those cards' hrefs, since applyFeatureVisibility() (which calls
-      // this) runs during init(), before renderContactRow() has run.
+      // The emergency fallback for when the bot itself is down — always
+      // shown here regardless of the separate Call Us / WhatsApp toggles,
+      // which only control the normal contact row shown when the bot IS
+      // available. Turning those off elsewhere must never remove the only
+      // way to reach NAWASA while the chatbot is unavailable.
       const callBtn = $("#maintenanceCallBtn");
       if (callBtn && state.config) {
         const phoneDigits = state.config.nawasa_phone.replace(/\D/g, "");
         callBtn.href = `tel:${phoneDigits}`;
-        callBtn.style.display = featureEnabled("call_us") ? "" : "none";
       }
       const waBtn = $("#maintenanceWhatsappBtn");
       if (waBtn && state.config) {
         const wa = state.config.territory_whatsapp[state.territory] || state.config.territory_whatsapp.Grenada;
         waBtn.href = wa;
-        waBtn.style.display = featureEnabled("whatsapp") ? "" : "none";
       }
     }
   }
