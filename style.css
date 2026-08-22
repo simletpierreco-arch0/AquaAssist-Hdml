@@ -224,31 +224,47 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
   flex-direction: column;
   align-items: center;
   text-align: center;
-  gap: 1rem;
-  padding: 3.5rem 1.5rem 4rem;
-  min-height: 340px;
+  gap: 1.1rem;
+  padding: 3rem 1.5rem 3.5rem;
+  min-height: 300px;
   justify-content: center;
   animation: fadeUp .35s ease-out;
 }
-.maintenance-screen-icon {
-  width: 84px; height: 84px; border-radius: 50%;
-  background: linear-gradient(135deg, var(--primary) 0%, var(--hover) 100%);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 2.1rem;
-  box-shadow: 0 10px 28px rgba(0,90,156,.28);
-}
-.maintenance-screen-title {
-  font-size: 1.3rem;
-  font-weight: 800;
-  color: var(--text);
-  letter-spacing: -.01em;
-}
 .maintenance-screen-text {
-  font-size: .92rem;
+  font-size: .94rem;
+  font-weight: 600;
   line-height: 1.65;
-  color: color-mix(in srgb, var(--text) 75%, transparent);
+  color: var(--text);
   max-width: 380px;
   white-space: pre-wrap;
+}
+.maintenance-screen-actions {
+  display: flex;
+  gap: .7rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.maintenance-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .65rem 1.2rem;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: .88rem;
+  text-decoration: none;
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(0,90,156,.22);
+  transition: background .15s ease, transform .12s ease;
+}
+.maintenance-action-btn:hover { background: var(--hover); transform: translateY(-1px); }
+.maintenance-hours-note {
+  font-size: .76rem;
+  color: color-mix(in srgb, var(--text) 60%, transparent);
+  max-width: 340px;
+  line-height: 1.5;
+  margin: 0;
 }
 .chip-btn {
   border-radius:999px; font-size:.78rem; padding:.35rem .8rem; background: color-mix(in srgb, var(--primary) 8%, transparent);
