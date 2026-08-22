@@ -289,6 +289,7 @@ const FEATURE_DEFS = [
   { id: "call_us", label: "Call Us" },
   { id: "website", label: "Website" },
   { id: "chatbot_available", label: "Chatbot Available" },
+  { id: "settings", label: "Settings Tab" },
 ];
 
 async function loadFeatureFlags() {
@@ -320,6 +321,9 @@ function applyFeatureVisibility() {
 
   const notifyTab = $('.tab-btn[data-tab="notify"]');
   if (notifyTab) notifyTab.style.display = featureEnabled("notify") ? "" : "none";
+
+  const settingsTab = $('.tab-btn[data-tab="settings"]');
+  if (settingsTab) settingsTab.style.display = featureEnabled("settings") ? "" : "none";
 
   // Camera buttons (live photo/video capture) — only shown when both the
   // staff toggle is on AND the device actually supports getUserMedia.
@@ -424,6 +428,23 @@ function applyMaintenanceMode() {
         "AquaAssist is temporarily unavailable.";
       const textEl = $("#maintenanceScreenText");
       if (textEl) textEl.textContent = msg;
+
+      // Mirrors the same URL logic renderContactRow() uses for the normal
+      // contact cards — computed directly here rather than copied from
+      // those cards' hrefs, since applyFeatureVisibility() (which calls
+      // this) runs during init(), before renderContactRow() has run.
+      const callBtn = $("#maintenanceCallBtn");
+      if (callBtn && state.config) {
+        const phoneDigits = state.config.nawasa_phone.replace(/\D/g, "");
+        callBtn.href = `tel:${phoneDigits}`;
+        callBtn.style.display = featureEnabled("call_us") ? "" : "none";
+      }
+      const waBtn = $("#maintenanceWhatsappBtn");
+      if (waBtn && state.config) {
+        const wa = state.config.territory_whatsapp[state.territory] || state.config.territory_whatsapp.Grenada;
+        waBtn.href = wa;
+        waBtn.style.display = featureEnabled("whatsapp") ? "" : "none";
+      }
     }
   }
 }
@@ -1537,6 +1558,7 @@ function setupSettings() {
     state.territory = territorySelect.value;
     localStorage.setItem("aqua_territory", state.territory);
     renderContactRow();
+    applyMaintenanceMode();
   });
 
   $("#newChatBtn").addEventListener("click", () => {
