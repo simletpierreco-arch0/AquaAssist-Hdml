@@ -188,7 +188,20 @@ DEFAULT_FEATURES = {
     "high_contrast": True,
     "large_text": True,
     "read_aloud": True,
+    "call_us": True,
+    "website": True,
+    "chatbot_available": True,
 }
+
+# Shown to customers on the Chat tab (and returned directly by /api/chat,
+# without ever calling the agent) whenever staff turn "Chatbot Available"
+# off. Staff can edit the text itself from the Staff Portal; this is just
+# the starting default.
+DEFAULT_MAINTENANCE_MESSAGE = (
+    "We're sorry — AquaAssist is temporarily unavailable. Please contact "
+    "NAWASA directly at (473) 440-2155 or via WhatsApp, and we'll be back "
+    "online as soon as possible."
+)
 STATUS_STAGES = ["Received", "Assigned", "Crew Dispatched", "In Progress", "Resolved"]
 SEVERITY_LEVELS = ["Unknown", "Low", "Medium", "High"]
 ISSUE_TYPES = ["Leak", "No water supply", "Low pressure", "Billing issue",
@@ -368,6 +381,9 @@ def load_features():
             saved = {}
     merged = dict(DEFAULT_FEATURES)
     merged.update({k: bool(v) for k, v in saved.items() if k in DEFAULT_FEATURES})
+    # maintenance_message is free text, not a boolean toggle, so it's kept
+    # and merged separately from the DEFAULT_FEATURES flags above.
+    merged["maintenance_message"] = saved.get("maintenance_message") or DEFAULT_MAINTENANCE_MESSAGE
     return merged
 
 
@@ -376,6 +392,9 @@ def save_features(updates):
     for k, v in (updates or {}).items():
         if k in DEFAULT_FEATURES:
             current[k] = bool(v)
+        elif k == "maintenance_message":
+            text = (v or "").strip()
+            current["maintenance_message"] = text or DEFAULT_MAINTENANCE_MESSAGE
     FEATURES_PATH.write_text(json.dumps(current), encoding="utf-8")
     return current
 
@@ -725,11 +744,25 @@ def api_business_hours():
 
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
+    body = request.get_json(force=True)
+    session_id = body.get("session_id") or str(uuid.uuid4())
+
+    # Staff-controlled kill switch — checked first, before even the API-key
+    # check below, so staff can always put up a graceful message regardless
+    # of backend configuration issues. Also means this works even if a
+    # request reaches this endpoint directly (bypassing the frontend's own
+    # disabled input/buttons) and never burns a Gemini call while the bot
+    # is deliberately turned off.
+    features = load_features()
+    if not features.get("chatbot_available", True):
+        return jsonify({
+            "session_id": session_id,
+            "reply": features.get("maintenance_message", DEFAULT_MAINTENANCE_MESSAGE),
+        })
+
     if not GEMINI_API_KEY:
         return jsonify({"error": "Server is missing GEMINI_API_KEY."}), 503
 
-    body = request.get_json(force=True)
-    session_id = body.get("session_id") or str(uuid.uuid4())
     territory = body.get("territory", "Grenada")
     message = (body.get("message") or "").strip()
     attachments = body.get("attachments") or []
