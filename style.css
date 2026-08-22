@@ -214,34 +214,41 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 
 .chip-row { display:flex; gap:.5rem; margin: .3rem 0 .8rem; flex-wrap: wrap; }
 
-/* ---------------- Maintenance mode banner ---------------- */
-.maintenance-banner {
-  display: flex; align-items: flex-start; gap: .6rem;
-  background: linear-gradient(135deg, #D6454522, #D6454510);
-  border: 1px solid #D6454550;
-  border-left: 4px solid #D64545;
-  border-radius: 12px;
-  padding: .8rem 1rem;
-  margin-bottom: .8rem;
-  font-size: .88rem;
-  font-weight: 600;
+/* ---------------- Maintenance mode — full takeover screen ----------------
+   Replaces the ENTIRE Chat tab (contact cards, tips, history, input,
+   quick actions — all of it) with just this, per the requirement that
+   nothing else compete with the message for attention while the bot is
+   off. Toggled alongside #chatNormalContent in applyMaintenanceMode(). */
+.maintenance-screen {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 1rem;
+  padding: 3.5rem 1.5rem 4rem;
+  min-height: 340px;
+  justify-content: center;
+  animation: fadeUp .35s ease-out;
+}
+.maintenance-screen-icon {
+  width: 84px; height: 84px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--hover) 100%);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 2.1rem;
+  box-shadow: 0 10px 28px rgba(0,90,156,.28);
+}
+.maintenance-screen-title {
+  font-size: 1.3rem;
+  font-weight: 800;
   color: var(--text);
-  line-height: 1.5;
+  letter-spacing: -.01em;
 }
-
-/* Chat controls dimmed (not hidden) while chatbot_available is off, so it
-   reads as "temporarily off" rather than a rendering bug. */
-.attach-btn.disabled-control,
-button:disabled.attach-btn,
-.chat-input-row button:disabled,
-.chat-input-row input:disabled {
-  opacity: .4;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-.quick-action-btn:disabled {
-  opacity: .4;
-  cursor: not-allowed;
+.maintenance-screen-text {
+  font-size: .92rem;
+  line-height: 1.65;
+  color: color-mix(in srgb, var(--text) 75%, transparent);
+  max-width: 380px;
+  white-space: pre-wrap;
 }
 .chip-btn {
   border-radius:999px; font-size:.78rem; padding:.35rem .8rem; background: color-mix(in srgb, var(--primary) 8%, transparent);
