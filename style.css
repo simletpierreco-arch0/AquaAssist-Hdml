@@ -472,6 +472,43 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 .camera-mode-btn.active { background: var(--primary); color:#fff; }
 #cameraPreviewVideo { width:100%; border-radius:14px; max-height:60vh; }
 
+/* ---------------- Attachment viewer modal (Staff Portal) ----------------
+   Reuses the .camera-modal backdrop/shell for visual consistency, but
+   wider and taller since it needs to comfortably fit a full-size image,
+   a video player, or an audio player — not a small camera preview. */
+.attachment-viewer-inner {
+  max-width: 640px;
+  width: 92vw;
+}
+.attachment-viewer-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+}
+.attachment-viewer-media {
+  width: 100%;
+  max-height: 75vh;
+  border-radius: 12px;
+  display: block;
+  background: #000;
+  object-fit: contain;
+}
+/* The report-thumb <img> used to be wrapped in an <a>; it's now wrapped in
+   a <button> instead (so clicking it opens the in-page viewer rather than
+   trying to navigate to a data: URI, which browsers silently block) — this
+   strips the default button chrome so it still just looks like a thumbnail. */
+.attachment-cell-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.attachment-cell-btn.attachment-link { padding: 0; }
+
 @media (max-width: 480px) {
   .quick-actions-grid { grid-template-columns: 1fr; }
   .form-row-2 { grid-template-columns: 1fr; }
