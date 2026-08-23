@@ -71,7 +71,12 @@ from langchain_core.tools import tool
 import agent
 
 BASE_DIR = Path(__file__).parent
-DATA_DIR = BASE_DIR / "data"
+# Configurable so a persistent disk (if you attach one on a paid Render
+# plan) can be mounted anywhere and pointed at without touching code —
+# set DATA_DIR to that mount path as an env var. Left unset, behavior is
+# identical to before: a "data" folder next to app.py (ephemeral on
+# Render's Free tier — wiped on every redeploy).
+DATA_DIR = Path(os.environ.get("DATA_DIR", str(BASE_DIR / "data")))
 FRONTEND_DIR = BASE_DIR
 
 DATA_DIR.mkdir(exist_ok=True)
