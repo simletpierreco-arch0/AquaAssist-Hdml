@@ -1590,6 +1590,8 @@ function setupSettings() {
 // Staff portal
 // ---------------------------------------------------------------------
 function setupStaffPortal() {
+  setupAttachmentViewer();
+
   $("#staffLoginBtn").addEventListener("click", async () => {
     const passcode = $("#staffPasscodeInput").value;
     const res = await fetch(`${API}/api/staff/login`, {
@@ -1809,33 +1811,79 @@ function renderReportsTable(reports) {
   const cols = ["reference", "timestamp", "name", "phone", "location", "issue_type", "severity", "status", "attachment"];
   thead.innerHTML = `<tr>${cols.map((c) => `<th>${c}</th>`).join("")}</tr>`;
   tbody.innerHTML = "";
+  // Keyed by reference so the attachment viewer can look up the right
+  // mime/data when a row's button is clicked, without embedding large
+  // base64 blobs directly in inline onclick attributes.
+  staffReportsCache = {};
   reports.slice().reverse().forEach((r) => {
+    staffReportsCache[r.reference] = r;
     const tr = document.createElement("tr");
     tr.innerHTML = cols.map((c) => {
-      if (c === "attachment") return `<td>${buildAttachmentCell(r.attachment_mime, r.attachment_data)}</td>`;
+      if (c === "attachment") return `<td>${buildAttachmentCell(r)}</td>`;
       return `<td>${escapeHtml(String(r[c] ?? ""))}</td>`;
     }).join("");
     tbody.appendChild(tr);
   });
 }
 
-// Builds the "attachment" cell for a staff report row directly from the
-// inline base64 stored on the report — no separate file/URL to fetch, so
-// this works the same whether the report was created 5 seconds ago or
-// survives a redeploy.
-function buildAttachmentCell(mime, dataB64) {
+let staffReportsCache = {};
+
+// Builds the "attachment" cell for a staff report row. Opens the in-page
+// viewer modal instead of navigating to a data: URI directly — modern
+// browsers (Chrome in particular) block or silently no-op top-level
+// navigation to data: URIs triggered by target="_blank" link clicks, which
+// is exactly what used to happen here: clicking "Play audio" opened a
+// blank tab and nothing played. Rendering the media inline in a modal
+// sidesteps that entirely, and doubles as making it bigger/easier to view.
+function buildAttachmentCell(r) {
+  const mime = r.attachment_mime, dataB64 = r.attachment_data;
   if (!mime || !dataB64) return `<span class="hint-text">—</span>`;
-  const dataUrl = `data:${mime};base64,${dataB64}`;
+  const ref = escapeHtml(r.reference);
   if (mime.startsWith("image/")) {
-    return `<a href="${dataUrl}" target="_blank" rel="noopener"><img src="${dataUrl}" class="report-thumb" alt="attachment" /></a>`;
+    return `<button type="button" class="attachment-cell-btn" data-ref="${ref}" title="View full size"><img src="data:${mime};base64,${dataB64}" class="report-thumb" alt="attachment" /></button>`;
   }
-  if (mime.startsWith("video/")) {
-    return `<a href="${dataUrl}" target="_blank" rel="noopener" class="attachment-link">🎥 View video</a>`;
+  const label = mime.startsWith("video/") ? "🎥 View video" : mime.startsWith("audio/") ? "🎤 Play audio" : "📎 View file";
+  return `<button type="button" class="attachment-cell-btn attachment-link" data-ref="${ref}">${label}</button>`;
+}
+
+function openAttachmentViewer(mime, dataB64, refLabel) {
+  const dataUrl = `data:${mime};base64,${dataB64}`;
+  const body = $("#attachmentViewerBody");
+  $("#attachmentViewerTitle").textContent = refLabel ? `Attachment — ${refLabel}` : "Attachment";
+  if (mime.startsWith("image/")) {
+    body.innerHTML = `<img src="${dataUrl}" class="attachment-viewer-media" alt="attachment" />`;
+  } else if (mime.startsWith("video/")) {
+    body.innerHTML = `<video src="${dataUrl}" class="attachment-viewer-media" controls autoplay></video>`;
+  } else if (mime.startsWith("audio/")) {
+    body.innerHTML = `<audio src="${dataUrl}" controls autoplay style="width:100%;"></audio>`;
+  } else {
+    body.innerHTML = `<div style="text-align:center;"><p class="hint-text">This file type can't be previewed here.</p><a href="${dataUrl}" download class="btn-primary" style="display:inline-block;margin-top:.6rem;">⬇ Download file</a></div>`;
   }
-  if (mime.startsWith("audio/")) {
-    return `<a href="${dataUrl}" target="_blank" rel="noopener" class="attachment-link">🎤 Play audio</a>`;
-  }
-  return `<a href="${dataUrl}" target="_blank" rel="noopener" class="attachment-link">📎 View file</a>`;
+  $("#attachmentViewerModal").style.display = "flex";
+}
+
+function closeAttachmentViewer() {
+  // Clearing the body stops any playing audio/video immediately, rather
+  // than letting it keep playing in the background after the modal closes.
+  $("#attachmentViewerBody").innerHTML = "";
+  $("#attachmentViewerModal").style.display = "none";
+}
+
+function setupAttachmentViewer() {
+  $("#attachmentViewerCloseBtn").addEventListener("click", closeAttachmentViewer);
+  $("#attachmentViewerModal").addEventListener("click", (e) => {
+    if (e.target.id === "attachmentViewerModal") closeAttachmentViewer();
+  });
+  // Delegated listener — the table body is rebuilt on every reports
+  // refresh, so binding once on the (stable) table element covers every
+  // row's attachment button, past and future, without re-attaching.
+  $("#reportsTable").addEventListener("click", (e) => {
+    const btn = e.target.closest(".attachment-cell-btn");
+    if (!btn) return;
+    const report = staffReportsCache[btn.dataset.ref];
+    if (!report || !report.attachment_mime || !report.attachment_data) return;
+    openAttachmentViewer(report.attachment_mime, report.attachment_data, report.reference);
+  });
 }
 
 function renderStaffMap(reports) {
