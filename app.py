@@ -1,10 +1,12 @@
 """
 AquaAssist backend — Flask API + a LangChain/LangGraph conversational agent
 (see agent.py), serving a static HTML/CSS/JS frontend (see ../frontend).
-This replaces the Streamlit UI: the browser is now a plain client that
-talks to this server over JSON; the server holds the Gemini API key, the
-Pinecone API key, the ElevenLabs API key, the CSV "database", and the
-staff passcode.
+
+STORAGE: report/notification/outage/tip/feature data now lives in db.py,
+backed by SQLite by default or Postgres if DATABASE_URL is set — see the
+docstring at the top of db.py for the full explanation. Everything else in
+this file (routes, business logic, the agent wiring) is unchanged from
+before.
 
 Run with:
     pip install -r requirements.txt
@@ -13,28 +15,17 @@ Run with:
     export ELEVENLABS_API_KEY=your-elevenlabs-key      # optional, enables Caribbean-accent read-aloud
     export ELEVENLABS_VOICE_ID=your-chosen-voice-id    # optional, from the ElevenLabs Voice Library
     export PINECONE_API_KEY=your-pinecone-key          # optional, enables live RAG retrieval (see agent.py)
+    export DATABASE_URL=your-postgres-url              # RECOMMENDED for production — see db.py
     python app.py
 
 Then open http://localhost:5000
 
 NOTE ON ATTACHMENTS: report attachments (photos/videos/voice notes) are
-stored inline in reports.csv as base64, not as separate files on disk. This
-is deliberate — on a host like Render without a persistent disk attached,
-anything written to a local "attachments/" folder disappears on the next
-deploy or restart, silently breaking every old link. Storing the bytes in
-the same CSV row means attachments survive exactly as long as the report
-data does, with nothing extra to configure. The trade-off: reports.csv
-grows faster (base64 is ~33% larger than the raw file) and this won't
-scale gracefully to a high volume of large video reports — if that
+stored inline (base64) in the reports table, not as separate files on
+disk — same reasoning as before: a host without a persistent disk would
+otherwise lose them on every restart. The trade-off is unchanged: this
+won't scale gracefully to a high volume of large video reports — if that
 happens, move to a real database + object storage (e.g. Postgres + S3/R2).
-
-NOTE ON TEXT-TO-SPEECH: read-aloud in the frontend now calls /api/tts,
-which proxies to ElevenLabs so the assistant can speak with an actual
-Caribbean-accented voice (browsers essentially never ship a real Caribbean
-voice for the native Web Speech API). If ELEVENLABS_API_KEY /
-ELEVENLABS_VOICE_ID aren't set, /api/tts returns a 503 and the frontend
-automatically falls back to the browser's built-in voice, so the app still
-works without this configured — it just won't have the Caribbean accent.
 
 NOTE ON THE AGENT: chat is handled by agent.py, which builds a LangGraph
 agent (via LangChain's ChatGoogleGenerativeAI + langchain.agents.create_agent)
@@ -47,13 +38,10 @@ FAQ dump if PINECONE_API_KEY isn't set, so the bot never breaks because
 this integration is unavailable. check_report_status calls the same
 track_report() helper used by the /api/report/<reference> endpoint, and
 check_active_outages calls get_active_outages_for_parish(), so the model's
-answers reflect the real rows in reports.csv / outages.csv rather than a
-guess.
+answers reflect the real rows in the database rather than a guess.
 """
 
 import os
-import csv
-import json
 import logging
 import re
 import uuid
@@ -69,17 +57,17 @@ from flask import Flask, request, jsonify, send_from_directory
 from langchain_core.tools import tool
 
 import agent
+import db
+from db import (
+    save_report, load_reports, update_report_status, track_report, delete_report,
+    save_notification_signup, load_notifications,
+    save_outage, load_outages, delete_outage, get_active_outages_for_parish,
+    load_tips, save_tip, update_tip, delete_tip,
+    load_features, save_features,
+)
 
 BASE_DIR = Path(__file__).parent
-# Configurable so a persistent disk (if you attach one on a paid Render
-# plan) can be mounted anywhere and pointed at without touching code —
-# set DATA_DIR to that mount path as an env var. Left unset, behavior is
-# identical to before: a "data" folder next to app.py (ephemeral on
-# Render's Free tier — wiped on every redeploy).
-DATA_DIR = Path(os.environ.get("DATA_DIR", str(BASE_DIR / "data")))
 FRONTEND_DIR = BASE_DIR
-
-DATA_DIR.mkdir(exist_ok=True)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 STAFF_PASSCODE = os.environ.get("STAFF_PASSCODE", "changeme123")
@@ -153,265 +141,10 @@ app = Flask(__name__, static_folder=None)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("aquaassist")
 
-REPORTS_PATH = DATA_DIR / "reports.csv"
-NOTIFY_PATH = DATA_DIR / "notifications.csv"
-OUTAGES_PATH = DATA_DIR / "outages.csv"
-TIPS_PATH = DATA_DIR / "tips.csv"
-FEATURES_PATH = DATA_DIR / "features.json"
-
-REPORTS_FIELDS = ["reference", "timestamp", "name", "phone", "location", "issue_type",
-                   "description", "attachment_mime", "attachment_data", "status", "severity"]
-NOTIFY_FIELDS = ["timestamp", "contact", "categories"]
-OUTAGE_FIELDS = ["id", "parish", "message", "start_date", "end_date", "created_at"]
-TIP_FIELDS = ["id", "text", "enabled", "created_at"]
-
-# Default Water Service Tips — seeded into tips.csv the first time it's
-# read, so the demo/competition build always has a rotation ready to show
-# without staff needing to add tips manually first.
-DEFAULT_TIPS = [
-    "Check for hidden leaks: turn off every tap in your home, then watch your meter dial. If it's still moving, water is escaping somewhere.",
-    "Conserve water during dry months by fixing dripping taps promptly — a single slow drip can waste over 15 gallons a day.",
-    "Protect your water storage tank by keeping the lid securely closed to prevent debris, insects, and contamination.",
-    "During a scheduled interruption, store enough water for drinking, cooking, and sanitation, and avoid running your pump dry.",
-    "Spot a leak on the street, a burst main, or a damaged hydrant? Report it to NAWASA right away via AquaAssist or call (473) 440-2155.",
-    "Regularly check your faucets and toilets for silent leaks — a toilet that keeps running after flushing can waste hundreds of gallons a month.",
-]
-
-# Feature flags customers see in the AquaAssist widget. Staff can flip any
-# of these off from the Staff Portal, and the change takes effect for
-# customers immediately (the widget re-checks /api/features on load).
-DEFAULT_FEATURES = {
-    "faqs": True,
-    "water_tips": True,
-    "report_issue": True,
-    "whatsapp": True,
-    "voice_notes": True,
-    "notify": True,
-    "camera": True,
-    "quick_actions": True,
-    "dark_mode": True,
-    "high_contrast": True,
-    "large_text": True,
-    "read_aloud": True,
-    "call_us": True,
-    "website": True,
-    "chatbot_available": True,
-    "settings": True,
-}
-
-# Shown to customers on the Chat tab (and returned directly by /api/chat,
-# without ever calling the agent) whenever staff turn "Chatbot Available"
-# off. Staff can edit the text itself from the Staff Portal; this is just
-# the starting default.
-DEFAULT_MAINTENANCE_MESSAGE = (
-    "We're sorry — AquaAssist is temporarily unavailable. Please contact "
-    "NAWASA directly at (473) 440-2155 or via WhatsApp, and we'll be back "
-    "online as soon as possible."
-)
 STATUS_STAGES = ["Received", "Assigned", "Crew Dispatched", "In Progress", "Resolved"]
 SEVERITY_LEVELS = ["Unknown", "Low", "Medium", "High"]
 ISSUE_TYPES = ["Leak", "No water supply", "Low pressure", "Billing issue",
                "Burst main", "Damaged hydrant", "Water quality concern", "Other"]
-
-
-def _ensure_csv(path, fields):
-    if not path.exists():
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            csv.DictWriter(f, fieldnames=fields).writeheader()
-
-
-def _read_csv(path, fields):
-    _ensure_csv(path, fields)
-    with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
-
-
-def _write_csv(path, fields, rows):
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fields)
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-def new_reference():
-    return "NW-" + uuid.uuid4().hex[:7].upper()
-
-
-def save_report(name, phone, location, issue_type, description,
-                 attachment_mime="", attachment_data="", severity="Unknown"):
-    _ensure_csv(REPORTS_PATH, REPORTS_FIELDS)
-    reference = new_reference()
-    row = {
-        "reference": reference,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "name": name or "Not provided", "phone": phone or "Not provided", "location": location,
-        "issue_type": issue_type, "description": description,
-        "attachment_mime": attachment_mime or "", "attachment_data": attachment_data or "",
-        "status": "Received", "severity": severity or "Unknown",
-    }
-    with open(REPORTS_PATH, "a", newline="", encoding="utf-8") as f:
-        csv.DictWriter(f, fieldnames=REPORTS_FIELDS).writerow(row)
-    return row
-
-
-def load_reports():
-    return _read_csv(REPORTS_PATH, REPORTS_FIELDS)
-
-
-def update_report_status(reference, new_status):
-    rows = load_reports()
-    found = False
-    for r in rows:
-        if r["reference"] == reference:
-            r["status"] = new_status
-            found = True
-    if found:
-        _write_csv(REPORTS_PATH, REPORTS_FIELDS, rows)
-    return found
-
-
-def track_report(reference):
-    for r in load_reports():
-        if r["reference"].upper() == reference.strip().upper():
-            return r
-    return None
-
-
-def delete_report(reference):
-    rows = load_reports()
-    remaining = [r for r in rows if r["reference"].upper() != reference.strip().upper()]
-    if len(remaining) == len(rows):
-        return False
-    _write_csv(REPORTS_PATH, REPORTS_FIELDS, remaining)
-    return True
-
-
-def save_notification_signup(contact, categories):
-    _ensure_csv(NOTIFY_PATH, NOTIFY_FIELDS)
-    with open(NOTIFY_PATH, "a", newline="", encoding="utf-8") as f:
-        csv.DictWriter(f, fieldnames=NOTIFY_FIELDS).writerow({
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "contact": contact, "categories": ", ".join(categories),
-        })
-
-
-def load_notifications():
-    return _read_csv(NOTIFY_PATH, NOTIFY_FIELDS)
-
-
-def save_outage(parish, message, start_date, end_date):
-    _ensure_csv(OUTAGES_PATH, OUTAGE_FIELDS)
-    outage_id = uuid.uuid4().hex[:8]
-    row = {"id": outage_id, "parish": parish, "message": message,
-           "start_date": start_date, "end_date": end_date,
-           "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-    with open(OUTAGES_PATH, "a", newline="", encoding="utf-8") as f:
-        csv.DictWriter(f, fieldnames=OUTAGE_FIELDS).writerow(row)
-    return row
-
-
-def load_outages():
-    return _read_csv(OUTAGES_PATH, OUTAGE_FIELDS)
-
-
-def delete_outage(outage_id):
-    rows = [r for r in load_outages() if r["id"] != outage_id]
-    _write_csv(OUTAGES_PATH, OUTAGE_FIELDS, rows)
-
-
-def get_active_outages_for_parish(parish):
-    today = datetime.now().strftime("%Y-%m-%d")
-    return [r for r in load_outages()
-            if r["parish"] == parish and r["start_date"] <= today <= r["end_date"]]
-
-
-# ---------------------------------------------------------------------------
-# Water Service Tips — CRUD over tips.csv. Seeded once at startup with
-# DEFAULT_TIPS so the customer rotation always has content on a fresh
-# deploy; after that, an empty tips.csv (e.g. staff deleted everything) is
-# left empty rather than being silently reseeded.
-# ---------------------------------------------------------------------------
-def _seed_tips_if_empty():
-    _ensure_csv(TIPS_PATH, TIP_FIELDS)
-    if _read_csv(TIPS_PATH, TIP_FIELDS):
-        return
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    seeded = [{"id": uuid.uuid4().hex[:8], "text": t, "enabled": "1", "created_at": now}
-              for t in DEFAULT_TIPS]
-    _write_csv(TIPS_PATH, TIP_FIELDS, seeded)
-
-
-def _tip_out(row):
-    return {"id": row["id"], "text": row["text"], "enabled": row.get("enabled") == "1",
-            "created_at": row.get("created_at", "")}
-
-
-def load_tips():
-    return [_tip_out(r) for r in _read_csv(TIPS_PATH, TIP_FIELDS)]
-
-
-def save_tip(text):
-    row = {"id": uuid.uuid4().hex[:8], "text": text, "enabled": "1",
-           "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-    with open(TIPS_PATH, "a", newline="", encoding="utf-8") as f:
-        csv.DictWriter(f, fieldnames=TIP_FIELDS).writerow(row)
-    return _tip_out(row)
-
-
-def update_tip(tip_id, text=None, enabled=None):
-    rows = _read_csv(TIPS_PATH, TIP_FIELDS)
-    found = None
-    for r in rows:
-        if r["id"] == tip_id:
-            if text is not None:
-                r["text"] = text
-            if enabled is not None:
-                r["enabled"] = "1" if enabled else "0"
-            found = r
-    if found is None:
-        return None
-    _write_csv(TIPS_PATH, TIP_FIELDS, rows)
-    return _tip_out(found)
-
-
-def delete_tip(tip_id):
-    rows = _read_csv(TIPS_PATH, TIP_FIELDS)
-    remaining = [r for r in rows if r["id"] != tip_id]
-    _write_csv(TIPS_PATH, TIP_FIELDS, remaining)
-    return len(remaining) != len(rows)
-
-
-# ---------------------------------------------------------------------------
-# Feature flags — staff-controlled on/off switches for customer-facing
-# features (FAQs, Water Tips, Report an Issue, WhatsApp, Voice Notes).
-# Stored as a small JSON file rather than a CSV since it's a single
-# object, not a list of rows.
-# ---------------------------------------------------------------------------
-def load_features():
-    saved = {}
-    if FEATURES_PATH.exists():
-        try:
-            saved = json.loads(FEATURES_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            saved = {}
-    merged = dict(DEFAULT_FEATURES)
-    merged.update({k: bool(v) for k, v in saved.items() if k in DEFAULT_FEATURES})
-    # maintenance_message is free text, not a boolean toggle, so it's kept
-    # and merged separately from the DEFAULT_FEATURES flags above.
-    merged["maintenance_message"] = saved.get("maintenance_message") or DEFAULT_MAINTENANCE_MESSAGE
-    return merged
-
-
-def save_features(updates):
-    current = load_features()
-    for k, v in (updates or {}).items():
-        if k in DEFAULT_FEATURES:
-            current[k] = bool(v)
-        elif k == "maintenance_message":
-            text = (v or "").strip()
-            current["maintenance_message"] = text or DEFAULT_MAINTENANCE_MESSAGE
-    FEATURES_PATH.write_text(json.dumps(current), encoding="utf-8")
-    return current
 
 
 def parse_report_coords(location_text):
@@ -579,7 +312,9 @@ If a question is unrelated to NAWASA services, politely explain that you can onl
 """
 
 
-_seed_tips_if_empty()
+# Initialize the database (creates tables + seeds default tips/features on
+# first run — safe to call every time the app starts).
+db.init_db()
 agent.seed_knowledge_base(FAQS)
 
 SESSIONS = {}  # session_id -> {"graph": compiled LangGraph agent, "territory": str}
@@ -772,7 +507,7 @@ def api_chat():
     if not features.get("chatbot_available", True):
         return jsonify({
             "session_id": session_id,
-            "reply": features.get("maintenance_message", DEFAULT_MAINTENANCE_MESSAGE),
+            "reply": features.get("maintenance_message", db.DEFAULT_MAINTENANCE_MESSAGE),
         })
 
     if not GEMINI_API_KEY:
