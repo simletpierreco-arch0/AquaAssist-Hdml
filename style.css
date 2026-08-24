@@ -509,6 +509,19 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 }
 .attachment-cell-btn.attachment-link { padding: 0; }
 
+.delete-report-btn {
+  background: none;
+  border: 1px solid #D6454540;
+  border-radius: 8px;
+  padding: .3rem .5rem;
+  cursor: pointer;
+  font-size: .9rem;
+  line-height: 1;
+  transition: background .15s ease;
+}
+.delete-report-btn:hover { background: #D6454518; }
+.delete-report-btn:disabled { opacity: .4; cursor: not-allowed; }
+
 @media (max-width: 480px) {
   .quick-actions-grid { grid-template-columns: 1fr; }
   .form-row-2 { grid-template-columns: 1fr; }
