@@ -277,6 +277,15 @@ def track_report(reference):
     return None
 
 
+def delete_report(reference):
+    rows = load_reports()
+    remaining = [r for r in rows if r["reference"].upper() != reference.strip().upper()]
+    if len(remaining) == len(rows):
+        return False
+    _write_csv(REPORTS_PATH, REPORTS_FIELDS, remaining)
+    return True
+
+
 def save_notification_signup(contact, categories):
     _ensure_csv(NOTIFY_PATH, NOTIFY_FIELDS)
     with open(NOTIFY_PATH, "a", newline="", encoding="utf-8") as f:
@@ -874,6 +883,14 @@ def api_update_report(reference):
     if not update_report_status(reference, new_status):
         return jsonify({"error": "Reference not found."}), 404
     return jsonify({"reference": reference, "status": new_status})
+
+
+@app.route("/api/reports/<reference>", methods=["DELETE"])
+@require_staff
+def api_delete_report(reference):
+    if not delete_report(reference):
+        return jsonify({"error": "Reference not found."}), 404
+    return jsonify({"deleted": reference})
 
 
 @app.route("/api/outages", methods=["GET", "POST"])
