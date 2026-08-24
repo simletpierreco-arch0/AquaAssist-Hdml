@@ -147,6 +147,15 @@ function setupSiteNav() {
     if (pushUrl && window.location.pathname !== "/admin") {
       history.pushState({ view: "admin" }, "", "/admin");
     }
+    // Resume an existing staff session automatically (e.g. after a page
+    // refresh) instead of forcing the passcode to be re-entered every
+    // time — sessionStorage already remembers it. If it's actually
+    // expired/invalid, the first staffFetch() call inside
+    // staffLoginSuccess()'s loaders gets a 401 and staffLogout() runs
+    // automatically, correctly falling back to the login form.
+    if (state.staffPasscode) {
+      staffLoginSuccess();
+    }
   };
   $("#navStaffPortalLink").addEventListener("click", (e) => { e.preventDefault(); showStaffPortal(); });
   $("#navHomeLink").addEventListener("click", (e) => { e.preventDefault(); showSite(); });
@@ -1590,7 +1599,7 @@ function setupSettings() {
 // Staff portal
 // ---------------------------------------------------------------------
 function setupStaffPortal() {
-  setupAttachmentViewer();
+  setupReportsTableActions();
 
   $("#staffLoginBtn").addEventListener("click", async () => {
     const passcode = $("#staffPasscodeInput").value;
@@ -1808,8 +1817,8 @@ function renderStatusMetrics(reports) {
 
 function renderReportsTable(reports) {
   const thead = $("#reportsTable thead"), tbody = $("#reportsTable tbody");
-  const cols = ["reference", "timestamp", "name", "phone", "location", "issue_type", "severity", "status", "attachment"];
-  thead.innerHTML = `<tr>${cols.map((c) => `<th>${c}</th>`).join("")}</tr>`;
+  const cols = ["reference", "timestamp", "name", "phone", "location", "issue_type", "severity", "status", "attachment", "delete"];
+  thead.innerHTML = `<tr>${cols.map((c) => `<th>${c === "delete" ? "" : c}</th>`).join("")}</tr>`;
   tbody.innerHTML = "";
   // Keyed by reference so the attachment viewer can look up the right
   // mime/data when a row's button is clicked, without embedding large
@@ -1820,6 +1829,7 @@ function renderReportsTable(reports) {
     const tr = document.createElement("tr");
     tr.innerHTML = cols.map((c) => {
       if (c === "attachment") return `<td>${buildAttachmentCell(r)}</td>`;
+      if (c === "delete") return `<td><button type="button" class="delete-report-btn" data-ref="${escapeHtml(r.reference)}" title="Delete this report">🗑️</button></td>`;
       return `<td>${escapeHtml(String(r[c] ?? ""))}</td>`;
     }).join("");
     tbody.appendChild(tr);
@@ -1869,20 +1879,30 @@ function closeAttachmentViewer() {
   $("#attachmentViewerModal").style.display = "none";
 }
 
-function setupAttachmentViewer() {
+function setupReportsTableActions() {
   $("#attachmentViewerCloseBtn").addEventListener("click", closeAttachmentViewer);
   $("#attachmentViewerModal").addEventListener("click", (e) => {
     if (e.target.id === "attachmentViewerModal") closeAttachmentViewer();
   });
   // Delegated listener — the table body is rebuilt on every reports
   // refresh, so binding once on the (stable) table element covers every
-  // row's attachment button, past and future, without re-attaching.
-  $("#reportsTable").addEventListener("click", (e) => {
-    const btn = e.target.closest(".attachment-cell-btn");
-    if (!btn) return;
-    const report = staffReportsCache[btn.dataset.ref];
-    if (!report || !report.attachment_mime || !report.attachment_data) return;
-    openAttachmentViewer(report.attachment_mime, report.attachment_data, report.reference);
+  // row's attachment/delete buttons, past and future, without re-attaching.
+  $("#reportsTable").addEventListener("click", async (e) => {
+    const attachBtn = e.target.closest(".attachment-cell-btn");
+    if (attachBtn) {
+      const report = staffReportsCache[attachBtn.dataset.ref];
+      if (!report || !report.attachment_mime || !report.attachment_data) return;
+      openAttachmentViewer(report.attachment_mime, report.attachment_data, report.reference);
+      return;
+    }
+    const deleteBtn = e.target.closest(".delete-report-btn");
+    if (deleteBtn) {
+      const ref = deleteBtn.dataset.ref;
+      if (!confirm(`Delete report ${ref}? This can't be undone.`)) return;
+      deleteBtn.disabled = true;
+      await staffFetch(`/api/reports/${encodeURIComponent(ref)}`, { method: "DELETE" });
+      loadReports();
+    }
   });
 }
 
@@ -1893,6 +1913,14 @@ function renderStaffMap(reports) {
       attribution: "© OpenStreetMap contributors, SRTM | © OpenTopoMap (CC-BY-SA)",
     }).addTo(state.staffMap);
     state.staffMapLayer = L.layerGroup().addTo(state.staffMap);
+    // Leaflet computes its internal tile-grid size from the container's
+    // dimensions at the moment L.map() runs. If the dashboard was still
+    // mid layout/transition right then (e.g. just switched from
+    // display:none), the map can render as a permanently blank box that
+    // never recovers on its own — force a recalculation shortly after,
+    // once the browser has settled the real layout. Same fix already
+    // used for the customer-facing report map elsewhere in this file.
+    setTimeout(() => { if (state.staffMap) state.staffMap.invalidateSize(); }, 200);
   }
   state.staffMapLayer.clearLayers();
   const statusColors = { Received: "red", Assigned: "orange", "Crew Dispatched": "orange", "In Progress": "blue", Resolved: "green" };
