@@ -6,3 +6,4 @@ langchain-google-genai==4.3.4
 langgraph==1.2.11
 langchain-pinecone==0.2.13
 pinecone==7.3.0
+psycopg2-binary
