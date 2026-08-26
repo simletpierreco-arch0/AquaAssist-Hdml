@@ -11,10 +11,12 @@ tracking "disappearing" or "not working".
 BACKEND — controlled by the DATABASE_URL environment variable:
 
   - DATABASE_URL set  -> uses that Postgres database. THIS is what survives
-    redeploys. Any free Postgres works: Render's own Postgres add-on,
-    Supabase, Neon, Railway, etc. Requires `psycopg2-binary` to be
-    installed (only imported when DATABASE_URL is actually set, so it's
-    not a required dependency otherwise).
+    redeploys. Recommended: a Neon (neon.tech) free Postgres project — it
+    does not expire, unlike Render's own free Postgres tier (auto-deleted
+    30 days after creation). Any Postgres works here (Supabase, Railway,
+    Render's own paid Postgres, etc.) — this file only needs a standard
+    connection string. Requires `psycopg2-binary` in requirements.txt
+    (only imported when DATABASE_URL is actually set).
 
   - DATABASE_URL not set -> falls back to a single SQLite file at
     DATA_DIR/aquaassist.db. No new dependencies needed. Still an upgrade
@@ -24,12 +26,22 @@ BACKEND — controlled by the DATABASE_URL environment variable:
     only for local dev/testing, or if you know your host gives you a
     persistent disk.
 
+MIGRATION: on first startup against a fresh/empty database, this module
+also checks DATA_DIR for the old reports.csv / outages.csv /
+notifications.csv files and imports their rows in — see
+migrate_legacy_storage() below. This only ever runs once per table (it
+no-ops the moment that table has any rows), so it's safe to leave this
+code in permanently and it will never duplicate or re-import data on
+later restarts.
+
 Every function here keeps the exact same name, signature, and return shape
 as the old CSV-based versions that used to live in app.py, so nothing else
 in the app needs to change.
 """
 
+import csv
 import json
+import logging
 import os
 import uuid
 from datetime import datetime
@@ -49,6 +61,8 @@ else:
     import sqlite3
 
 SQLITE_PATH = DATA_DIR / "aquaassist.db"
+
+logger = logging.getLogger("aquaassist.db")
 
 STATUS_DEFAULT = "Received"
 SEVERITY_DEFAULT = "Unknown"
@@ -92,8 +106,9 @@ def _rows(cur_rows):
 
 
 def init_db():
-    """Creates all tables if they don't exist yet, and seeds default tips /
-    features on first run. Safe to call every time the app starts."""
+    """Creates all tables if they don't exist yet, migrates any legacy CSV
+    data in, and seeds default tips/features on first run. Safe to call
+    every time the app starts."""
     conn = _connect()
     cur = conn.cursor()
     cur.execute("""
@@ -140,8 +155,113 @@ def init_db():
     cur.close()
     conn.close()
 
+    migrate_legacy_storage()
     _seed_tips_if_empty()
     _seed_features_if_empty()
+
+
+# ---------------------------------------------------------------------
+# Legacy migration — imports old CSV/JSON data into the DB exactly once
+# ---------------------------------------------------------------------
+def _table_is_empty(table):
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute(f"SELECT COUNT(*) AS c FROM {table}")
+    count = cur.fetchone()["c"]
+    cur.close()
+    conn.close()
+    return count == 0
+
+
+def _insert_legacy_report(row):
+    ph = _ph()
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute(f"""
+        INSERT INTO reports (reference, timestamp, name, phone, location, issue_type,
+                              description, attachment_mime, attachment_data, status, severity)
+        VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
+    """, (
+        row.get("reference"), row.get("timestamp"), row.get("name"), row.get("phone"),
+        row.get("location"), row.get("issue_type"), row.get("description", ""),
+        row.get("attachment_mime", ""), row.get("attachment_data", ""),
+        row.get("status") or STATUS_DEFAULT, row.get("severity") or SEVERITY_DEFAULT,
+    ))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def _insert_legacy_outage(row):
+    ph = _ph()
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute(f"""
+        INSERT INTO outages (id, parish, message, start_date, end_date, created_at)
+        VALUES ({ph},{ph},{ph},{ph},{ph},{ph})
+    """, (
+        row.get("id") or uuid.uuid4().hex[:8], row.get("parish"), row.get("message"),
+        row.get("start_date"), row.get("end_date"),
+        row.get("created_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    ))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def _insert_legacy_notification(row):
+    ph = _ph()
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute(f"INSERT INTO notifications (timestamp, contact, categories) VALUES ({ph},{ph},{ph})",
+                (row.get("timestamp"), row.get("contact"), row.get("categories")))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def _migrate_legacy_csv(table, csv_name, insert_fn):
+    if not _table_is_empty(table):
+        return  # already has data — either migrated already, or this is a fresh non-legacy DB
+    path = DATA_DIR / csv_name
+    if not path.exists():
+        return
+    migrated = 0
+    with open(path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            try:
+                insert_fn(row)
+                migrated += 1
+            except Exception as e:
+                logger.warning("Skipped malformed legacy row in %s: %s", csv_name, e)
+    if migrated:
+        logger.info("Migrated %d legacy rows from %s into %s.", migrated, csv_name, table)
+
+
+def _migrate_legacy_features_json():
+    if not _table_is_empty("features"):
+        return
+    path = DATA_DIR / "features.json"
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("Could not read legacy features.json: %s", e)
+        return
+    save_features(data)
+    logger.info("Migrated legacy features.json into the features table.")
+
+
+def migrate_legacy_storage():
+    """One-time import of the old CSV/JSON files, if they're still sitting
+    in DATA_DIR from before this database existed. No-ops completely once
+    each table has at least one row, so it's safe to run on every startup."""
+    _migrate_legacy_csv("reports", "reports.csv", _insert_legacy_report)
+    _migrate_legacy_csv("outages", "outages.csv", _insert_legacy_outage)
+    _migrate_legacy_csv("notifications", "notifications.csv", _insert_legacy_notification)
+    _migrate_legacy_features_json()
 
 
 # ---------------------------------------------------------------------
