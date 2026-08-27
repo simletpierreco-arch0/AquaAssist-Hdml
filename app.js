@@ -822,9 +822,36 @@ async function speakText(text) {
   }
 }
 
+// ---------------------------------------------------------------------
+// Lightweight markdown + auto-linking for chat bubbles.
+//
+// Order matters: escape HTML first (so user/bot text can never inject
+// markup), then bold + line breaks, THEN URL linking, THEN phone-number
+// linking. Phone linking runs last and is careful to skip over any text
+// already inside an <a>...</a> tag from the URL-linking step, so it can
+// never rewrite a link's own href/label.
+// ---------------------------------------------------------------------
+const PHONE_NUMBER_RE = /(\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/g;
+
+function linkifyPhoneNumbers(html) {
+  // Split around any existing <a>...</a> tags so the phone regex only
+  // ever runs against the plain-text segments between them — it must
+  // never touch link text or attributes from the URL-linking step above.
+  const parts = html.split(/(<a\b[^>]*>.*?<\/a>)/g);
+  return parts.map((part) => {
+    if (part.startsWith("<a")) return part;
+    return part.replace(PHONE_NUMBER_RE, (match) => {
+      const digits = match.replace(/[^\d]/g, "");
+      const telDigits = digits.length === 11 ? digits : `1${digits}`;
+      return `<a href="tel:+${telDigits}">${match}</a>`;
+    });
+  }).join("");
+}
+
 function mdLite(text) {
   // Minimal, safe markdown: escape HTML first, then bold + line breaks,
-  // then turn bare URLs into clickable links.
+  // then turn bare URLs into clickable links, then turn phone numbers
+  // (e.g. NAWASA's (473) 440-2155) into tap-to-call links.
   let html = escapeHtml(text)
     .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
     .replace(/\n/g, "<br>");
@@ -832,6 +859,7 @@ function mdLite(text) {
     /(https?:\/\/[^\s<]+)/g,
     (url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`
   );
+  html = linkifyPhoneNumbers(html);
   return html;
 }
 function escapeHtml(s) {
@@ -970,14 +998,42 @@ async function sendMessage(text, directAttachment, locationCard) {
 // ---------------------------------------------------------------------
 // Outage banners (customer)
 // ---------------------------------------------------------------------
+// Grenada runs a fixed UTC-4 offset year-round (no daylight saving) — the
+// backend hardcodes the same offset (GRENADA_TZ) for business hours and
+// (as of this fix) for outage-date matching. Using the browser's own
+// local/UTC date here instead would silently drop or add an outage
+// banner during the last few hours of each Grenada calendar day (roughly
+// 8 PM-midnight local time), since by then the browser's UTC clock has
+// already rolled into "tomorrow". Compute "today" the same way the
+// backend does so the two never disagree.
+function grenadaTodayISO() {
+  const grenadaMs = Date.now() - 4 * 60 * 60 * 1000;
+  return new Date(grenadaMs).toISOString().slice(0, 10);
+}
+
 async function renderOutageBanners() {
   const parish = localStorage.getItem("aqua_customer_parish");
   const wrap = $("#outageBanners");
   wrap.innerHTML = "";
-  if (!parish) return;
+  if (!parish) {
+    // Previously this just returned here, so an outage staff posted
+    // correctly would never show for any customer who hadn't separately
+    // gone into Settings and picked a parish — a silent dead end. Prompt
+    // instead, and note that sharing GPS location in chat also sets this
+    // automatically (see sendLocationMessage below).
+    wrap.innerHTML = `<div class="card" style="font-size:.8rem;">📍 <a href="#" id="setParishPromptLink">Set your parish</a> to see service notices for your area.</div>`;
+    const link = $("#setParishPromptLink");
+    if (link) {
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        $('.tab-btn[data-tab="settings"]').click();
+      });
+    }
+    return;
+  }
   const res = await fetch(`${API}/api/outages`);
   const outages = await res.json();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = grenadaTodayISO();
   outages.filter((o) => o.parish === parish && o.start_date <= today && o.end_date >= today).forEach((o) => {
     const div = document.createElement("div");
     div.className = "card";
@@ -1461,6 +1517,15 @@ function setupLocationShare() {
 function sendLocationMessage(lat, lng, accuracy, parish) {
   const gpsText = `📍 My current location is ${parish}, Grenada (GPS: ${lat.toFixed(5)}, ${lng.toFixed(5)}).`;
   sendMessage(gpsText, null, { parish, lat, lng, accuracy: accuracy ? Math.round(accuracy) : null });
+  // Sharing GPS location tells us the customer's parish just as reliably
+  // as picking it in Settings does — persist it the same way (and update
+  // the Settings dropdown to match) so outage banners start working
+  // immediately instead of silently staying blank until a separate trip
+  // to Settings.
+  localStorage.setItem("aqua_customer_parish", parish);
+  const parishSelect = $("#customerParishSelect");
+  if (parishSelect) parishSelect.value = parish;
+  renderOutageBanners();
 }
 
 function setupTrackForm() {
