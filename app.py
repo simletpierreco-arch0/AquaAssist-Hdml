@@ -4,9 +4,10 @@ AquaAssist backend — Flask API + a LangChain/LangGraph conversational agent
 
 STORAGE: report/notification/outage/tip/feature data now lives in db.py,
 backed by SQLite by default or Postgres if DATABASE_URL is set — see the
-docstring at the top of db.py for the full explanation. Everything else in
-this file (routes, business logic, the agent wiring) is unchanged from
-before.
+docstring at the top of db.py for the full explanation, including the
+connection-pooling fix that removes a per-call reconnect penalty on every
+single database access. Everything else in this file (routes, business
+logic, the agent wiring) is unchanged from before.
 
 Run with:
     pip install -r requirements.txt
@@ -16,6 +17,7 @@ Run with:
     export ELEVENLABS_VOICE_ID=your-chosen-voice-id    # optional, from the ElevenLabs Voice Library
     export PINECONE_API_KEY=your-pinecone-key          # optional, enables live RAG retrieval (see agent.py)
     export DATABASE_URL=your-postgres-url              # RECOMMENDED for production — see db.py
+    export SELF_PING_URL=https://your-app.onrender.com # RECOMMENDED for production — see _keep_alive_loop below
     python app.py
 
 Then open http://localhost:5000
@@ -44,6 +46,8 @@ answers reflect the real rows in the database rather than a guess.
 import os
 import logging
 import re
+import threading
+import time
 import uuid
 import base64
 import subprocess
@@ -224,6 +228,52 @@ PARISH_CENTERS = {
     "Carriacou and Petite Martinique": [12.4747, -61.4487],
 }
 GRENADA_CENTER = [12.1165, -61.6790]
+
+# FIX — staff map pins were landing next to the wrong parish label. The
+# pin's POSITION was always correct (it's just the customer's raw GPS
+# coordinate), but the PARISH NAME attached to it was being guessed by
+# finding the single nearest point in PARISH_CENTERS above — one dot per
+# parish, which is a poor approximation near any parish border. Instead
+# of one centroid, each parish now gets several real, well-known
+# reference points (its parish capital/main town plus a couple of spread
+# points), and the frontend matches a GPS coordinate against the nearest
+# of ALL of these points across every parish — effectively a coarse
+# Voronoi split using real places instead of one arbitrary center. This
+# is still an approximation (real parish boundary polygons would be the
+# proper fix and aren't available here), but it's meaningfully more
+# accurate than a single point per parish, especially near borders.
+PARISH_REFERENCE_POINTS = {
+    "St. George's (Capital area)": [
+        [12.0561, -61.7488],  # St. George's (parish capital)
+        [12.0450, -61.7350],  # Grand Anse / L'Anse aux Epines
+        [12.0750, -61.7300],  # Beaulieu / northern edge toward St. John's
+    ],
+    "St. David's": [
+        [12.0150, -61.6280],  # Westerhall area
+        [12.0400, -61.6600],  # inland, toward the St. George's border
+    ],
+    "St. Andrew's": [
+        [12.1330, -61.6150],  # Grenville (parish capital)
+        [12.1100, -61.6600],  # central St. Andrew's
+        [12.0900, -61.6300],  # southern St. Andrew's, toward St. David's
+    ],
+    "St. John's": [
+        [12.1300, -61.7250],  # Gouyave (parish capital)
+        [12.1550, -61.7100],  # inland toward St. Mark's
+    ],
+    "St. Mark's": [
+        [12.1950, -61.6950],  # Victoria (parish capital)
+        [12.2100, -61.6700],  # inland toward St. Patrick's
+    ],
+    "St. Patrick's": [
+        [12.2450, -61.6250],  # Sauteurs (parish capital)
+        [12.2200, -61.6100],  # southern St. Patrick's
+    ],
+    "Carriacou and Petite Martinique": [
+        [12.4747, -61.4487],  # Hillsborough, Carriacou
+        [12.3000, -61.4000],  # Petite Martinique
+    ],
+}
 
 FAQS = [
     {"category": "New Connections", "q": "How do I apply for a new connection?",
@@ -473,6 +523,7 @@ def api_init():
         "territory_whatsapp": TERRITORY_WHATSAPP,
         "parishes": GRENADA_PARISHES,
         "parish_centers": PARISH_CENTERS,
+        "parish_reference_points": PARISH_REFERENCE_POINTS,
         "grenada_center": GRENADA_CENTER,
         "issue_types": ISSUE_TYPES,
         "severity_levels": SEVERITY_LEVELS,
@@ -490,6 +541,16 @@ def api_init():
 @app.route("/api/business-hours")
 def api_business_hours():
     return jsonify(get_business_hours_status())
+
+
+@app.route("/api/ping")
+def api_ping():
+    # Lightweight, unauthenticated endpoint that does no real work — it
+    # exists purely as something for the keep-alive thread below (and, if
+    # you want, an external uptime monitor like UptimeRobot/cron-job.org)
+    # to hit, so hosts that suspend idle free-tier services don't spin
+    # this one down mid-competition.
+    return jsonify({"ok": True, "time": datetime.now(timezone.utc).isoformat()})
 
 
 @app.route("/api/chat", methods=["POST"])
@@ -768,6 +829,58 @@ def api_tts():
     return resp.content, 200, {"Content-Type": "audio/mpeg"}
 
 
+# ---------------------------------------------------------------------
+# Keep-alive — prevents free-tier hosts from spinning this app (and its
+# database) down mid-competition.
+#
+# Render's free web services sleep after ~15 minutes with no incoming
+# HTTP traffic; Neon's free Postgres suspends its compute after ~5
+# minutes idle. Both wake back up on the next request/query, but that
+# first request after a cold start can take many seconds to tens of
+# seconds — exactly the kind of "why is it suddenly slow" moment you
+# don't want during a demo. This background thread runs for the life of
+# the process and, every SELF_PING_INTERVAL_SECONDS:
+#   1. Runs a trivial DB read (keeps Postgres/Neon's compute warm).
+#   2. If SELF_PING_URL is set, makes a real outbound HTTP request to
+#      this app's own public URL (keeps Render's web service warm) — an
+#      in-process function call does NOT count as "traffic" for this
+#      purpose, it has to actually arrive over the network from outside.
+#
+# Set this in your environment before deploying:
+#   SELF_PING_URL=https://your-app.onrender.com
+# ---------------------------------------------------------------------
+SELF_PING_URL = os.environ.get("SELF_PING_URL", "").strip()
+SELF_PING_INTERVAL_SECONDS = int(os.environ.get("SELF_PING_INTERVAL_SECONDS", "600"))
+
+
+def _keep_alive_loop():
+    while True:
+        time.sleep(SELF_PING_INTERVAL_SECONDS)
+        try:
+            db.load_features()
+        except Exception as e:
+            logger.warning("Keep-alive DB touch failed: %s", e)
+        if SELF_PING_URL:
+            try:
+                requests.get(f"{SELF_PING_URL.rstrip('/')}/api/ping", timeout=15)
+            except Exception as e:
+                logger.warning("Keep-alive self-ping failed: %s", e)
+        else:
+            logger.info("SELF_PING_URL not set — only the database is being kept warm, "
+                        "not the web service itself. Set SELF_PING_URL to your deployed "
+                        "URL to keep Render's free web service from sleeping too.")
+
+
+threading.Thread(target=_keep_alive_loop, daemon=True).start()
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    # threaded=True lets Flask's dev server handle more than one request
+    # at a time (e.g. a staff dashboard refresh while a customer is mid-
+    # chat) instead of queueing requests behind each other one at a time.
+    # If you deploy behind gunicorn/uwsgi instead of running this file
+    # directly, set worker/thread counts there instead (e.g.
+    # `gunicorn -w 2 --threads 4 app:app`) — this line only affects
+    # `python app.py`.
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
