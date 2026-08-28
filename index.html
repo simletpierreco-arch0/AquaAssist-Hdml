@@ -45,7 +45,15 @@
       <div class="mock-hero-actions">
         <a href="#" class="mock-btn mock-btn-primary">Pay My Bill</a>
         <a href="#" class="mock-btn mock-btn-ghost">Report a Leak</a>
+        <!-- Lets staff confirm the ElevenLabs Caribbean-accent voice is
+             actually configured and sounds right BEFORE the competition
+             starts, without opening the chat widget and hunting for a
+             message to read aloud. Wired up by setupVoiceTestButton() in
+             app.js, which hits the public /api/tts endpoint — no login
+             required. -->
+        <button type="button" id="testVoiceBtn" class="mock-btn mock-btn-ghost">🔊 Test Caribbean Voice</button>
       </div>
+      <p id="testVoiceStatus" class="hint-text" style="color:#fff; opacity:.85; margin-top:.6rem;"></p>
     </div>
   </section>
 
