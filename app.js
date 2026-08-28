@@ -673,7 +673,17 @@ function renderChat() {
   if (!state.messages.length) {
     appendBubble("assistant", welcomeText());
   } else {
-    state.messages.forEach((m) => appendBubble(m.role, m.content, m.attachmentName, m.reportCard, m.attachmentMime, m.locationCard));
+    // isLive=false — this is a REPLAY of chat history from localStorage
+    // (page load / widget reopen), not a fresh reply. Passing false here
+    // stops appendBubble() from auto-playing read-aloud TTS for every
+    // single historical message at once: without this, reopening a chat
+    // with read-aloud on and N prior assistant messages would fire N
+    // near-simultaneous /api/tts requests that immediately cancel each
+    // other out (speakText() stops whatever's already playing before
+    // starting the next one), producing stuttering audio and wasted
+    // network calls. Live replies from sendMessage() below don't pass
+    // this argument, so they default to true and still auto-play normally.
+    state.messages.forEach((m) => appendBubble(m.role, m.content, m.attachmentName, m.reportCard, m.attachmentMime, m.locationCard, false));
   }
   $("#messageCount").textContent = `${state.messages.length} messages in this session.`;
   renderFollowupChips();
@@ -683,7 +693,7 @@ function welcomeText() {
   return "👋 **Welcome to AquaAssist**\n\nI'm NAWASA's official virtual assistant, available 24/7 to help with water outages, billing, new connections, reporting leaks, office locations, FAQs, and general support.\n\nHow may I assist you today?";
 }
 
-function appendBubble(role, content, attachmentName, reportCard, attachmentMime, locationCard) {
+function appendBubble(role, content, attachmentName, reportCard, attachmentMime, locationCard, isLive = true) {
   const row = document.createElement("div");
   row.className = `msg-row ${role}`;
   const avatar = document.createElement("div");
@@ -726,7 +736,10 @@ function appendBubble(role, content, attachmentName, reportCard, attachmentMime,
   row.appendChild(bubble);
   $("#chatMessages").appendChild(row);
   $("#chatMessages").scrollTop = $("#chatMessages").scrollHeight;
-  if (role === "assistant" && featureEnabled("read_aloud") && localStorage.getItem("aqua_read_aloud") === "1") {
+  // Only auto-play for a genuinely NEW/live message (isLive=true, the
+  // default) — never for historical messages being replayed on page load
+  // or widget reopen. See the isLive comment in renderChat() above.
+  if (isLive && role === "assistant" && featureEnabled("read_aloud") && localStorage.getItem("aqua_read_aloud") === "1") {
     speakText(content, speakBtn);
   }
 }
