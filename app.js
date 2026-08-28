@@ -7,10 +7,9 @@ const API = ""; // same-origin
 // aqua_customer_parish (see startChatBtn handler and the Settings
 // territory-change handler below) so outage/service notices show up for
 // a customer right away instead of staying invisible until they happen
-// to visit Settings and manually pick a parish — which almost nobody
-// does, and which was the actual reason the outage banner never seemed
-// to work. "Grenada" isn't included here since it covers six different
-// mainland parishes and can't be guessed from territory alone.
+// to visit Settings and manually pick a parish. "Grenada" isn't included
+// since it covers six different mainland parishes and can't be guessed
+// from territory alone.
 const TERRITORY_TO_PARISH = {
   "Carriacou": "Carriacou and Petite Martinique",
   "Petit Martinique": "Carriacou and Petite Martinique",
@@ -110,6 +109,7 @@ async function init() {
   // customer having "logged in" to the widget, so it's wired up here.
   setupSiteNav();
   setupStaffPortal();
+  setupVoiceTestButton();
 
   await loadFeatureFlags();
   applyFeatureVisibility();
@@ -417,8 +417,7 @@ function applyFeatureVisibility() {
     btn.style.display = featureEnabled("read_aloud") ? "" : "none";
   });
   if (!featureEnabled("read_aloud")) {
-    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    stopSpeaking();
   }
 
   // If a now-hidden tab was the active one, fall back to the Chat tab so
@@ -432,13 +431,6 @@ function applyFeatureVisibility() {
   applyMaintenanceMode();
 }
 
-// Staff-controlled kill switch for the chatbot itself (not the whole
-// widget — Report & Track, FAQ, etc. don't depend on the AI and keep
-// working normally). When off: shows an editable apology banner at the
-// top of the Chat tab and disables every control that would otherwise
-// send a message, so customers aren't left typing into a dead end. The
-// backend enforces this independently too (see /api/chat in app.py) —
-// this is the UI half of that same switch, not the only thing guarding it.
 // Staff-controlled kill switch for the chatbot itself (not the whole
 // widget — Report & Track, FAQ, etc. don't depend on the AI and keep
 // working normally, since those are separate tabs entirely). When off:
@@ -660,7 +652,7 @@ function renderFAQ(query) {
         speakBtn.className = "speak-btn";
         speakBtn.title = "Read this answer aloud";
         speakBtn.textContent = "🔊";
-        speakBtn.addEventListener("click", () => speakText(`${f.q}. ${f.a}`));
+        speakBtn.addEventListener("click", () => speakText(`${f.q}. ${f.a}`, speakBtn));
         item.appendChild(speakBtn);
       }
       list.appendChild(item);
@@ -717,13 +709,17 @@ function appendBubble(role, content, attachmentName, reportCard, attachmentMime,
   if (locationCard) {
     bubble.appendChild(buildLocationCardEl(locationCard));
   }
+  // Build the speak button BEFORE deciding whether to auto-play below, so
+  // the auto-play path can toggle the same button's icon/state instead of
+  // playing "blind" with no visual indicator that anything is happening.
+  let speakBtn = null;
   if (role === "assistant" && featureEnabled("read_aloud")) {
-    const speakBtn = document.createElement("button");
+    speakBtn = document.createElement("button");
     speakBtn.type = "button";
     speakBtn.className = "speak-btn";
     speakBtn.title = "Read this reply aloud";
     speakBtn.textContent = "🔊";
-    speakBtn.addEventListener("click", () => speakText(content));
+    speakBtn.addEventListener("click", () => speakText(content, speakBtn));
     bubble.appendChild(speakBtn);
   }
   row.appendChild(avatar);
@@ -731,7 +727,7 @@ function appendBubble(role, content, attachmentName, reportCard, attachmentMime,
   $("#chatMessages").appendChild(row);
   $("#chatMessages").scrollTop = $("#chatMessages").scrollHeight;
   if (role === "assistant" && featureEnabled("read_aloud") && localStorage.getItem("aqua_read_aloud") === "1") {
-    speakText(content);
+    speakText(content, speakBtn);
   }
 }
 
@@ -747,8 +743,17 @@ function appendBubble(role, content, attachmentName, reportCard, attachmentMime,
 // ELEVENLABS_API_KEY set) or the request fails for any reason, we fall
 // back to the browser's built-in speechSynthesis so read-aloud still
 // works — just without the Caribbean accent.
+//
+// PLAY/STOP TOGGLE: speakText(text, btn) now tracks which button (if any)
+// triggered the currently-playing audio in currentSpeakBtn. Clicking the
+// SAME button again while it's speaking stops playback instead of
+// restarting it; clicking a DIFFERENT button stops whatever was playing
+// first, then starts the new one. The button's icon/style flips between
+// 🔊 and ⏹️ (via the .speaking CSS class) so it's obvious which message
+// is currently being read.
 let availableVoices = [];
 let currentAudio = null;
+let currentSpeakBtn = null;
 
 // Caribbean English locale codes — used only by the browser-voice fallback
 // path below. Some platforms (Edge/Windows in particular) ship neural
@@ -804,26 +809,58 @@ function populateVoiceSelect() {
   }
 }
 
-function speakWithBrowserVoice(plainText) {
-  if (!("speechSynthesis" in window)) return;
+function resetSpeakBtn(btn) {
+  if (!btn) return;
+  btn.classList.remove("speaking");
+  btn.textContent = "🔊";
+}
+
+// Stops whatever is currently playing/queued (server audio clip or the
+// browser's speechSynthesis) and resets that message's button back to 🔊.
+function stopSpeaking() {
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  resetSpeakBtn(currentSpeakBtn);
+  currentSpeakBtn = null;
+}
+
+function speakWithBrowserVoice(plainText, btn) {
+  if (!("speechSynthesis" in window)) {
+    resetSpeakBtn(btn);
+    if (currentSpeakBtn === btn) currentSpeakBtn = null;
+    return;
+  }
   window.speechSynthesis.cancel();
   const utter = new SpeechSynthesisUtterance(plainText);
   utter.rate = 1;
   const savedVoiceName = localStorage.getItem("aqua_tts_voice");
   const voice = availableVoices.find((v) => v.name === savedVoiceName);
   if (voice) utter.voice = voice;
+  utter.onend = () => { resetSpeakBtn(btn); if (currentSpeakBtn === btn) currentSpeakBtn = null; };
+  utter.onerror = () => { resetSpeakBtn(btn); if (currentSpeakBtn === btn) currentSpeakBtn = null; };
   window.speechSynthesis.speak(utter);
 }
 
-async function speakText(text) {
-  const plain = text.replace(/\*\*(.+?)\*\*/g, "$1").replace(/[#_*`]/g, "");
-
-  // Stop anything currently playing/queued before starting the next clip.
-  if (currentAudio) {
-    currentAudio.pause();
-    currentAudio = null;
+async function speakText(text, btn) {
+  // Clicking the button that's already speaking is a STOP action.
+  if (btn && currentSpeakBtn === btn) {
+    stopSpeaking();
+    return;
   }
-  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  // Otherwise, stop anything else currently playing/queued first so only
+  // one message is ever being read aloud at a time.
+  stopSpeaking();
+
+  if (btn) {
+    currentSpeakBtn = btn;
+    btn.classList.add("speaking");
+    btn.textContent = "⏹️";
+  }
+
+  const plain = text.replace(/\*\*(.+?)\*\*/g, "$1").replace(/[#_*`]/g, "");
 
   try {
     const res = await fetch(`${API}/api/tts`, {
@@ -835,13 +872,83 @@ async function speakText(text) {
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     currentAudio = new Audio(url);
-    currentAudio.addEventListener("ended", () => URL.revokeObjectURL(url));
+    currentAudio.addEventListener("ended", () => {
+      URL.revokeObjectURL(url);
+      currentAudio = null;
+      resetSpeakBtn(btn);
+      if (currentSpeakBtn === btn) currentSpeakBtn = null;
+    });
+    currentAudio.addEventListener("error", () => {
+      resetSpeakBtn(btn);
+      if (currentSpeakBtn === btn) currentSpeakBtn = null;
+    });
     await currentAudio.play();
   } catch (err) {
     // Server-side TTS isn't configured or the request failed — fall back
     // to the browser's built-in voice so read-aloud still works.
-    speakWithBrowserVoice(plain);
+    speakWithBrowserVoice(plain, btn);
   }
+}
+
+// ---------------------------------------------------------------------
+// Homepage "test the Caribbean voice" button — lets staff confirm the
+// ElevenLabs voice is actually configured and sounds right BEFORE the
+// competition starts, without having to open the chat widget and hunt
+// for a message to read aloud. Lives in the mock homepage hero, works
+// with no login required (hits the same public /api/tts endpoint).
+// ---------------------------------------------------------------------
+function setupVoiceTestButton() {
+  const btn = $("#testVoiceBtn");
+  if (!btn) return;
+  const statusEl = $("#testVoiceStatus");
+  const SAMPLE_TEXT = "Good day, this is AquaAssist, testing the NAWASA voice. If you can hear this clearly, the Caribbean-accent voice is working.";
+  let testAudio = null;
+
+  const reset = () => {
+    btn.disabled = false;
+    btn.textContent = "🔊 Test Caribbean Voice";
+  };
+
+  btn.addEventListener("click", async () => {
+    // Toggle off if a test clip is already playing.
+    if (testAudio && !testAudio.paused) {
+      testAudio.pause();
+      testAudio = null;
+      reset();
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "⏳ Loading voice...";
+    if (statusEl) statusEl.textContent = "";
+
+    try {
+      const res = await fetch(`${API}/api/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: SAMPLE_TEXT }),
+      });
+      if (!res.ok) {
+        reset();
+        if (statusEl) statusEl.textContent = "⚠️ Server voice isn't configured — set ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID.";
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      testAudio = new Audio(url);
+      btn.disabled = false;
+      btn.textContent = "⏹️ Stop test";
+      testAudio.addEventListener("ended", () => {
+        URL.revokeObjectURL(url);
+        testAudio = null;
+        reset();
+      });
+      await testAudio.play();
+    } catch (err) {
+      reset();
+      if (statusEl) statusEl.textContent = "⚠️ Couldn't reach the voice endpoint.";
+    }
+  });
 }
 
 // ---------------------------------------------------------------------
@@ -1022,12 +1129,12 @@ async function sendMessage(text, directAttachment, locationCard) {
 // ---------------------------------------------------------------------
 // Grenada runs a fixed UTC-4 offset year-round (no daylight saving) — the
 // backend hardcodes the same offset (GRENADA_TZ) for business hours and
-// (as of this fix) for outage-date matching. Using the browser's own
-// local/UTC date here instead would silently drop or add an outage
-// banner during the last few hours of each Grenada calendar day (roughly
-// 8 PM-midnight local time), since by then the browser's UTC clock has
-// already rolled into "tomorrow". Compute "today" the same way the
-// backend does so the two never disagree.
+// for outage-date matching. Using the browser's own local/UTC date here
+// instead would silently drop or add an outage banner during the last
+// few hours of each Grenada calendar day (roughly 8 PM-midnight local
+// time), since by then the browser's UTC clock has already rolled into
+// "tomorrow". Compute "today" the same way the backend does so the two
+// never disagree.
 function grenadaTodayISO() {
   const grenadaMs = Date.now() - 4 * 60 * 60 * 1000;
   return new Date(grenadaMs).toISOString().slice(0, 10);
@@ -1069,7 +1176,28 @@ async function renderOutageBanners() {
 // ---------------------------------------------------------------------
 // Report & Track
 // ---------------------------------------------------------------------
+// FIX — the staff map's colored status dots were landing next to the
+// wrong parish. The pin's actual POSITION was always the customer's raw
+// GPS coordinate (accurate); what was wrong was the PARISH LABEL saved
+// alongside it, which used to come from finding the nearest single point
+// in one "center" per parish — a poor approximation right near a parish
+// border. nearestParish() now checks against several real reference
+// points per parish (state.config.parish_reference_points, from
+// app.py's PARISH_REFERENCE_POINTS: each parish's actual main town plus
+// a couple of spread points) and falls back to the old single-centroid
+// list only if that richer data isn't available for some reason.
 function nearestParish(lat, lng) {
+  const pointSets = state.config.parish_reference_points;
+  if (pointSets) {
+    let best = null, bestDist = Infinity;
+    for (const [parish, points] of Object.entries(pointSets)) {
+      for (const [plat, plng] of points) {
+        const d = (lat - plat) ** 2 + (lng - plng) ** 2;
+        if (d < bestDist) { bestDist = d; best = parish; }
+      }
+    }
+    if (best) return best;
+  }
   let best = null, bestDist = Infinity;
   for (const [parish, [plat, plng]] of Object.entries(state.config.parish_centers)) {
     const d = (lat - plat) ** 2 + (lng - plng) ** 2;
@@ -1078,12 +1206,13 @@ function nearestParish(lat, lng) {
   return best;
 }
 
-// Straight-line "nearest parish center" is only a rough fallback — parish
-// boundaries don't actually line up with distance to one arbitrary point
-// per parish, so a house right on a border can easily snap to the wrong
-// parish. We try a real reverse-geocode against OpenStreetMap first (which
-// knows actual parish/county boundaries) and only fall back to the center
-// trick if that lookup fails or the network is unavailable.
+// Straight-line "nearest reference point" is still only an approximation
+// — real parish boundaries don't line up perfectly with distance to a
+// handful of sample points, so a house right on a border can still
+// occasionally snap to the neighboring parish. We try a real
+// reverse-geocode against OpenStreetMap first (which knows actual
+// parish/county boundaries) and only fall back to nearestParish() above
+// if that lookup fails or the network is unavailable.
 const NOMINATIM_PARISH_MAP = {
   "saint george": "St. George's (Capital area)",
   "st george": "St. George's (Capital area)",
@@ -1641,8 +1770,7 @@ function setupSettings() {
   readAloud.addEventListener("change", () => {
     localStorage.setItem("aqua_read_aloud", readAloud.checked ? "1" : "0");
     if (!readAloud.checked) {
-      if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+      stopSpeaking();
     }
   });
 
@@ -2026,6 +2154,11 @@ function renderStaffMap(reports) {
     const m = gpsRe.exec(r.location || "");
     if (!m) return;
     const lat = parseFloat(m[1]), lng = parseFloat(m[2]);
+    // The circle's POSITION is always this exact GPS coordinate (accurate,
+    // straight from the device). Its COLOR is the report's status. Which
+    // parish that position visually falls within on the tile map is
+    // determined purely by real geography now — nothing here guesses a
+    // parish; see nearestParish() above for where that used to go wrong.
     L.circleMarker([lat, lng], { radius: 8, color: statusColors[r.status] || "gray", fillOpacity: 0.8 })
       .bindPopup(`<b>${r.reference}</b><br>${r.issue_type} — ${r.status}<br>Severity: ${r.severity}`)
       .addTo(state.staffMapLayer);
