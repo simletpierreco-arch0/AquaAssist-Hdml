@@ -3,6 +3,19 @@
 
 const API = ""; // same-origin
 
+// Territories that map to exactly one NAWASA parish. Used to auto-fill
+// aqua_customer_parish (see startChatBtn handler and the Settings
+// territory-change handler below) so outage/service notices show up for
+// a customer right away instead of staying invisible until they happen
+// to visit Settings and manually pick a parish — which almost nobody
+// does, and which was the actual reason the outage banner never seemed
+// to work. "Grenada" isn't included here since it covers six different
+// mainland parishes and can't be guessed from territory alone.
+const TERRITORY_TO_PARISH = {
+  "Carriacou": "Carriacou and Petite Martinique",
+  "Petit Martinique": "Carriacou and Petite Martinique",
+};
+
 const state = {
   config: null,
   sessionId: localStorage.getItem("aqua_session_id") || null,
@@ -118,6 +131,15 @@ async function init() {
     state.territory = territory;
     localStorage.setItem("aqua_territory", territory);
     localStorage.setItem("aqua_auth_done", "1");
+    // Auto-fill the customer's parish whenever their chosen territory
+    // maps to exactly one NAWASA parish (Carriacou / Petit Martinique),
+    // so outage/service notices can show up immediately on the Chat tab
+    // instead of silently staying blank until the customer happens to
+    // visit Settings and pick a parish manually. Never overwrites a
+    // parish the customer already set themselves.
+    if (!localStorage.getItem("aqua_customer_parish") && TERRITORY_TO_PARISH[territory]) {
+      localStorage.setItem("aqua_customer_parish", TERRITORY_TO_PARISH[territory]);
+    }
     startApp();
   });
 }
@@ -1019,8 +1041,9 @@ async function renderOutageBanners() {
     // Previously this just returned here, so an outage staff posted
     // correctly would never show for any customer who hadn't separately
     // gone into Settings and picked a parish — a silent dead end. Prompt
-    // instead, and note that sharing GPS location in chat also sets this
-    // automatically (see sendLocationMessage below).
+    // instead, and note that sharing GPS location in chat, or picking
+    // Carriacou / Petit Martinique as your territory at login, also sets
+    // this automatically now (see sendLocationMessage and startChatBtn).
     wrap.innerHTML = `<div class="card" style="font-size:.8rem;">📍 <a href="#" id="setParishPromptLink">Set your parish</a> to see service notices for your area.</div>`;
     const link = $("#setParishPromptLink");
     if (link) {
@@ -1647,8 +1670,17 @@ function setupSettings() {
   territorySelect.addEventListener("change", () => {
     state.territory = territorySelect.value;
     localStorage.setItem("aqua_territory", state.territory);
+    // Keep the auto-derived parish in sync if the customer switches to a
+    // territory that maps to exactly one parish (Carriacou / Petit
+    // Martinique) — and refresh the outage banner immediately rather
+    // than waiting for the next unrelated re-render.
+    if (TERRITORY_TO_PARISH[state.territory]) {
+      localStorage.setItem("aqua_customer_parish", TERRITORY_TO_PARISH[state.territory]);
+      if (parishSelect) parishSelect.value = TERRITORY_TO_PARISH[state.territory];
+    }
     renderContactRow();
     applyMaintenanceMode();
+    renderOutageBanners();
   });
 
   $("#newChatBtn").addEventListener("click", () => {
