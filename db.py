@@ -34,6 +34,17 @@ no-ops the moment that table has any rows), so it's safe to leave this
 code in permanently and it will never duplicate or re-import data on
 later restarts.
 
+PERFORMANCE NOTE (fixed): every function used to open a brand-new database
+connection and close it again on every single call. Against Postgres in
+particular (SSL handshake + auth round trip every time) that adds roughly
+100-400ms of pure connection overhead on top of the actual query — and a
+single /api/chat turn can easily trigger 2-4 of these calls (load_features
+up front, plus whichever agent tool ends up running), so this was adding
+up to a very noticeable chunk of AquaAssist's total reply time. Connection
+handling now goes through a small pool (Postgres) / a single shared
+connection (SQLite) that lives for the life of the process — see
+_cursor() below — instead of reconnecting from scratch every time.
+
 Every function here keeps the exact same name, signature, and return shape
 as the old CSV-based versions that used to live in app.py, so nothing else
 in the app needs to change.
@@ -43,8 +54,10 @@ import csv
 import json
 import logging
 import os
+import threading
 import uuid
-from datetime import datetime
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
@@ -57,6 +70,7 @@ USE_POSTGRES = bool(DATABASE_URL)
 if USE_POSTGRES:
     import psycopg2
     import psycopg2.extras
+    import psycopg2.pool
 else:
     import sqlite3
 
@@ -66,6 +80,13 @@ logger = logging.getLogger("aquaassist.db")
 
 STATUS_DEFAULT = "Received"
 SEVERITY_DEFAULT = "Unknown"
+
+# Grenada runs a fixed UTC-4 offset year-round (no daylight saving). Used
+# below so "today" for outage matching always means Grenada's today, not
+# whatever timezone the server happens to be running in (most hosts run
+# UTC) — matches the same fix already applied on the frontend and to
+# business-hours logic in app.py.
+GRENADA_TZ = timezone(timedelta(hours=-4))
 
 DEFAULT_FEATURES = {
     "faqs": True, "water_tips": True, "report_issue": True, "whatsapp": True,
@@ -88,13 +109,74 @@ DEFAULT_TIPS = [
 ]
 
 
-def _connect():
+# ---------------------------------------------------------------------
+# Connection handling (pooled)
+# ---------------------------------------------------------------------
+_pg_pool = None
+_sqlite_conn = None
+_sqlite_lock = threading.Lock()
+
+
+def _init_pg_pool():
+    global _pg_pool
+    if _pg_pool is None:
+        _pg_pool = psycopg2.pool.ThreadedConnectionPool(
+            1, 10,
+            dsn=DATABASE_URL,
+            sslmode="require",
+            cursor_factory=psycopg2.extras.RealDictCursor,
+        )
+        logger.info("Initialized Postgres connection pool (1-10 connections).")
+    return _pg_pool
+
+
+def _init_sqlite_conn():
+    global _sqlite_conn
+    if _sqlite_conn is None:
+        _sqlite_conn = sqlite3.connect(str(SQLITE_PATH), check_same_thread=False)
+        _sqlite_conn.row_factory = sqlite3.Row
+    return _sqlite_conn
+
+
+@contextmanager
+def _cursor(commit=False):
+    """Yields a DB cursor from the shared pool (Postgres) or the shared
+    connection (SQLite). Commits on the way out if commit=True, rolls back
+    on any exception, and always returns the connection cleanly — for
+    Postgres it goes back to the pool rather than being closed outright;
+    for SQLite access is serialized with a lock, since SQLite only safely
+    supports one writer at a time."""
     if USE_POSTGRES:
-        return psycopg2.connect(DATABASE_URL, sslmode="require",
-                                 cursor_factory=psycopg2.extras.RealDictCursor)
-    conn = sqlite3.connect(str(SQLITE_PATH))
-    conn.row_factory = sqlite3.Row
-    return conn
+        pool = _init_pg_pool()
+        conn = pool.getconn()
+        cur = None
+        try:
+            cur = conn.cursor()
+            yield cur
+            if commit:
+                conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            if cur is not None:
+                cur.close()
+            pool.putconn(conn)
+    else:
+        with _sqlite_lock:
+            conn = _init_sqlite_conn()
+            cur = None
+            try:
+                cur = conn.cursor()
+                yield cur
+                if commit:
+                    conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                if cur is not None:
+                    cur.close()
 
 
 def _ph():
@@ -109,51 +191,47 @@ def init_db():
     """Creates all tables if they don't exist yet, migrates any legacy CSV
     data in, and seeds default tips/features on first run. Safe to call
     every time the app starts."""
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS reports (
-            reference TEXT PRIMARY KEY,
-            timestamp TEXT, name TEXT, phone TEXT, location TEXT,
-            issue_type TEXT, description TEXT,
-            attachment_mime TEXT, attachment_data TEXT,
-            status TEXT, severity TEXT
-        )
-    """)
-    if USE_POSTGRES:
+    with _cursor(commit=True) as cur:
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS notifications (
-                id SERIAL PRIMARY KEY,
-                timestamp TEXT, contact TEXT, categories TEXT
+            CREATE TABLE IF NOT EXISTS reports (
+                reference TEXT PRIMARY KEY,
+                timestamp TEXT, name TEXT, phone TEXT, location TEXT,
+                issue_type TEXT, description TEXT,
+                attachment_mime TEXT, attachment_data TEXT,
+                status TEXT, severity TEXT
             )
         """)
-    else:
+        if USE_POSTGRES:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS notifications (
+                    id SERIAL PRIMARY KEY,
+                    timestamp TEXT, contact TEXT, categories TEXT
+                )
+            """)
+        else:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS notifications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT, contact TEXT, categories TEXT
+                )
+            """)
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS notifications (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT, contact TEXT, categories TEXT
+            CREATE TABLE IF NOT EXISTS outages (
+                id TEXT PRIMARY KEY,
+                parish TEXT, message TEXT, start_date TEXT, end_date TEXT, created_at TEXT
             )
         """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS outages (
-            id TEXT PRIMARY KEY,
-            parish TEXT, message TEXT, start_date TEXT, end_date TEXT, created_at TEXT
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS tips (
-            id TEXT PRIMARY KEY,
-            text TEXT, enabled TEXT, created_at TEXT
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS features (
-            id INTEGER PRIMARY KEY, data TEXT
-        )
-    """)
-    conn.commit()
-    cur.close()
-    conn.close()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS tips (
+                id TEXT PRIMARY KEY,
+                text TEXT, enabled TEXT, created_at TEXT
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS features (
+                id INTEGER PRIMARY KEY, data TEXT
+            )
+        """)
 
     migrate_legacy_storage()
     _seed_tips_if_empty()
@@ -164,60 +242,45 @@ def init_db():
 # Legacy migration — imports old CSV/JSON data into the DB exactly once
 # ---------------------------------------------------------------------
 def _table_is_empty(table):
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute(f"SELECT COUNT(*) AS c FROM {table}")
-    count = cur.fetchone()["c"]
-    cur.close()
-    conn.close()
+    with _cursor() as cur:
+        cur.execute(f"SELECT COUNT(*) AS c FROM {table}")
+        count = cur.fetchone()["c"]
     return count == 0
 
 
 def _insert_legacy_report(row):
     ph = _ph()
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute(f"""
-        INSERT INTO reports (reference, timestamp, name, phone, location, issue_type,
-                              description, attachment_mime, attachment_data, status, severity)
-        VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
-    """, (
-        row.get("reference"), row.get("timestamp"), row.get("name"), row.get("phone"),
-        row.get("location"), row.get("issue_type"), row.get("description", ""),
-        row.get("attachment_mime", ""), row.get("attachment_data", ""),
-        row.get("status") or STATUS_DEFAULT, row.get("severity") or SEVERITY_DEFAULT,
-    ))
-    conn.commit()
-    cur.close()
-    conn.close()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"""
+            INSERT INTO reports (reference, timestamp, name, phone, location, issue_type,
+                                  description, attachment_mime, attachment_data, status, severity)
+            VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
+        """, (
+            row.get("reference"), row.get("timestamp"), row.get("name"), row.get("phone"),
+            row.get("location"), row.get("issue_type"), row.get("description", ""),
+            row.get("attachment_mime", ""), row.get("attachment_data", ""),
+            row.get("status") or STATUS_DEFAULT, row.get("severity") or SEVERITY_DEFAULT,
+        ))
 
 
 def _insert_legacy_outage(row):
     ph = _ph()
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute(f"""
-        INSERT INTO outages (id, parish, message, start_date, end_date, created_at)
-        VALUES ({ph},{ph},{ph},{ph},{ph},{ph})
-    """, (
-        row.get("id") or uuid.uuid4().hex[:8], row.get("parish"), row.get("message"),
-        row.get("start_date"), row.get("end_date"),
-        row.get("created_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    ))
-    conn.commit()
-    cur.close()
-    conn.close()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"""
+            INSERT INTO outages (id, parish, message, start_date, end_date, created_at)
+            VALUES ({ph},{ph},{ph},{ph},{ph},{ph})
+        """, (
+            row.get("id") or uuid.uuid4().hex[:8], row.get("parish"), row.get("message"),
+            row.get("start_date"), row.get("end_date"),
+            row.get("created_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        ))
 
 
 def _insert_legacy_notification(row):
     ph = _ph()
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute(f"INSERT INTO notifications (timestamp, contact, categories) VALUES ({ph},{ph},{ph})",
-                (row.get("timestamp"), row.get("contact"), row.get("categories")))
-    conn.commit()
-    cur.close()
-    conn.close()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"INSERT INTO notifications (timestamp, contact, categories) VALUES ({ph},{ph},{ph})",
+                    (row.get("timestamp"), row.get("contact"), row.get("categories")))
 
 
 def _migrate_legacy_csv(table, csv_name, insert_fn):
@@ -282,41 +345,30 @@ def save_report(name, phone, location, issue_type, description,
         "status": STATUS_DEFAULT, "severity": severity or SEVERITY_DEFAULT,
     }
     ph = _ph()
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute(f"""
-        INSERT INTO reports (reference, timestamp, name, phone, location, issue_type,
-                              description, attachment_mime, attachment_data, status, severity)
-        VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
-    """, (row["reference"], row["timestamp"], row["name"], row["phone"], row["location"],
-          row["issue_type"], row["description"], row["attachment_mime"], row["attachment_data"],
-          row["status"], row["severity"]))
-    conn.commit()
-    cur.close()
-    conn.close()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"""
+            INSERT INTO reports (reference, timestamp, name, phone, location, issue_type,
+                                  description, attachment_mime, attachment_data, status, severity)
+            VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
+        """, (row["reference"], row["timestamp"], row["name"], row["phone"], row["location"],
+              row["issue_type"], row["description"], row["attachment_mime"], row["attachment_data"],
+              row["status"], row["severity"]))
     return row
 
 
 def load_reports():
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM reports ORDER BY timestamp ASC")
-    rows = _rows(cur.fetchall())
-    cur.close()
-    conn.close()
+    with _cursor() as cur:
+        cur.execute("SELECT * FROM reports ORDER BY timestamp ASC")
+        rows = _rows(cur.fetchall())
     return rows
 
 
 def update_report_status(reference, new_status):
     ph = _ph()
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute(f"UPDATE reports SET status = {ph} WHERE UPPER(reference) = UPPER({ph})",
-                (new_status, reference))
-    updated = cur.rowcount > 0
-    conn.commit()
-    cur.close()
-    conn.close()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"UPDATE reports SET status = {ph} WHERE UPPER(reference) = UPPER({ph})",
+                    (new_status, reference))
+        updated = cur.rowcount > 0
     return updated
 
 
@@ -324,24 +376,17 @@ def track_report(reference):
     if not reference:
         return None
     ph = _ph()
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute(f"SELECT * FROM reports WHERE UPPER(reference) = UPPER({ph})", (reference.strip(),))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
+    with _cursor() as cur:
+        cur.execute(f"SELECT * FROM reports WHERE UPPER(reference) = UPPER({ph})", (reference.strip(),))
+        row = cur.fetchone()
     return dict(row) if row else None
 
 
 def delete_report(reference):
     ph = _ph()
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute(f"DELETE FROM reports WHERE UPPER(reference) = UPPER({ph})", (reference.strip(),))
-    deleted = cur.rowcount > 0
-    conn.commit()
-    cur.close()
-    conn.close()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"DELETE FROM reports WHERE UPPER(reference) = UPPER({ph})", (reference.strip(),))
+        deleted = cur.rowcount > 0
     return deleted
 
 
@@ -350,22 +395,15 @@ def delete_report(reference):
 # ---------------------------------------------------------------------
 def save_notification_signup(contact, categories):
     ph = _ph()
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute(f"INSERT INTO notifications (timestamp, contact, categories) VALUES ({ph},{ph},{ph})",
-                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), contact, ", ".join(categories)))
-    conn.commit()
-    cur.close()
-    conn.close()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"INSERT INTO notifications (timestamp, contact, categories) VALUES ({ph},{ph},{ph})",
+                    (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), contact, ", ".join(categories)))
 
 
 def load_notifications():
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute("SELECT timestamp, contact, categories FROM notifications ORDER BY id ASC")
-    rows = _rows(cur.fetchall())
-    cur.close()
-    conn.close()
+    with _cursor() as cur:
+        cur.execute("SELECT timestamp, contact, categories FROM notifications ORDER BY id ASC")
+        rows = _rows(cur.fetchall())
     return rows
 
 
@@ -377,49 +415,50 @@ def save_outage(parish, message, start_date, end_date):
            "start_date": start_date, "end_date": end_date,
            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
     ph = _ph()
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute(f"""
-        INSERT INTO outages (id, parish, message, start_date, end_date, created_at)
-        VALUES ({ph},{ph},{ph},{ph},{ph},{ph})
-    """, (row["id"], row["parish"], row["message"], row["start_date"], row["end_date"], row["created_at"]))
-    conn.commit()
-    cur.close()
-    conn.close()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"""
+            INSERT INTO outages (id, parish, message, start_date, end_date, created_at)
+            VALUES ({ph},{ph},{ph},{ph},{ph},{ph})
+        """, (row["id"], row["parish"], row["message"], row["start_date"], row["end_date"], row["created_at"]))
     return row
 
 
 def load_outages():
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM outages ORDER BY created_at ASC")
-    rows = _rows(cur.fetchall())
-    cur.close()
-    conn.close()
+    with _cursor() as cur:
+        cur.execute("SELECT * FROM outages ORDER BY created_at ASC")
+        rows = _rows(cur.fetchall())
     return rows
 
 
 def delete_outage(outage_id):
     ph = _ph()
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute(f"DELETE FROM outages WHERE id = {ph}", (outage_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"DELETE FROM outages WHERE id = {ph}", (outage_id,))
 
 
-def get_active_outages_for_parish(parish):
-    today = datetime.now().strftime("%Y-%m-%d")
+def get_active_outages_for_parish(parish, today=None):
+    """Returns outages currently active (start_date <= today <= end_date)
+    for the given parish.
+
+    FIX: this used to compute "today" from the server's local/UTC clock.
+    Grenada runs a fixed UTC-4 offset with no daylight saving, so on a
+    server running in UTC (the common case on most hosts) that clock is
+    several hours ahead of Grenada for part of every day — which meant an
+    outage could show as active a few hours too early, or vanish a few
+    hours too early, right around the boundary of "today". "today" is now
+    computed in Grenada time by default, matching business-hours logic
+    elsewhere in the app and the same fix already applied on the frontend.
+    An explicit `today` ("YYYY-MM-DD") can still be passed in if a caller
+    ever needs to check a specific date instead of "right now".
+    """
+    if today is None:
+        today = datetime.now(GRENADA_TZ).strftime("%Y-%m-%d")
     ph = _ph()
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute(f"""
-        SELECT * FROM outages WHERE parish = {ph} AND start_date <= {ph} AND end_date >= {ph}
-    """, (parish, today, today))
-    rows = _rows(cur.fetchall())
-    cur.close()
-    conn.close()
+    with _cursor() as cur:
+        cur.execute(f"""
+            SELECT * FROM outages WHERE parish = {ph} AND start_date <= {ph} AND end_date >= {ph}
+        """, (parish, today, today))
+        rows = _rows(cur.fetchall())
     return rows
 
 
@@ -432,32 +471,23 @@ def _tip_out(row):
 
 
 def _seed_tips_if_empty():
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) AS c FROM tips")
-    count = cur.fetchone()["c"]
-    cur.close()
+    with _cursor() as cur:
+        cur.execute("SELECT COUNT(*) AS c FROM tips")
+        count = cur.fetchone()["c"]
     if count:
-        conn.close()
         return
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ph = _ph()
-    cur = conn.cursor()
-    for t in DEFAULT_TIPS:
-        cur.execute(f"INSERT INTO tips (id, text, enabled, created_at) VALUES ({ph},{ph},{ph},{ph})",
-                    (uuid.uuid4().hex[:8], t, "1", now))
-    conn.commit()
-    cur.close()
-    conn.close()
+    with _cursor(commit=True) as cur:
+        for t in DEFAULT_TIPS:
+            cur.execute(f"INSERT INTO tips (id, text, enabled, created_at) VALUES ({ph},{ph},{ph},{ph})",
+                        (uuid.uuid4().hex[:8], t, "1", now))
 
 
 def load_tips():
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM tips ORDER BY created_at ASC")
-    rows = _rows(cur.fetchall())
-    cur.close()
-    conn.close()
+    with _cursor() as cur:
+        cur.execute("SELECT * FROM tips ORDER BY created_at ASC")
+        rows = _rows(cur.fetchall())
     return [_tip_out(r) for r in rows]
 
 
@@ -465,47 +495,34 @@ def save_tip(text):
     row = {"id": uuid.uuid4().hex[:8], "text": text, "enabled": "1",
            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
     ph = _ph()
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute(f"INSERT INTO tips (id, text, enabled, created_at) VALUES ({ph},{ph},{ph},{ph})",
-                (row["id"], row["text"], row["enabled"], row["created_at"]))
-    conn.commit()
-    cur.close()
-    conn.close()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"INSERT INTO tips (id, text, enabled, created_at) VALUES ({ph},{ph},{ph},{ph})",
+                    (row["id"], row["text"], row["enabled"], row["created_at"]))
     return _tip_out(row)
 
 
 def update_tip(tip_id, text=None, enabled=None):
     ph = _ph()
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute(f"SELECT * FROM tips WHERE id = {ph}", (tip_id,))
-    existing = cur.fetchone()
+    with _cursor() as cur:
+        cur.execute(f"SELECT * FROM tips WHERE id = {ph}", (tip_id,))
+        existing = cur.fetchone()
     if existing is None:
-        cur.close()
-        conn.close()
         return None
     existing = dict(existing)
     new_text = text if text is not None else existing["text"]
     new_enabled = ("1" if enabled else "0") if enabled is not None else existing["enabled"]
-    cur.execute(f"UPDATE tips SET text = {ph}, enabled = {ph} WHERE id = {ph}",
-                (new_text, new_enabled, tip_id))
-    conn.commit()
-    cur.close()
-    conn.close()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"UPDATE tips SET text = {ph}, enabled = {ph} WHERE id = {ph}",
+                    (new_text, new_enabled, tip_id))
     return _tip_out({"id": tip_id, "text": new_text, "enabled": new_enabled,
                       "created_at": existing["created_at"]})
 
 
 def delete_tip(tip_id):
     ph = _ph()
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute(f"DELETE FROM tips WHERE id = {ph}", (tip_id,))
-    deleted = cur.rowcount > 0
-    conn.commit()
-    cur.close()
-    conn.close()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"DELETE FROM tips WHERE id = {ph}", (tip_id,))
+        deleted = cur.rowcount > 0
     return deleted
 
 
@@ -513,27 +530,21 @@ def delete_tip(tip_id):
 # Feature flags
 # ---------------------------------------------------------------------
 def _seed_features_if_empty():
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) AS c FROM features")
-    count = cur.fetchone()["c"]
+    with _cursor() as cur:
+        cur.execute("SELECT COUNT(*) AS c FROM features")
+        count = cur.fetchone()["c"]
     if not count:
         ph = _ph()
         data = dict(DEFAULT_FEATURES)
         data["maintenance_message"] = DEFAULT_MAINTENANCE_MESSAGE
-        cur.execute(f"INSERT INTO features (id, data) VALUES (1, {ph})", (json.dumps(data),))
-        conn.commit()
-    cur.close()
-    conn.close()
+        with _cursor(commit=True) as cur:
+            cur.execute(f"INSERT INTO features (id, data) VALUES (1, {ph})", (json.dumps(data),))
 
 
 def load_features():
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute("SELECT data FROM features WHERE id = 1")
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
+    with _cursor() as cur:
+        cur.execute("SELECT data FROM features WHERE id = 1")
+        row = cur.fetchone()
     saved = {}
     if row:
         try:
@@ -555,16 +566,12 @@ def save_features(updates):
             text = (v or "").strip()
             current["maintenance_message"] = text or DEFAULT_MAINTENANCE_MESSAGE
     ph = _ph()
-    conn = _connect()
-    cur = conn.cursor()
-    if USE_POSTGRES:
-        cur.execute(f"""
-            INSERT INTO features (id, data) VALUES (1, {ph})
-            ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data
-        """, (json.dumps(current),))
-    else:
-        cur.execute(f"INSERT OR REPLACE INTO features (id, data) VALUES (1, {ph})", (json.dumps(current),))
-    conn.commit()
-    cur.close()
-    conn.close()
+    with _cursor(commit=True) as cur:
+        if USE_POSTGRES:
+            cur.execute(f"""
+                INSERT INTO features (id, data) VALUES (1, {ph})
+                ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data
+            """, (json.dumps(current),))
+        else:
+            cur.execute(f"INSERT OR REPLACE INTO features (id, data) VALUES (1, {ph})", (json.dumps(current),))
     return current
