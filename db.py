@@ -45,6 +45,23 @@ handling now goes through a small pool (Postgres) / a single shared
 connection (SQLite) that lives for the life of the process — see
 _cursor() below — instead of reconnecting from scratch every time.
 
+RESILIENCE NOTE: hosts like Neon suspend their Postgres compute after a
+few minutes of inactivity, and it wakes back up on the next query — but a
+connection that was sitting idle in the pool when that suspend happened
+can come back from pool.getconn() looking fine while actually being dead
+underneath. Previously, a connection that broke mid-request (or was
+already dead when handed out) got returned to the pool anyway, so every
+future request would keep drawing that same broken connection and fail
+forever until the process was manually restarted — a single blip could
+permanently take the whole app down. _cursor() now (1) discards a
+connection that's already marked closed before using it, and (2) discards
+(rather than returns) any connection that raises a connection-level error
+mid-request, so the pool opens a fresh one next time instead of handing
+out the same corpse. The request that hit the blip still fails and
+surfaces an error to its caller (app.py's /api/chat already catches this
+and shows the customer a friendly retry message) — but the app recovers
+on the very next request instead of staying down.
+
 Every function here keeps the exact same name, signature, and return shape
 as the old CSV-based versions that used to live in app.py, so nothing else
 in the app needs to change.
@@ -143,25 +160,54 @@ def _cursor(commit=False):
     """Yields a DB cursor from the shared pool (Postgres) or the shared
     connection (SQLite). Commits on the way out if commit=True, rolls back
     on any exception, and always returns the connection cleanly — for
-    Postgres it goes back to the pool rather than being closed outright;
-    for SQLite access is serialized with a lock, since SQLite only safely
-    supports one writer at a time."""
+    Postgres it goes back to the pool rather than being closed outright
+    (unless it's actually broken — see below); for SQLite access is
+    serialized with a lock, since SQLite only safely supports one writer
+    at a time."""
     if USE_POSTGRES:
         pool = _init_pg_pool()
         conn = pool.getconn()
+
+        # A connection that's already closed under us (e.g. Neon suspended
+        # its compute while this connection sat idle in the pool) would
+        # otherwise hand back a cursor that's guaranteed to fail. Discard
+        # it and grab a fresh one instead of finding out via a failed
+        # query.
+        if conn.closed:
+            pool.putconn(conn, close=True)
+            conn = pool.getconn()
+
         cur = None
+        broken = False
         try:
             cur = conn.cursor()
             yield cur
             if commit:
                 conn.commit()
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            # The connection itself died mid-request (network blip, a
+            # Neon suspend/resume caught in the middle of a query, etc).
+            # Mark it broken so it gets closed instead of returned to the
+            # pool — otherwise every future request would keep drawing
+            # this same dead connection and fail forever until the
+            # process was restarted. The request that hit this still
+            # fails and raises up to the caller (app.py's /api/chat
+            # already catches this and shows a friendly retry message),
+            # but the app self-heals on the very next request instead of
+            # staying down.
+            broken = True
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
         except Exception:
             conn.rollback()
             raise
         finally:
             if cur is not None:
                 cur.close()
-            pool.putconn(conn)
+            pool.putconn(conn, close=broken)
     else:
         with _sqlite_lock:
             conn = _init_sqlite_conn()
