@@ -16,16 +16,11 @@
   --font-size-base: 0.95rem;
   --radius: 16px;
 
-  /* Ocean palette used only by the background layer below */
   --ocean-deep: #01324F;
   --ocean-mid: #005A9C;
   --ocean-bright: #00B5E2;
   --ocean-foam: #E9FBFF;
 }
-
-/* =========================================================================
-   BASE STYLES
-   ========================================================================= */
 
 body.dark {
   --primary: #2E86C6;
@@ -74,7 +69,6 @@ input[type="checkbox"], input[type="radio"] {
 .page { max-width: 720px; margin: 0 auto; padding: 1.2rem 1rem 2rem; animation: fadeUp .35s ease-out; position: relative; z-index: 1; }
 @keyframes fadeUp { from { opacity:0; transform: translateY(10px);} to {opacity:1; transform:none;} }
 
-/* ---------------- Hero ---------------- */
 .hero {
   position: relative; overflow: hidden; border-radius: 24px 24px 0 0;
   padding: 1.6rem 1.6rem 3.2rem 1.6rem;
@@ -118,7 +112,6 @@ input[type="checkbox"], input[type="radio"] {
 .wave { position:absolute; bottom:-2px; left:0; width:100%; line-height:0; z-index:1; }
 .wave-fill { fill: var(--bg); }
 
-/* ---------------- Tabs ---------------- */
 .tab-nav { display:flex; gap:4px; margin-bottom: 1rem; flex-wrap: wrap; }
 .tab-btn {
   flex:1; min-width: 90px; min-height: 3.4rem; border-radius:12px; border:1px solid color-mix(in srgb, var(--primary) 25%, transparent);
@@ -129,7 +122,6 @@ input[type="checkbox"], input[type="radio"] {
 .tab-panel { display:none; }
 .tab-panel.active { display:block; animation: fadeUp .3s ease-out; }
 
-/* ---------------- Cards (glassmorphism) ---------------- */
 .card {
   background: color-mix(in srgb, var(--card) 78%, transparent);
   backdrop-filter: blur(14px) saturate(140%);
@@ -147,7 +139,6 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 .hint-text { font-size: .78rem; color: color-mix(in srgb, var(--text) 65%, transparent); }
 .error-text { color:#D64545; font-size:.85rem; }
 
-/* ---------------- Buttons ---------------- */
 .btn-primary {
   background: var(--primary); color:#fff; border:none; border-radius:12px; padding:.7rem 1rem; font-weight:700;
   box-shadow: 0 2px 8px rgba(0,90,156,.2);
@@ -160,7 +151,6 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 }
 .btn-secondary:hover { background: var(--bg-soft); }
 
-/* ---------------- Contact row ---------------- */
 .contact-row { display:flex; gap:.7rem; margin-bottom: 1rem; flex-wrap: wrap; }
 .contact-card {
   flex:1; min-width: 90px; background: color-mix(in srgb, var(--card) 65%, transparent); border:1px solid color-mix(in srgb, var(--primary) 15%, transparent);
@@ -171,7 +161,6 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 .contact-label { font-size:.72rem; font-weight:700; color: var(--text); text-transform:uppercase; letter-spacing:.04em; display:block; }
 .contact-value { font-size:.7rem; color: var(--primary); font-weight:600; }
 
-/* ---------------- Chat ---------------- */
 .chat-messages { display:flex; flex-direction:column; gap:.7rem; min-height: 200px; margin-bottom: .8rem; }
 .msg-row { display:flex; gap:.6rem; align-items:flex-end; animation: fadeUp .25s ease-out; }
 .msg-row.user { flex-direction: row-reverse; }
@@ -198,7 +187,6 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 .report-card-row span:first-child { color: color-mix(in srgb, var(--text) 65%, transparent); }
 .severity-badge { padding:.05rem .5rem; border-radius:999px; font-weight:700; }
 
-/* Location card — shown on a chat bubble when the customer shares GPS location */
 .location-card {
   background: linear-gradient(135deg, color-mix(in srgb, var(--card) 92%, transparent), color-mix(in srgb, var(--bg-soft) 92%, transparent));
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
@@ -214,11 +202,6 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 
 .chip-row { display:flex; gap:.5rem; margin: .3rem 0 .8rem; flex-wrap: wrap; }
 
-/* ---------------- Maintenance mode — full takeover screen ----------------
-   Replaces the ENTIRE Chat tab (contact cards, tips, history, input,
-   quick actions — all of it) with just this, per the requirement that
-   nothing else compete with the message for attention while the bot is
-   off. Toggled alongside #chatNormalContent in applyMaintenanceMode(). */
 .maintenance-screen {
   display: none;
   flex-direction: column;
@@ -280,7 +263,6 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 .chat-input-row input[type=text] { border:none; margin:0; background:transparent; flex:1; }
 .chat-input-row input[type=text]:focus { outline:none; }
 
-/* ---------------- Attach / camera / mic / location buttons ---------------- */
 .attach-btn {
   cursor: pointer;
   width: 2.15rem;
@@ -301,9 +283,6 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 .attach-btn:active { transform: translateY(0) scale(.92); }
 .attach-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* Recording (mic) gets a warm red "live" pulse; locating (GPS lookup in
-   progress) gets a cooler accent pulse — same ring treatment, different
-   color, so each state reads instantly without needing to read the icon. */
 #chatMicBtn.mic-active {
   background: #D6454518;
   border-color: #D6454550;
@@ -342,7 +321,6 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 }
 .quick-action-btn:hover { background: var(--bg-soft); }
 
-/* ---------------- Water Service Tip card ---------------- */
 .water-tip-card {
   display: flex;
   align-items: flex-start;
@@ -365,18 +343,15 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 .water-tip-text.tip-fade-in { animation: tipFadeIn .6s ease forwards; }
 @keyframes tipFadeIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 
-/* ---------------- FAQ ---------------- */
 .faq-cat-heading { font-weight:700; margin: .8rem 0 .3rem; }
 .faq-item { background: color-mix(in srgb, var(--card) 85%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border:1px solid color-mix(in srgb, var(--primary) 15%, transparent); border-radius:14px; padding:.8rem 1rem; margin-bottom:.6rem; }
 .faq-cat { font-size:.68rem; font-weight:700; color: var(--accent); text-transform:uppercase; letter-spacing:.05em; }
 
-/* ---------------- Forms ---------------- */
 .form-row-2 { display:grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
 .checkbox-group { display:flex; flex-direction:column; gap:.3rem; margin-bottom:.6rem; }
 .toggle-row { display:flex; align-items:center; gap:.5rem; margin-bottom:.7rem; font-weight:500; }
 .leaflet-map { height: 300px; border-radius: 14px; margin: .6rem 0; overflow:hidden; box-shadow: 0 6px 20px rgba(0,90,156,.15); }
 
-/* ---------------- Staff table ---------------- */
 .table-wrap { overflow-x: auto; }
 .reports-table { width:100%; border-collapse: collapse; font-size:.8rem; }
 .reports-table th, .reports-table td { padding:.4rem .5rem; text-align:left; border-bottom:1px solid color-mix(in srgb, var(--primary) 12%, transparent); white-space: nowrap; }
@@ -389,7 +364,6 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 .outage-row { display:flex; justify-content:space-between; align-items:center; background: color-mix(in srgb, var(--card) 85%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border:1px solid color-mix(in srgb, var(--primary) 15%, transparent); border-radius:12px; padding:.6rem .8rem; margin-bottom:.5rem; gap:.6rem; }
 .outage-row button { background: #D6454518; color:#D64545; border:1px solid #D6454540; border-radius:8px; padding:.3rem .6rem; font-size:.78rem; }
 
-/* ---------------- Staff: Water Service Tips management ---------------- */
 .tip-manage-list { margin-top: .8rem; display: flex; flex-direction: column; gap: .5rem; }
 .tip-manage-row {
   display: flex; align-items: center; justify-content: space-between; gap: .8rem;
@@ -403,14 +377,10 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 .tip-manage-actions button { padding: .3rem .6rem; font-size: .76rem; }
 .tip-delete-btn { color: #D64545 !important; border-color: #D6454540 !important; }
 
-/* Attachment cell in the staff reports table — inline thumbnail for
-   images, a plain link for video/audio/other files. Data comes straight
-   from the report row's base64 (data: URL), not a separate file. */
 .report-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; display: block; }
 .attachment-link { font-size: .78rem; font-weight: 600; color: var(--primary); text-decoration: none; white-space: nowrap; }
 .attachment-link:hover { text-decoration: underline; }
 
-/* ---------------- Login gate ---------------- */
 .login-wrap { max-width: min(460px, 94vw); width:100%; margin: 0 auto; padding: 1rem; animation: fadeUp .4s ease-out; position: relative; z-index: 1; }
 .login-toggle-row { display:flex; justify-content:flex-end; }
 .dm-toggle { font-size:.78rem; display:flex; align-items:center; gap:.3rem; }
@@ -431,7 +401,6 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 .footer { text-align:center; font-size:.72rem; color: color-mix(in srgb, var(--text) 65%, transparent); padding: .9rem 0 1.4rem; position: relative; z-index: 1; }
 .footer strong { color: var(--primary); }
 
-/* ---------------- Real logo / avatar images ---------------- */
 .brand-logo-wrap { width:112px; height:112px; margin:0 auto .6rem; }
 .brand-logo-img { width:100%; height:100%; border-radius:50%; object-fit:cover; box-shadow:0 4px 14px rgba(0,0,0,.18); }
 .avatar-img { width:100%; height:100%; border-radius:50%; object-fit:cover; }
@@ -439,7 +408,6 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 .msg-avatar img { width:100%; height:100%; border-radius:50%; object-fit:cover; }
 .msg-avatar span { font-size:1rem; }
 
-/* ---------------- Chat extras: speak button ---------------- */
 .speak-btn {
   background:none; border:none; font-size:.85rem; padding:.15rem .3rem; margin-top:.35rem;
   opacity:.6; border-radius:6px;
@@ -449,7 +417,6 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 .report-file-row { display:flex; align-items:center; gap:.5rem; }
 .report-file-row input[type=file] { margin-bottom:0; flex:1; }
 
-/* ---------------- Camera modal ---------------- */
 .camera-modal {
   position: fixed; inset:0; z-index:2000; background: rgba(1,15,25,.78);
   backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
@@ -472,52 +439,15 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 .camera-mode-btn.active { background: var(--primary); color:#fff; }
 #cameraPreviewVideo { width:100%; border-radius:14px; max-height:60vh; }
 
-/* ---------------- Attachment viewer modal (Staff Portal) ----------------
-   Reuses the .camera-modal backdrop/shell for visual consistency, but
-   wider and taller since it needs to comfortably fit a full-size image,
-   a video player, or an audio player — not a small camera preview. */
-.attachment-viewer-inner {
-  max-width: 640px;
-  width: 92vw;
-}
-.attachment-viewer-body {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 120px;
-}
-.attachment-viewer-media {
-  width: 100%;
-  max-height: 75vh;
-  border-radius: 12px;
-  display: block;
-  background: #000;
-  object-fit: contain;
-}
-/* The report-thumb <img> used to be wrapped in an <a>; it's now wrapped in
-   a <button> instead (so clicking it opens the in-page viewer rather than
-   trying to navigate to a data: URI, which browsers silently block) — this
-   strips the default button chrome so it still just looks like a thumbnail. */
-.attachment-cell-btn {
-  background: none;
-  border: none;
-  padding: 0;
-  margin: 0;
-  cursor: pointer;
-  font: inherit;
-  color: inherit;
-}
+.attachment-viewer-inner { max-width: 640px; width: 92vw; }
+.attachment-viewer-body { display: flex; align-items: center; justify-content: center; min-height: 120px; }
+.attachment-viewer-media { width: 100%; max-height: 75vh; border-radius: 12px; display: block; background: #000; object-fit: contain; }
+.attachment-cell-btn { background: none; border: none; padding: 0; margin: 0; cursor: pointer; font: inherit; color: inherit; }
 .attachment-cell-btn.attachment-link { padding: 0; }
 
 .delete-report-btn {
-  background: none;
-  border: 1px solid #D6454540;
-  border-radius: 8px;
-  padding: .3rem .5rem;
-  cursor: pointer;
-  font-size: .9rem;
-  line-height: 1;
-  transition: background .15s ease;
+  background: none; border: 1px solid #D6454540; border-radius: 8px; padding: .3rem .5rem;
+  cursor: pointer; font-size: .9rem; line-height: 1; transition: background .15s ease;
 }
 .delete-report-btn:hover { background: #D6454518; }
 .delete-report-btn:disabled { opacity: .4; cursor: not-allowed; }
@@ -529,18 +459,9 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
 
 /* =========================================================================
    WATERY BACKGROUND
-   -------------------------------------------------------------------------
-   Purely decorative. Scoped to the inside of the widget body (absolute,
-   filling its scroll container) rather than the whole viewport, since the
-   viewport itself is the mock website.
    ========================================================================= */
-
 .ocean-bg {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  pointer-events: none;
+  position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none;
   background:
     radial-gradient(1100px 650px at 18% -8%, color-mix(in srgb, var(--ocean-bright) 22%, transparent) 0%, transparent 55%),
     radial-gradient(900px 600px at 100% 0%, color-mix(in srgb, var(--ocean-bright) 14%, transparent) 0%, transparent 60%),
@@ -555,13 +476,11 @@ body.dark .ocean-bg {
 body.high-contrast .ocean-bg { display: none; }
 
 .ocean-caustics {
-  position: absolute;
-  inset: -10%;
+  position: absolute; inset: -10%;
   background:
     radial-gradient(420px 420px at 25% 30%, rgba(255,255,255,0.35) 0%, transparent 60%),
     radial-gradient(360px 360px at 75% 60%, rgba(255,255,255,0.22) 0%, transparent 65%);
-  opacity: 0.35;
-  mix-blend-mode: screen;
+  opacity: 0.35; mix-blend-mode: screen;
   animation: causticsDrift 22s ease-in-out infinite alternate;
   will-change: transform;
 }
@@ -572,30 +491,21 @@ body.dark .ocean-caustics { opacity: 0.14; }
 }
 
 .ocean-wave {
-  position: absolute;
-  left: -10%;
-  width: 120%;
-  height: 220px;
-  background-repeat: repeat-x;
-  background-size: 1200px 220px;
-  will-change: transform;
+  position: absolute; left: -10%; width: 120%; height: 220px;
+  background-repeat: repeat-x; background-size: 1200px 220px; will-change: transform;
 }
 .ocean-wave--back {
-  bottom: -30px;
-  opacity: 0.35;
+  bottom: -30px; opacity: 0.35;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1200' height='220' viewBox='0 0 1200 220'><path d='M0,110 C150,170 350,50 600,110 C850,170 1050,50 1200,110 L1200,220 L0,220 Z' fill='%23FFFFFF'/></svg>");
   animation: waveDriftSlow 26s linear infinite;
 }
 .ocean-wave--mid {
-  bottom: -45px;
-  opacity: 0.28;
+  bottom: -45px; opacity: 0.28;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1200' height='220' viewBox='0 0 1200 220'><path d='M0,130 C200,70 400,190 600,130 C800,70 1000,190 1200,130 L1200,220 L0,220 Z' fill='%2300B5E2'/></svg>");
   animation: waveDriftMed 18s linear infinite reverse;
 }
 .ocean-wave--front {
-  bottom: -60px;
-  height: 200px;
-  opacity: 0.5;
+  bottom: -60px; height: 200px; opacity: 0.5;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1200' height='200' viewBox='0 0 1200 200'><path d='M0,120 C180,180 420,60 600,120 C780,180 1020,60 1200,120 L1200,200 L0,200 Z' fill='%23005A9C'/></svg>");
   animation: waveDriftFast 12s linear infinite;
 }
@@ -605,14 +515,9 @@ body.dark .ocean-caustics { opacity: 0.14; }
 
 .ocean-bubbles { position: absolute; inset: 0; }
 .bubble {
-  position: absolute;
-  bottom: -60px;
-  border-radius: 50%;
+  position: absolute; bottom: -60px; border-radius: 50%;
   background: radial-gradient(circle at 32% 28%, rgba(255,255,255,0.95), rgba(255,255,255,0.08) 70%);
-  opacity: 0.55;
-  animation-name: bubbleRise;
-  animation-timing-function: ease-in;
-  animation-iteration-count: infinite;
+  opacity: 0.55; animation-name: bubbleRise; animation-timing-function: ease-in; animation-iteration-count: infinite;
   will-change: transform, opacity;
 }
 .bubble:nth-child(1)  { left: 6%;  width: 10px; height: 10px; animation-duration: 14s; animation-delay: 0s; }
@@ -633,7 +538,6 @@ body.dark .ocean-caustics { opacity: 0.14; }
   90%  { opacity: 0.35; }
   100% { transform: translate3d(14px, -115vh, 0) scale(1.1); opacity: 0; }
 }
-
 @media (prefers-reduced-motion: reduce) {
   .ocean-caustics, .ocean-wave, .bubble { animation: none !important; }
 }
@@ -672,80 +576,34 @@ body.dark .ocean-caustics { opacity: 0.14; }
   padding: .55rem 1.1rem; border-radius: 10px; flex-shrink:0;
 }
 
-/* Staff Portal nav link — deliberately distinct from the ordinary marketing
-   links so it reads as an internal/admin entry point, not a customer page. */
 .nav-staff-link {
-  color: var(--hover) !important;
-  font-weight: 800 !important;
-  opacity: 1 !important;
-  padding: .3rem .7rem;
-  border-radius: 999px;
+  color: var(--hover) !important; font-weight: 800 !important; opacity: 1 !important;
+  padding: .3rem .7rem; border-radius: 999px;
   background: color-mix(in srgb, var(--primary) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
 }
 .nav-staff-link:hover { background: color-mix(in srgb, var(--primary) 18%, transparent); }
 .nav-staff-link.active { background: var(--primary); color:#fff !important; border-color: var(--primary); }
 
-/* ---------------- Announcement ticker — mirrors the real nawasa.gd
-   scrolling "ANNOUNCEMENTS:" bar just above the hero. ---------------- */
 .mock-announce-bar {
-  background: var(--ocean-deep);
-  color: #cfe6f5;
-  font-size: .8rem;
-  padding: .5rem 1.5rem;
-  display: flex;
-  gap: .5rem;
-  align-items: baseline;
-  overflow: hidden;
+  background: var(--ocean-deep); color: #cfe6f5; font-size: .8rem; padding: .5rem 1.5rem;
+  display: flex; gap: .5rem; align-items: baseline; overflow: hidden;
 }
 .mock-announce-label {
-  flex-shrink: 0;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: .05em;
-  font-size: .7rem;
-  color: var(--accent);
+  flex-shrink: 0; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
+  font-size: .7rem; color: var(--accent);
 }
-.mock-announce-text {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  opacity: .9;
-}
-@media (max-width: 640px) {
-  .mock-announce-bar { font-size: .74rem; }
-}
+.mock-announce-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .9; }
+@media (max-width: 640px) { .mock-announce-bar { font-size: .74rem; } }
 
-.mock-card-link {
-  display: inline-block;
-  margin-top: .6rem;
-  font-size: .82rem;
-  font-weight: 700;
-  color: var(--primary);
-  text-decoration: none;
-}
+.mock-card-link { display: inline-block; margin-top: .6rem; font-size: .82rem; font-weight: 700; color: var(--primary); text-decoration: none; }
 .mock-card-link:hover { text-decoration: underline; }
 .mock-news-grid .mock-card { text-align: left; }
-.mock-news-cat {
-  font-size: .72rem;
-  font-weight: 700;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: .05em;
-  margin: 0;
-}
-.mock-footer-demo-note {
-  font-size: .78rem;
-  opacity: .75;
-  margin-top: .5rem;
-  max-width: 320px;
-}
+.mock-news-cat { font-size: .72rem; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .05em; margin: 0; }
+.mock-footer-demo-note { font-size: .78rem; opacity: .75; margin-top: .5rem; max-width: 320px; }
 .mock-footer-demo-note a { color: #cfe6f5; text-decoration: underline; }
 
-.mock-hero {
-  background: linear-gradient(135deg, var(--primary) 0%, var(--hover) 100%);
-  padding: 4.5rem 1.5rem 5rem;
-}
+.mock-hero { background: linear-gradient(135deg, var(--primary) 0%, var(--hover) 100%); padding: 4.5rem 1.5rem 5rem; }
 .mock-hero-inner { max-width: 720px; margin: 0 auto; text-align: center; color: #fff; }
 .mock-hero-eyebrow {
   display:inline-block; font-size:.75rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
@@ -783,9 +641,7 @@ body.dark .ocean-caustics { opacity: 0.14; }
 .mock-notice-card p { font-size: .85rem; margin: .25rem 0 0; color: color-mix(in srgb, var(--text) 65%, transparent); }
 
 .mock-footer { background: var(--ocean-deep); color: #cfe6f5; padding: 3rem 1.5rem 1.2rem; }
-.mock-footer-inner {
-  max-width: 1180px; margin: 0 auto 1.6rem; display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 2rem;
-}
+.mock-footer-inner { max-width: 1180px; margin: 0 auto 1.6rem; display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 2rem; }
 .mock-footer-inner h4 { font-size: .82rem; text-transform: uppercase; letter-spacing: .05em; margin: 0 0 .6rem; color: #fff; }
 .mock-footer-inner p { font-size: .85rem; margin: 0 0 .3rem; opacity: .85; }
 .mock-footer-inner a { color: #cfe6f5; text-decoration: none; }
@@ -806,31 +662,43 @@ body.dark .ocean-caustics { opacity: 0.14; }
 
 /* =========================================================================
    STAFF PORTAL — SITE SECTION
-   -------------------------------------------------------------------------
-   Moved out of the AquaAssist widget entirely; this is now a normal page
-   section on the demo site, reached via the "Staff Portal" nav link, and
-   toggled with #mockSiteMain by setupSiteNav() in app.js.
    ========================================================================= */
-.staff-site-section {
-  background: var(--bg);
-  min-height: 70vh;
-  padding: 2rem 1.5rem 4rem;
-}
-.staff-site-inner { max-width: 900px; margin: 0 auto; }
+.staff-site-section { background: var(--bg); min-height: 70vh; padding: 2rem 1.5rem 4rem; }
+.staff-site-inner { max-width: 1180px; margin: 0 auto; }
 .staff-site-hero { border-radius: 20px; margin-bottom: 1.5rem; padding: 1.6rem 1.6rem 2.4rem; }
+
+/* ---------------- Staff Portal: sidebar shell (NEW) ---------------- */
+.staff-shell { display: flex; gap: 1.4rem; align-items: flex-start; }
+.staff-sidebar {
+  flex: 0 0 210px; position: sticky; top: 1rem;
+  display: flex; flex-direction: column; gap: .2rem;
+  background: color-mix(in srgb, var(--card) 85%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 15%, transparent);
+  border-radius: 16px; padding: .9rem .7rem;
+}
+.staff-sidebar-title { font-weight: 800; font-size: .82rem; color: var(--primary); line-height: 1.3; padding: .3rem .5rem .8rem; letter-spacing: -.01em; }
+.staff-nav-group {
+  font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+  color: color-mix(in srgb, var(--text) 55%, transparent); padding: .7rem .5rem .2rem;
+}
+.staff-nav-btn { text-align: left; background: none; border: none; border-radius: 10px; padding: .5rem .6rem; font-size: .84rem; font-weight: 600; color: var(--text); }
+.staff-nav-btn:hover { background: color-mix(in srgb, var(--primary) 8%, transparent); }
+.staff-nav-btn.active { background: var(--primary); color: #fff; }
+.staff-main { flex: 1; min-width: 0; }
+.staff-section { display: none; animation: fadeUp .25s ease-out; }
+.staff-section.active { display: block; }
+
+@media (max-width: 780px) {
+  .staff-shell { flex-direction: column; }
+  .staff-sidebar { position: static; flex-direction: row; flex-wrap: wrap; width: 100%; }
+  .staff-nav-group { flex-basis: 100%; padding-top: .5rem; }
+}
 
 /* =========================================================================
    WIDGET SHELL
-   -------------------------------------------------------------------------
-   Collapsed: a small floating launcher button, bottom-right, fixed.
-   Expanded: a fixed chat panel (desktop: ~400x680, bottom-right; mobile:
-   near-full-screen). The panel's content (#widgetBody) is the customer-
-   facing app only — the Staff Portal no longer lives inside it.
    ========================================================================= */
-
 .aqua-widget { position: fixed; z-index: 1000; bottom: 20px; right: 20px; }
 
-/* ---- Collapsed launcher button ---- */
 .widget-fab {
   display: flex; align-items: center; gap: .55rem;
   background: linear-gradient(135deg, var(--primary) 0%, var(--hover) 100%);
@@ -853,10 +721,8 @@ body.dark .ocean-caustics { opacity: 0.14; }
   50%      { box-shadow: 0 10px 30px rgba(0,90,156,.35), 0 0 0 10px rgba(0,181,226,0); }
 }
 @media (prefers-reduced-motion: reduce) { .widget-fab { animation: none; } }
-
 .aqua-widget.expanded .widget-fab { display: none; }
 
-/* ---- Expanded chat panel ---- */
 .widget-panel {
   position: fixed; right: 20px; bottom: 20px;
   width: min(400px, calc(100vw - 32px));
@@ -876,52 +742,31 @@ body.dark .ocean-caustics { opacity: 0.14; }
 }
 @media (prefers-reduced-motion: reduce) { .widget-panel { animation: none; } }
 
-/* ---------------- Widget header ---------------- */
 .widget-header {
   flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
   flex-wrap: nowrap; gap: .5rem; padding: .8rem .9rem .8rem 1rem;
   background: linear-gradient(135deg, var(--primary) 0%, var(--hover) 100%);
-  color: #fff;
-  min-width: 0;
-  width: 100%;
-  overflow: hidden;
+  color: #fff; min-width: 0; width: 100%; overflow: hidden;
 }
-.widget-header-brand {
-  display:flex; align-items:center; gap:.6rem;
-  min-width:0; flex: 1 1 auto;
-  overflow: hidden;
-}
+.widget-header-brand { display:flex; align-items:center; gap:.6rem; min-width:0; flex: 1 1 auto; overflow: hidden; }
 .widget-header-brand > div { min-width: 0; flex: 1 1 auto; }
-.widget-header-title {
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  min-width: 0;
-}
+.widget-header-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .widget-header-avatar {
-  width: 38px; height: 38px; border-radius: 50%; background: #fff;
-  flex: 0 0 38px;
+  width: 38px; height: 38px; border-radius: 50%; background: #fff; flex: 0 0 38px;
   display:flex; align-items:center; justify-content:center; overflow:hidden; box-shadow: 0 2px 8px rgba(0,0,0,.18);
 }
 .widget-header-avatar img { width:100%; height:100%; object-fit:cover; }
 .widget-header-title { font-weight: 800; font-size: 1rem; line-height:1.2; }
 .widget-header-subtitle {
   font-size: .72rem; font-weight: 500; opacity: .92; display:flex; align-items:center; gap:.35rem;
-  white-space: nowrap; overflow:hidden; text-overflow: ellipsis;
-  min-width: 0;
+  white-space: nowrap; overflow:hidden; text-overflow: ellipsis; min-width: 0;
 }
 .widget-header-dot { width:6px; height:6px; border-radius:50%; background:#34D399; flex-shrink:0; animation: onlinePulse 2.2s infinite; }
-.widget-header-actions {
-  display:flex; align-items:center; gap:.3rem;
-  flex: 0 0 auto;
-  min-width: max-content;
-  position: relative;
-  z-index: 5;
-  pointer-events: auto;
-}
+.widget-header-actions { display:flex; align-items:center; gap:.3rem; flex: 0 0 auto; min-width: max-content; position: relative; z-index: 5; pointer-events: auto; }
 .widget-header-btn {
   width: 30px; height: 30px; border-radius: 50%; border: none; background: rgba(255,255,255,.16);
   color: #fff; font-size: 1rem; line-height: 1; display:flex; align-items:center; justify-content:center;
-  text-decoration:none; flex: 0 0 30px;
-  pointer-events: auto;
+  text-decoration:none; flex: 0 0 30px; pointer-events: auto;
 }
 .widget-header-btn:hover { background: rgba(255,255,255,.28); }
 .widget-header-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
@@ -934,24 +779,16 @@ body.dark .ocean-caustics { opacity: 0.14; }
   .widget-header-actions { gap: .2rem; }
 }
 
-.widget-body {
-  position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
-}
+.widget-body { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
 .widget-body .page { max-width: none; margin: 0; padding: 1rem 1rem 1.5rem; position: relative; z-index: 1; }
 .widget-body .login-wrap { max-width: none; margin: 0; padding: 1rem; position: relative; z-index: 1; }
 .widget-body .footer { padding-bottom: 1rem; }
 
 body.aqua-widget-open { overflow: visible; }
 
-/* ---- Mobile: near-full-screen panel ---- */
 @media (max-width: 640px) {
   .aqua-widget { bottom: 16px; right: 16px; }
-  .widget-panel {
-    right: 0; bottom: 0; left: 0; top: 0;
-    width: 100vw; height: 100vh; max-height: 100vh;
-    border-radius: 0;
-  }
+  .widget-panel { right: 0; bottom: 0; left: 0; top: 0; width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; }
   .widget-fab-label { display: none; }
   .widget-fab { padding: .85rem; border-radius: 50%; }
   .widget-fab-icon { width: 24px; height: 24px; font-size: .95rem; }
