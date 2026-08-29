@@ -23,13 +23,17 @@
         <div class="mock-nav-logo-fallback" style="display:none;">NAWASA</div>
         <span class="mock-nav-name">NAWASA</span>
       </div>
+      <!-- Section labels mirror the real nawasa.gd main menu (Home, About
+           Us, Customer Care, Projects & Programmes, Resources, Media
+           Room, Contact Us) — linked out to the real site since this demo
+           doesn't reproduce those inner pages. -->
       <nav class="mock-nav-links">
         <a href="#" id="navHomeLink" class="active">Home</a>
-        <a href="#">Our Services</a>
-        <a href="#">Billing</a>
-        <a href="#">Report an Issue</a>
-        <a href="#">News</a>
-        <a href="#">Contact</a>
+        <a href="https://www.nawasa.gd/about-us/vision-mission" target="_blank" rel="noopener">About Us</a>
+        <a href="https://www.nawasa.gd/customer-care/customer-service-charter" target="_blank" rel="noopener">Customer Care</a>
+        <a href="https://www.nawasa.gd/resources" target="_blank" rel="noopener">Resources</a>
+        <a href="https://www.nawasa.gd/media-room" target="_blank" rel="noopener">Media Room</a>
+        <a href="https://www.nawasa.gd/contact-us" target="_blank" rel="noopener">Contact Us</a>
         <a href="#" id="navStaffPortalLink" class="nav-staff-link">🔐 Staff Portal</a>
       </nav>
       <a href="#" id="navCustomerPortalCta" class="mock-nav-cta">Customer Portal</a>
@@ -37,14 +41,24 @@
   </header>
 
   <div id="mockSiteMain">
+
+  <!-- Announcement ticker — mirrors the scrolling "ANNOUNCEMENTS:" bar on
+       the real nawasa.gd homepage, using their actual current messaging
+       (dry-season storage advisory, the Water Wise radio programme, and
+       their Facebook call-out). -->
+  <div class="mock-announce-bar">
+    <span class="mock-announce-label">Announcements:</span>
+    <span class="mock-announce-text">The dry season is here — always keep water storage on hand to last a minimum of three days. · Catch our Water Wise programme Mon, Wed &amp; Fri — WEE FM 7:15am, Real FM 7:30am, City Sound FM 10:30am. · Find us on Facebook — search NAWASA Grenada.</span>
+  </div>
+
   <section class="mock-hero">
     <div class="mock-hero-inner">
       <span class="mock-hero-eyebrow">National Water &amp; Sewerage Authority</span>
-      <h1>Clean, reliable water for every parish in Grenada</h1>
-      <p>Serving Grenada, Carriacou &amp; Petite Martinique with safe drinking water and modern sewerage services since 1973.</p>
+      <h1>NAWASA — committed to meeting customers' needs</h1>
+      <p>Serving Grenada, Carriacou &amp; Petite Martinique with safe drinking water and modern sewerage services.</p>
       <div class="mock-hero-actions">
-        <a href="#" class="mock-btn mock-btn-primary">Pay My Bill</a>
-        <a href="#" class="mock-btn mock-btn-ghost">Report a Leak</a>
+        <a href="https://www.nawasa.gd/contact-us" target="_blank" rel="noopener" class="mock-btn mock-btn-primary">Report a Leak</a>
+        <a href="https://www.nawasa.gd/customer-care/customer-service-charter" target="_blank" rel="noopener" class="mock-btn mock-btn-ghost">Customer Service Charter</a>
         <!-- Lets staff confirm the ElevenLabs Caribbean-accent voice is
              actually configured and sounds right BEFORE the competition
              starts, without opening the chat widget and hunting for a
@@ -57,68 +71,107 @@
     </div>
   </section>
 
+  <!-- Three-card layout mirrors the real homepage's "Customer Care /
+       Media Room / Resources" section — descriptions paraphrased in our
+       own words, cards link out to the corresponding real pages. -->
   <section class="mock-content">
     <div class="mock-section-head">
-      <h2>Our Services</h2>
+      <h2>NAWASA — committed to meeting customers' needs</h2>
       <p class="mock-section-sub">Everything you need to manage your NAWASA account, in one place.</p>
     </div>
     <div class="mock-card-grid">
       <div class="mock-card">
-        <div class="mock-card-icon">💧</div>
-        <h3>New Connections</h3>
-        <p>Apply for a new water service connection for your home, business, or project site.</p>
+        <div class="mock-card-icon">🧾</div>
+        <h3>Customer Care</h3>
+        <p>Read NAWASA's Customer Service Charter to see what to expect from us, and what we ask of our customers.</p>
+        <a href="https://www.nawasa.gd/customer-care/customer-service-charter" target="_blank" rel="noopener" class="mock-card-link">Read more →</a>
       </div>
       <div class="mock-card">
-        <div class="mock-card-icon">📄</div>
-        <h3>Billing &amp; Payments</h3>
-        <p>View your balance, understand your consumption, and pay online or in person.</p>
+        <div class="mock-card-icon">📰</div>
+        <h3>Media Room</h3>
+        <p>Browse NAWASA press releases, photo and video galleries, newsletters, and brochures.</p>
+        <a href="https://www.nawasa.gd/media-room" target="_blank" rel="noopener" class="mock-card-link">Read more →</a>
       </div>
       <div class="mock-card">
-        <div class="mock-card-icon">🛠️</div>
-        <h3>Leak &amp; Outage Reporting</h3>
-        <p>Report leaks, burst mains, and check for scheduled maintenance in your parish.</p>
-      </div>
-      <div class="mock-card">
-        <div class="mock-card-icon">📍</div>
-        <h3>Office Locations</h3>
-        <p>Find your nearest NAWASA office across St. George's, Grenville, Gouyave, and more.</p>
+        <div class="mock-card-icon">📚</div>
+        <h3>Resources</h3>
+        <p>Explore legislation, annual reports, water treatment info, and other NAWASA research and publications.</p>
+        <a href="https://www.nawasa.gd/resources" target="_blank" rel="noopener" class="mock-card-link">Read more →</a>
       </div>
     </div>
   </section>
 
+  <!-- Latest News — the same three posts currently featured on the real
+       nawasa.gd homepage's blog carousel, linked out to the real posts. -->
   <section class="mock-content mock-content-alt">
     <div class="mock-section-head">
-      <h2>Service Notices</h2>
-      <p class="mock-section-sub">Stay informed about planned maintenance in your area.</p>
+      <h2>Latest News</h2>
+      <p class="mock-section-sub">From the NAWASA Blog.</p>
     </div>
-    <div class="mock-notice-card">
-      <span class="mock-notice-dot"></span>
-      <div>
-        <b>St. Andrew's — Scheduled Maintenance</b>
-        <p>Routine main line maintenance may cause brief low pressure in some areas this week.</p>
+    <div class="mock-card-grid mock-news-grid">
+      <div class="mock-card">
+        <h3>NAWASA App</h3>
+        <p class="mock-news-cat">NAWASA Blog</p>
+        <a href="https://www.nawasa.gd/nawasa-blog/entry/nawasa-app" target="_blank" rel="noopener" class="mock-card-link">Read more →</a>
+      </div>
+      <div class="mock-card">
+        <h3>Bill payment — upside down</h3>
+        <p class="mock-news-cat">NAWASA Blog</p>
+        <a href="https://www.nawasa.gd/nawasa-blog/entry/bill-payment-upside-down" target="_blank" rel="noopener" class="mock-card-link">Read more →</a>
+      </div>
+      <div class="mock-card">
+        <h3>Stay Connected</h3>
+        <p class="mock-news-cat">NAWASA Blog</p>
+        <a href="https://www.nawasa.gd/nawasa-blog/entry/stay-connected" target="_blank" rel="noopener" class="mock-card-link">Read more →</a>
       </div>
     </div>
   </section>
+
+  <!-- Customer Service Charter blurb — paraphrased from the real
+       homepage section of the same name. -->
+  <section class="mock-content">
+    <div class="mock-notice-card" style="border-left-color: var(--primary);">
+      <span class="mock-notice-dot" style="background: var(--primary);"></span>
+      <div>
+        <b>Customer Service Charter</b>
+        <p>NAWASA's Customer Service Charter sets out our commitment to helping customers get the most from our services, and gives you a way to share feedback and suggestions with us directly.</p>
+        <a href="https://www.nawasa.gd/customer-care/customer-service-charter" target="_blank" rel="noopener" class="mock-card-link">Read the charter →</a>
+      </div>
+    </div>
+  </section>
+
   </div><!-- /#mockSiteMain -->
 
+  <!-- Footer mirrors the real site's "Quicklinks" and "Connect With Us"
+       columns, including their actual phone/WhatsApp numbers and social
+       links. -->
   <footer class="mock-footer">
     <div class="mock-footer-inner">
       <div>
         <div class="mock-nav-name" style="color:#fff;">NAWASA</div>
         <p>National Water &amp; Sewerage Authority — Grenada, Carriacou &amp; Petite Martinique.</p>
+        <p class="mock-footer-demo-note">This is a demo preview site built to showcase the AquaAssist chat widget — not NAWASA's official website. Visit the real site at <a href="https://www.nawasa.gd/" target="_blank" rel="noopener">nawasa.gd</a>.</p>
       </div>
       <div>
-        <h4>Contact</h4>
-        <p>(473) 440-2155</p>
-        <p>Lucas Street, St. George's</p>
+        <h4>Quicklinks</h4>
+        <p><a href="https://www.nawasa.gd/nawasa-calender" target="_blank" rel="noopener">Events Calendar</a></p>
+        <p><a href="https://www.nawasa.gd/contact-us" target="_blank" rel="noopener">Report a Leak</a></p>
+        <p><a href="https://www.nawasa.gd/contact-us" target="_blank" rel="noopener">Make a Suggestion</a></p>
+        <p><a href="https://www.nawasa.gd/career-opportunities" target="_blank" rel="noopener">Job Opportunities</a></p>
       </div>
       <div>
-        <h4>Quick Links</h4>
-        <p><a href="#">Terms &amp; Conditions</a></p>
-        <p><a href="#">Privacy Policy</a></p>
+        <h4>Connect With Us</h4>
+        <p>Phone: (473) 440-2155</p>
+        <p>WhatsApp: 405 5245 / 459 6064 / 405 9143</p>
+        <p>
+          <a href="https://www.facebook.com/nawasa.grenada" target="_blank" rel="noopener">Facebook</a> ·
+          <a href="https://twitter.com/NAWASAGrenada" target="_blank" rel="noopener">Twitter</a> ·
+          <a href="https://www.instagram.com/nawasa_gnd/" target="_blank" rel="noopener">Instagram</a> ·
+          <a href="https://www.youtube.com/user/NAWASA1Grenada" target="_blank" rel="noopener">YouTube</a>
+        </p>
       </div>
     </div>
-    <div class="mock-footer-bottom">© NAWASA. This demo page exists only to preview the AquaAssist widget below.</div>
+    <div class="mock-footer-bottom">Copyright © 2026 NAWASA. All rights reserved. Demo site built for the AquaAssist competition entry by AquaVision.</div>
   </footer>
 </div>
 <!-- =================== END MOCK NAWASA WEBSITE =================== -->
