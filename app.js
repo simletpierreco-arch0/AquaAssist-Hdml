@@ -3,13 +3,6 @@
 
 const API = ""; // same-origin
 
-// Territories that map to exactly one NAWASA parish. Used to auto-fill
-// aqua_customer_parish (see startChatBtn handler and the Settings
-// territory-change handler below) so outage/service notices show up for
-// a customer right away instead of staying invisible until they happen
-// to visit Settings and manually pick a parish. "Grenada" isn't included
-// since it covers six different mainland parishes and can't be guessed
-// from territory alone.
 const TERRITORY_TO_PARISH = {
   "Carriacou": "Carriacou and Petite Martinique",
   "Petit Martinique": "Carriacou and Petite Martinique",
@@ -21,12 +14,14 @@ const state = {
   territory: localStorage.getItem("aqua_territory") || "Grenada",
   messages: JSON.parse(localStorage.getItem("aqua_messages") || "[]"),
   staffPasscode: sessionStorage.getItem("aqua_staff_passcode") || "",
+  staffRole: sessionStorage.getItem("aqua_staff_role") || null,
+  faqsAdmin: [],
   reportPin: null,
   reportMap: null,
   reportMarker: null,
   staffMap: null,
-  features: {}, // feature flag id -> bool, e.g. {faqs: true, water_tips: true, ...}
-  tips: [], // active water service tips for the customer rotation
+  features: {},
+  tips: [],
   tipIndex: 0,
   tipTimer: null,
 };
@@ -43,10 +38,7 @@ function saveSession(id) {
 }
 
 // ---------------------------------------------------------------------
-// Widget shell — collapsed floating button <-> expanded chat panel.
-// This wraps the app; nothing below this function had to change to work
-// inside the widget, since the panel is just a fixed-position, scrollable
-// box and the app content inside it is untouched.
+// Widget shell
 // ---------------------------------------------------------------------
 function setupWidgetToggle() {
   const widget = $("#aquaWidget");
@@ -61,13 +53,10 @@ function setupWidgetToggle() {
     panel.style.display = "flex";
     fab.setAttribute("aria-expanded", "true");
     document.body.classList.add("aqua-widget-open");
-    // Maps render at 0 size while their container is display:none — force
-    // Leaflet to recalculate now that the panel is actually visible.
     setTimeout(() => {
       if (state.reportMap) state.reportMap.invalidateSize();
       if (state.staffMap) state.staffMap.invalidateSize();
     }, 260);
-    // Move focus into the panel for keyboard/screen-reader users.
     setTimeout(() => closeBtn && closeBtn.focus(), 300);
   }
 
@@ -104,9 +93,6 @@ async function init() {
   populateSelect($("#territorySelect"), state.config.territories);
   $("#territorySelect").value = state.territory;
 
-  // The Staff Portal now lives on the demo site itself, completely
-  // separate from the customer chat widget — it doesn't depend on the
-  // customer having "logged in" to the widget, so it's wired up here.
   setupSiteNav();
   setupStaffPortal();
   setupVoiceTestButton();
@@ -131,12 +117,6 @@ async function init() {
     state.territory = territory;
     localStorage.setItem("aqua_territory", territory);
     localStorage.setItem("aqua_auth_done", "1");
-    // Auto-fill the customer's parish whenever their chosen territory
-    // maps to exactly one NAWASA parish (Carriacou / Petit Martinique),
-    // so outage/service notices can show up immediately on the Chat tab
-    // instead of silently staying blank until the customer happens to
-    // visit Settings and pick a parish manually. Never overwrites a
-    // parish the customer already set themselves.
     if (!localStorage.getItem("aqua_customer_parish") && TERRITORY_TO_PARISH[territory]) {
       localStorage.setItem("aqua_customer_parish", TERRITORY_TO_PARISH[territory]);
     }
@@ -145,10 +125,7 @@ async function init() {
 }
 
 // ---------------------------------------------------------------------
-// Site nav — switches the demo website between its normal customer-facing
-// content and the Staff Portal section. The Staff Portal is intentionally
-// NOT part of the AquaAssist chat widget; it's reached from the mock
-// site's own nav, same as any other admin area would be on a real site.
+// Site nav
 // ---------------------------------------------------------------------
 function setupSiteNav() {
   const showSite = (pushUrl = true) => {
@@ -169,12 +146,6 @@ function setupSiteNav() {
     if (pushUrl && window.location.pathname !== "/admin") {
       history.pushState({ view: "admin" }, "", "/admin");
     }
-    // Resume an existing staff session automatically (e.g. after a page
-    // refresh) instead of forcing the passcode to be re-entered every
-    // time — sessionStorage already remembers it. If it's actually
-    // expired/invalid, the first staffFetch() call inside
-    // staffLoginSuccess()'s loaders gets a 401 and staffLogout() runs
-    // automatically, correctly falling back to the login form.
     if (state.staffPasscode) {
       staffLoginSuccess();
     }
@@ -184,23 +155,15 @@ function setupSiteNav() {
   $("#navCustomerPortalCta").addEventListener("click", (e) => {
     e.preventDefault();
     showSite();
-    // Also pop the AquaAssist chat widget open, since "Customer Portal" on
-    // a real NAWASA site would point a visitor at the chat/service widget.
     const widget = $("#aquaWidget");
     if (!widget.classList.contains("expanded")) $("#widgetToggleBtn").click();
   });
 
-  // Keep the browser's back/forward buttons working correctly between the
-  // marketing site and the Staff Portal.
   window.addEventListener("popstate", () => {
     if (window.location.pathname === "/admin") showStaffPortal(false);
     else showSite(false);
   });
 
-  // Deep-link support: visiting /admin directly (bookmark, typed URL, a
-  // link staff share with each other) lands straight on the Staff Portal
-  // login instead of the marketing homepage. pushUrl=false since the URL
-  // is already correct — no need to rewrite history on the very first load.
   if (window.location.pathname === "/admin") {
     showStaffPortal(false);
   }
@@ -296,13 +259,7 @@ function renderContactRow() {
 }
 
 // ---------------------------------------------------------------------
-// Feature flags — staff can flip these in the Staff Portal to show/hide
-// customer-facing features (FAQs, Water Tips, Report an Issue, WhatsApp,
-// Voice Notes, Get Notified, Camera, Quick Actions, and the Dark Mode /
-// High Contrast / Larger Text / Read Aloud accessibility toggles) without
-// touching code. Flags are public (GET /api/features
-// needs no passcode) so the customer widget can read them on every load;
-// only writing them (PATCH) requires the staff passcode.
+// Feature flags
 // ---------------------------------------------------------------------
 const FEATURE_DEFS = [
   { id: "faqs", label: "FAQs" },
@@ -328,21 +285,15 @@ async function loadFeatureFlags() {
     const res = await fetch(`${API}/api/features`);
     state.features = await res.json();
   } catch (err) {
-    // If the endpoint isn't reachable for some reason, default everything
-    // on so the demo degrades gracefully rather than hiding features.
     state.features = {};
     FEATURE_DEFS.forEach((f) => { state.features[f.id] = true; });
   }
 }
 
 function featureEnabled(id) {
-  return state.features[id] !== false; // default ON unless explicitly disabled
+  return state.features[id] !== false;
 }
 
-// Applies the current feature flags to the customer-facing UI: hides the
-// relevant tab/button/card entirely (rather than just disabling it) so a
-// turned-off feature really disappears for customers, per the NAWASA
-// requirement that Staff Portal toggles control what customers can see.
 function applyFeatureVisibility() {
   const faqTab = $('.tab-btn[data-tab="faq"]');
   if (faqTab) faqTab.style.display = featureEnabled("faqs") ? "" : "none";
@@ -356,10 +307,6 @@ function applyFeatureVisibility() {
   const settingsTab = $('.tab-btn[data-tab="settings"]');
   if (settingsTab) settingsTab.style.display = featureEnabled("settings") ? "" : "none";
 
-  // Camera buttons (live photo/video capture) — only shown when both the
-  // staff toggle is on AND the device actually supports getUserMedia.
-  // Plain file attachment (the 📎 button) is untouched by this flag; it
-  // only controls the live camera capture entry points.
   const hasCameraSupport = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   const cameraEls = [$("#chatCameraBtn"), $("#reportCameraBtn")];
   cameraEls.forEach((el) => { if (el) el.style.display = (featureEnabled("camera") && hasCameraSupport) ? "" : "none"; });
@@ -386,13 +333,9 @@ function applyFeatureVisibility() {
   const micBtn = $("#chatMicBtn");
   if (micBtn) micBtn.style.display = featureEnabled("voice_notes") ? "" : "none";
 
-  // Quick actions grid on the Chat tab (label + button grid together).
   const qaLabel = $("#quickActionsLabel"), qaGrid = $("#quickActions");
   [qaLabel, qaGrid].forEach((el) => { if (el) el.style.display = featureEnabled("quick_actions") ? "" : "none"; });
 
-  // Settings-tab accessibility/preference toggles — each hidden by
-  // removing its whole row (checkbox + label text), not just the input,
-  // so no orphaned label is left behind.
   const toggleRow = (inputId) => { const input = $(inputId); return input ? input.closest("label") : null; };
   const darkRow = toggleRow("#darkModeToggle");
   if (darkRow) darkRow.style.display = featureEnabled("dark_mode") ? "" : "none";
@@ -402,17 +345,9 @@ function applyFeatureVisibility() {
   if (largeRow) largeRow.style.display = featureEnabled("large_text") ? "" : "none";
   const readAloudRow = toggleRow("#readAloudToggle");
   if (readAloudRow) readAloudRow.style.display = featureEnabled("read_aloud") ? "" : "none";
-  // The voice picker is only meaningful alongside Read Aloud, so it rides
-  // on the same flag.
   const voiceLabel = $("#voiceSelectLabel"), voiceSelectEl = $("#voiceSelect");
   [voiceLabel, voiceSelectEl].forEach((el) => { if (el) el.style.display = featureEnabled("read_aloud") ? "" : "none"; });
 
-  // Defense in depth: appendBubble()/renderFAQ() already skip creating
-  // 🔊 buttons at all when this flag is off, but if either ever rendered
-  // before flags were loaded (or a future change adds live polling while
-  // content is already on screen), sweep any that already exist too — the
-  // Read Aloud feature should mean NO read-aloud entry points anywhere,
-  // not just the Settings toggle.
   document.querySelectorAll(".speak-btn").forEach((btn) => {
     btn.style.display = featureEnabled("read_aloud") ? "" : "none";
   });
@@ -420,8 +355,6 @@ function applyFeatureVisibility() {
     stopSpeaking();
   }
 
-  // If a now-hidden tab was the active one, fall back to the Chat tab so
-  // the customer never lands on a blank panel.
   const activeTab = $(".tab-btn.active");
   if (activeTab && activeTab.style.display === "none") {
     const chatTab = $('.tab-btn[data-tab="chat"]');
@@ -431,14 +364,6 @@ function applyFeatureVisibility() {
   applyMaintenanceMode();
 }
 
-// Staff-controlled kill switch for the chatbot itself (not the whole
-// widget — Report & Track, FAQ, etc. don't depend on the AI and keep
-// working normally, since those are separate tabs entirely). When off:
-// a clean takeover screen replaces the ENTIRE Chat tab — contact cards,
-// tips, message history, input, quick actions, all of it — showing only
-// the staff-editable message, per NAWASA's ask that nothing else compete
-// with it for attention. The backend enforces this independently too
-// (see /api/chat in app.py) — this is the UI half of that same switch.
 function applyMaintenanceMode() {
   const available = featureEnabled("chatbot_available");
   const screen = $("#maintenanceScreen");
@@ -449,10 +374,6 @@ function applyMaintenanceMode() {
   if (tabNav) tabNav.style.display = available ? "" : "none";
 
   if (!available) {
-    // With the tab bar hidden there's no way to navigate to another tab
-    // anyway, but force Chat to be the only "active" panel too, in case
-    // the customer was already sitting on FAQ/Report/etc. when this
-    // switched on (e.g. a page reload while maintenance was already set).
     $$(".tab-btn").forEach((b) => b.classList.remove("active"));
     $$(".tab-panel").forEach((p) => p.classList.remove("active"));
     const chatTabBtn = $('.tab-btn[data-tab="chat"]');
@@ -469,11 +390,6 @@ function applyMaintenanceMode() {
       const textEl = $("#maintenanceScreenText");
       if (textEl) textEl.textContent = msg;
 
-      // The emergency fallback for when the bot itself is down — always
-      // shown here regardless of the separate Call Us / WhatsApp toggles,
-      // which only control the normal contact row shown when the bot IS
-      // available. Turning those off elsewhere must never remove the only
-      // way to reach NAWASA while the chatbot is unavailable.
       const callBtn = $("#maintenanceCallBtn");
       if (callBtn && state.config) {
         const phoneDigits = state.config.nawasa_phone.replace(/\D/g, "");
@@ -489,9 +405,7 @@ function applyMaintenanceMode() {
 }
 
 // ---------------------------------------------------------------------
-// Water Service Tips — small rotating tip card on the Chat tab. Only the
-// tips staff have left enabled are ever sent to the customer; rotation is
-// purely client-side (no reload needed) with a soft cross-fade.
+// Water Service Tips
 // ---------------------------------------------------------------------
 async function loadTips() {
   try {
@@ -515,7 +429,6 @@ function renderCurrentTip() {
   const textEl = $("#waterTipText");
   if (!textEl || !state.tips.length) return;
   textEl.classList.remove("tip-fade-in");
-  // Force a reflow so the fade-in animation restarts on every tip change.
   void textEl.offsetWidth;
   textEl.textContent = state.tips[state.tipIndex % state.tips.length].text;
   textEl.classList.add("tip-fade-in");
@@ -538,7 +451,7 @@ function stopTipRotation() {
 }
 
 // ---------------------------------------------------------------------
-// Tabs
+// Tabs (customer widget)
 // ---------------------------------------------------------------------
 function setupTabs() {
   $$(".tab-btn").forEach((btn) => {
@@ -577,11 +490,6 @@ function renderQuickActions() {
   });
 }
 
-// Intelligent follow-up suggestions: only offered when the most recent
-// exchange actually touched a topic that has a natural next step. Unlike
-// a chatbot that tacks the same "anything else?" chips onto every reply,
-// this returns null (no chips at all) when nothing relevant matched, so
-// suggestions stay occasional and useful rather than repetitive.
 function suggestFollowupChips() {
   const lastAssistant = [...state.messages].reverse().find((m) => m.role === "assistant");
   const lastUser = [...state.messages].reverse().find((m) => m.role === "user");
@@ -616,11 +524,11 @@ function suggestFollowupChips() {
   for (const t of topics) {
     if (t.keys.some((k) => recent.includes(k))) return t.chips;
   }
-  return null; // nothing topical matched — don't force a generic follow-up
+  return null;
 }
 
 // ---------------------------------------------------------------------
-// FAQ
+// FAQ (customer-facing)
 // ---------------------------------------------------------------------
 function renderFAQ(query) {
   const q = (query || "").toLowerCase();
@@ -643,9 +551,6 @@ function renderFAQ(query) {
       const item = document.createElement("div");
       item.className = "faq-item";
       item.innerHTML = `<div class="faq-cat">${f.category}</div><b>${escapeHtml(f.q)}</b><br>${escapeHtml(f.a)}`;
-      // Read-aloud button — reuses the same speakText() helper (and voice
-      // preference) already used for chat replies. Only shown when staff
-      // have the Read Aloud feature enabled.
       if (featureEnabled("read_aloud")) {
         const speakBtn = document.createElement("button");
         speakBtn.type = "button";
@@ -664,8 +569,8 @@ function renderFAQ(query) {
 // ---------------------------------------------------------------------
 // Chat
 // ---------------------------------------------------------------------
-let pendingAttachment = null; // {name, mime, data_base64}
-let pendingReportPhoto = null; // {name, mime, data_base64} — from report form's file input or camera
+let pendingAttachment = null;
+let pendingReportPhoto = null;
 
 function renderChat() {
   const box = $("#chatMessages");
@@ -673,16 +578,6 @@ function renderChat() {
   if (!state.messages.length) {
     appendBubble("assistant", welcomeText());
   } else {
-    // isLive=false — this is a REPLAY of chat history from localStorage
-    // (page load / widget reopen), not a fresh reply. Passing false here
-    // stops appendBubble() from auto-playing read-aloud TTS for every
-    // single historical message at once: without this, reopening a chat
-    // with read-aloud on and N prior assistant messages would fire N
-    // near-simultaneous /api/tts requests that immediately cancel each
-    // other out (speakText() stops whatever's already playing before
-    // starting the next one), producing stuttering audio and wasted
-    // network calls. Live replies from sendMessage() below don't pass
-    // this argument, so they default to true and still auto-play normally.
     state.messages.forEach((m) => appendBubble(m.role, m.content, m.attachmentName, m.reportCard, m.attachmentMime, m.locationCard, false));
   }
   $("#messageCount").textContent = `${state.messages.length} messages in this session.`;
@@ -719,9 +614,6 @@ function appendBubble(role, content, attachmentName, reportCard, attachmentMime,
   if (locationCard) {
     bubble.appendChild(buildLocationCardEl(locationCard));
   }
-  // Build the speak button BEFORE deciding whether to auto-play below, so
-  // the auto-play path can toggle the same button's icon/state instead of
-  // playing "blind" with no visual indicator that anything is happening.
   let speakBtn = null;
   if (role === "assistant" && featureEnabled("read_aloud")) {
     speakBtn = document.createElement("button");
@@ -736,9 +628,6 @@ function appendBubble(role, content, attachmentName, reportCard, attachmentMime,
   row.appendChild(bubble);
   $("#chatMessages").appendChild(row);
   $("#chatMessages").scrollTop = $("#chatMessages").scrollHeight;
-  // Only auto-play for a genuinely NEW/live message (isLive=true, the
-  // default) — never for historical messages being replayed on page load
-  // or widget reopen. See the isLive comment in renderChat() above.
   if (isLive && role === "assistant" && featureEnabled("read_aloud") && localStorage.getItem("aqua_read_aloud") === "1") {
     speakText(content, speakBtn);
   }
@@ -747,34 +636,12 @@ function appendBubble(role, content, attachmentName, reportCard, attachmentMime,
 // ---------------------------------------------------------------------
 // Text-to-speech
 // ---------------------------------------------------------------------
-// Primary path: the backend's /api/tts endpoint, which proxies to
-// ElevenLabs so AquaAssist can speak with an actual Caribbean-accented
-// voice (browsers essentially never ship a real Caribbean voice for the
-// native Web Speech API, no matter which one you pick from the list).
-//
-// Fallback path: if /api/tts isn't configured on the server (no
-// ELEVENLABS_API_KEY set) or the request fails for any reason, we fall
-// back to the browser's built-in speechSynthesis so read-aloud still
-// works — just without the Caribbean accent.
-//
-// PLAY/STOP TOGGLE: speakText(text, btn) now tracks which button (if any)
-// triggered the currently-playing audio in currentSpeakBtn. Clicking the
-// SAME button again while it's speaking stops playback instead of
-// restarting it; clicking a DIFFERENT button stops whatever was playing
-// first, then starts the new one. The button's icon/style flips between
-// 🔊 and ⏹️ (via the .speaking CSS class) so it's obvious which message
-// is currently being read.
 let availableVoices = [];
 let currentAudio = null;
 let currentSpeakBtn = null;
 
-// Caribbean English locale codes — used only by the browser-voice fallback
-// path below. Some platforms (Edge/Windows in particular) ship neural
-// voices for these locales even though they're easy to miss in a long,
-// mostly US/UK/AU list.
 const CARIBBEAN_LOCALES = [
-  "en-gd", // Grenada
-  "en-jm", "en-tt", "en-bb", "en-lc", "en-vc", "en-ag", "en-kn", "en-dm", "en-bs", "en-bz", "en-gy",
+  "en-gd", "en-jm", "en-tt", "en-bb", "en-lc", "en-vc", "en-ag", "en-kn", "en-dm", "en-bs", "en-bz", "en-gy",
 ];
 
 function loadVoices() {
@@ -828,8 +695,6 @@ function resetSpeakBtn(btn) {
   btn.textContent = "🔊";
 }
 
-// Stops whatever is currently playing/queued (server audio clip or the
-// browser's speechSynthesis) and resets that message's button back to 🔊.
 function stopSpeaking() {
   if (currentAudio) {
     currentAudio.pause();
@@ -858,13 +723,10 @@ function speakWithBrowserVoice(plainText, btn) {
 }
 
 async function speakText(text, btn) {
-  // Clicking the button that's already speaking is a STOP action.
   if (btn && currentSpeakBtn === btn) {
     stopSpeaking();
     return;
   }
-  // Otherwise, stop anything else currently playing/queued first so only
-  // one message is ever being read aloud at a time.
   stopSpeaking();
 
   if (btn) {
@@ -897,19 +759,10 @@ async function speakText(text, btn) {
     });
     await currentAudio.play();
   } catch (err) {
-    // Server-side TTS isn't configured or the request failed — fall back
-    // to the browser's built-in voice so read-aloud still works.
     speakWithBrowserVoice(plain, btn);
   }
 }
 
-// ---------------------------------------------------------------------
-// Homepage "test the Caribbean voice" button — lets staff confirm the
-// ElevenLabs voice is actually configured and sounds right BEFORE the
-// competition starts, without having to open the chat widget and hunt
-// for a message to read aloud. Lives in the mock homepage hero, works
-// with no login required (hits the same public /api/tts endpoint).
-// ---------------------------------------------------------------------
 function setupVoiceTestButton() {
   const btn = $("#testVoiceBtn");
   if (!btn) return;
@@ -923,7 +776,6 @@ function setupVoiceTestButton() {
   };
 
   btn.addEventListener("click", async () => {
-    // Toggle off if a test clip is already playing.
     if (testAudio && !testAudio.paused) {
       testAudio.pause();
       testAudio = null;
@@ -965,20 +817,11 @@ function setupVoiceTestButton() {
 }
 
 // ---------------------------------------------------------------------
-// Lightweight markdown + auto-linking for chat bubbles.
-//
-// Order matters: escape HTML first (so user/bot text can never inject
-// markup), then bold + line breaks, THEN URL linking, THEN phone-number
-// linking. Phone linking runs last and is careful to skip over any text
-// already inside an <a>...</a> tag from the URL-linking step, so it can
-// never rewrite a link's own href/label.
+// Lightweight markdown + auto-linking
 // ---------------------------------------------------------------------
 const PHONE_NUMBER_RE = /(\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/g;
 
 function linkifyPhoneNumbers(html) {
-  // Split around any existing <a>...</a> tags so the phone regex only
-  // ever runs against the plain-text segments between them — it must
-  // never touch link text or attributes from the URL-linking step above.
   const parts = html.split(/(<a\b[^>]*>.*?<\/a>)/g);
   return parts.map((part) => {
     if (part.startsWith("<a")) return part;
@@ -991,9 +834,6 @@ function linkifyPhoneNumbers(html) {
 }
 
 function mdLite(text) {
-  // Minimal, safe markdown: escape HTML first, then bold + line breaks,
-  // then turn bare URLs into clickable links, then turn phone numbers
-  // (e.g. NAWASA's (473) 440-2155) into tap-to-call links.
   let html = escapeHtml(text)
     .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
     .replace(/\n/g, "<br>");
@@ -1029,9 +869,6 @@ function buildReportCardEl(card) {
   return wrap;
 }
 
-// Nicer bubble for a shared GPS location — shows the resolved parish,
-// the accuracy radius reported by the device, and a link to view the pin
-// on a real map, instead of just a plain "My current location is..." line.
 function buildLocationCardEl(loc) {
   const wrap = document.createElement("div");
   wrap.className = "location-card";
@@ -1140,14 +977,6 @@ async function sendMessage(text, directAttachment, locationCard) {
 // ---------------------------------------------------------------------
 // Outage banners (customer)
 // ---------------------------------------------------------------------
-// Grenada runs a fixed UTC-4 offset year-round (no daylight saving) — the
-// backend hardcodes the same offset (GRENADA_TZ) for business hours and
-// for outage-date matching. Using the browser's own local/UTC date here
-// instead would silently drop or add an outage banner during the last
-// few hours of each Grenada calendar day (roughly 8 PM-midnight local
-// time), since by then the browser's UTC clock has already rolled into
-// "tomorrow". Compute "today" the same way the backend does so the two
-// never disagree.
 function grenadaTodayISO() {
   const grenadaMs = Date.now() - 4 * 60 * 60 * 1000;
   return new Date(grenadaMs).toISOString().slice(0, 10);
@@ -1158,12 +987,6 @@ async function renderOutageBanners() {
   const wrap = $("#outageBanners");
   wrap.innerHTML = "";
   if (!parish) {
-    // Previously this just returned here, so an outage staff posted
-    // correctly would never show for any customer who hadn't separately
-    // gone into Settings and picked a parish — a silent dead end. Prompt
-    // instead, and note that sharing GPS location in chat, or picking
-    // Carriacou / Petit Martinique as your territory at login, also sets
-    // this automatically now (see sendLocationMessage and startChatBtn).
     wrap.innerHTML = `<div class="card" style="font-size:.8rem;">📍 <a href="#" id="setParishPromptLink">Set your parish</a> to see service notices for your area.</div>`;
     const link = $("#setParishPromptLink");
     if (link) {
@@ -1189,16 +1012,6 @@ async function renderOutageBanners() {
 // ---------------------------------------------------------------------
 // Report & Track
 // ---------------------------------------------------------------------
-// FIX — the staff map's colored status dots were landing next to the
-// wrong parish. The pin's actual POSITION was always the customer's raw
-// GPS coordinate (accurate); what was wrong was the PARISH LABEL saved
-// alongside it, which used to come from finding the nearest single point
-// in one "center" per parish — a poor approximation right near a parish
-// border. nearestParish() now checks against several real reference
-// points per parish (state.config.parish_reference_points, from
-// app.py's PARISH_REFERENCE_POINTS: each parish's actual main town plus
-// a couple of spread points) and falls back to the old single-centroid
-// list only if that richer data isn't available for some reason.
 function nearestParish(lat, lng) {
   const pointSets = state.config.parish_reference_points;
   if (pointSets) {
@@ -1219,13 +1032,6 @@ function nearestParish(lat, lng) {
   return best;
 }
 
-// Straight-line "nearest reference point" is still only an approximation
-// — real parish boundaries don't line up perfectly with distance to a
-// handful of sample points, so a house right on a border can still
-// occasionally snap to the neighboring parish. We try a real
-// reverse-geocode against OpenStreetMap first (which knows actual
-// parish/county boundaries) and only fall back to nearestParish() above
-// if that lookup fails or the network is unavailable.
 const NOMINATIM_PARISH_MAP = {
   "saint george": "St. George's (Capital area)",
   "st george": "St. George's (Capital area)",
@@ -1370,22 +1176,17 @@ function setupReportForm() {
 }
 
 // ---------------------------------------------------------------------
-// Camera capture (live photo or short video) — shared modal used by chat and the report form
+// Camera capture
 // ---------------------------------------------------------------------
 let cameraStream = null;
 let cameraFacingMode = "environment";
-let cameraTarget = null; // "chat" | "report"
-let cameraMode = "photo"; // "photo" | "video"
+let cameraTarget = null;
+let cameraMode = "photo";
 let cameraRecorder = null;
 let cameraChunks = [];
 let capturedPhotoB64 = null;
 let capturedVideoBlob = null;
 
-// Pick the best MediaRecorder mimeType a browser actually supports, out of
-// a preference-ordered candidate list. Used for both the mic (voice notes)
-// and camera (video) recorders so we record in a format Gemini can read
-// natively wherever possible, instead of always falling back to whatever
-// the browser's default happens to be.
 function pickSupportedMimeType(candidates) {
   if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return "";
   return candidates.find((t) => MediaRecorder.isTypeSupported(t)) || "";
@@ -1459,11 +1260,6 @@ function setCameraMode(mode) {
   $("#cameraModalTitle").textContent = mode === "photo" ? "📷 Take a photo" : "🎥 Record a video";
   $("#cameraShotBtn").textContent = mode === "photo" ? "Capture" : "● Record";
   resetCameraCaptureUI();
-  // The initial stream (opened in photo mode) is requested without a mic
-  // track, since photo capture doesn't need audio. Switching into video
-  // mode needs its own getUserMedia call with audio:true, or the recorded
-  // clip plays back silent — restart the stream whenever the mode actually
-  // changes and the modal is already open.
   if (changed && cameraStream) {
     startCameraStream();
   }
@@ -1507,9 +1303,6 @@ function toggleVideoRecording() {
   }
   if (!cameraStream) return;
   if (cameraStream.getAudioTracks().length === 0) {
-    // Safety net: if we somehow still don't have a mic track (e.g. the
-    // browser silently dropped it), grab one now rather than recording
-    // a silent clip.
     $("#cameraError").textContent = "Recording without audio — microphone wasn't available.";
     $("#cameraError").style.display = "block";
   } else {
@@ -1576,19 +1369,12 @@ function closeCamera() {
 }
 
 // ---------------------------------------------------------------------
-// Voice notes — records actual audio (like a WhatsApp voice note) and
-// sends it as a chat attachment, rather than just transcribing to text.
+// Voice notes
 // ---------------------------------------------------------------------
 let voiceRecorder = null;
 let voiceChunks = [];
 let voiceStartTime = null;
 
-// Gemini's audio understanding reliably reads wav/mp3/aiff/aac/ogg/flac.
-// Most browsers only ever offer webm/opus to MediaRecorder for audio, which
-// the model can't parse as audio — so voice notes were uploading fine but
-// being "heard" as nothing. We prefer any better-supported type the browser
-// actually has, and the backend also remuxes webm -> ogg as a second safety
-// net for browsers (mainly Chrome/Firefox) that only offer webm.
 const PREFERRED_VOICE_MIME_TYPES = [
   "audio/mp4",
   "audio/aac",
@@ -1627,7 +1413,7 @@ function setupMic() {
         const actualType = voiceRecorder.mimeType || mimeType || "audio/webm";
         const blob = new Blob(voiceChunks, { type: actualType });
         const seconds = Math.round((Date.now() - voiceStartTime) / 1000);
-        if (seconds < 1) return; // accidental tap, discard
+        if (seconds < 1) return;
         const reader = new FileReader();
         reader.onload = () => {
           const b64 = reader.result.split(",")[1];
@@ -1648,9 +1434,7 @@ function setupMic() {
 }
 
 // ---------------------------------------------------------------------
-// Location sharing — lets the assistant see where the customer actually is
-// (NAWASA only serves Grenada, Carriacou & Petit Martinique, so we resolve
-// straight to the nearest parish rather than asking for a country).
+// Location sharing
 // ---------------------------------------------------------------------
 function setupLocationShare() {
   if (!navigator.geolocation) {
@@ -1682,11 +1466,6 @@ function setupLocationShare() {
 function sendLocationMessage(lat, lng, accuracy, parish) {
   const gpsText = `📍 My current location is ${parish}, Grenada (GPS: ${lat.toFixed(5)}, ${lng.toFixed(5)}).`;
   sendMessage(gpsText, null, { parish, lat, lng, accuracy: accuracy ? Math.round(accuracy) : null });
-  // Sharing GPS location tells us the customer's parish just as reliably
-  // as picking it in Settings does — persist it the same way (and update
-  // the Settings dropdown to match) so outage banners start working
-  // immediately instead of silently staying blank until a separate trip
-  // to Settings.
   localStorage.setItem("aqua_customer_parish", parish);
   const parishSelect = $("#customerParishSelect");
   if (parishSelect) parishSelect.value = parish;
@@ -1758,7 +1537,7 @@ function setupNotifyForm() {
 }
 
 // ---------------------------------------------------------------------
-// Settings
+// Settings (customer)
 // ---------------------------------------------------------------------
 function setupSettings() {
   const dark = $("#darkModeToggle"), hc = $("#highContrastToggle"), large = $("#largeTextToggle"), readAloud = $("#readAloudToggle");
@@ -1767,13 +1546,8 @@ function setupSettings() {
   large.checked = document.body.classList.contains("large-text");
   readAloud.checked = localStorage.getItem("aqua_read_aloud") === "1";
 
-  // The voice picker below only affects the browser-voice fallback path
-  // (used when the server's Caribbean-accent TTS isn't reachable), so it
-  // stays available even on browsers without speechSynthesis support —
-  // it just won't do anything in that case.
   if ("speechSynthesis" in window) {
     loadVoices();
-    // Chrome/Edge populate the voice list asynchronously.
     window.speechSynthesis.onvoiceschanged = loadVoices;
   }
 
@@ -1811,10 +1585,6 @@ function setupSettings() {
   territorySelect.addEventListener("change", () => {
     state.territory = territorySelect.value;
     localStorage.setItem("aqua_territory", state.territory);
-    // Keep the auto-derived parish in sync if the customer switches to a
-    // territory that maps to exactly one parish (Carriacou / Petit
-    // Martinique) — and refresh the outage banner immediately rather
-    // than waiting for the next unrelated re-render.
     if (TERRITORY_TO_PARISH[state.territory]) {
       localStorage.setItem("aqua_customer_parish", TERRITORY_TO_PARISH[state.territory]);
       if (parishSelect) parishSelect.value = TERRITORY_TO_PARISH[state.territory];
@@ -1833,11 +1603,235 @@ function setupSettings() {
   });
 }
 
+// =========================================================================
+// STAFF PORTAL — "NAWASA Digital Management Center"
+// =========================================================================
+
+const ROLE_SECTION_AREAS = {
+  overview: null,
+  "website-alerts": "website", "website-tips": "website", "website-preview": "website",
+  "aqua-kb": "aquaassist", "aqua-unanswered": "aquaassist", "aqua-settings": "aquaassist",
+  "reports-map": "reports", "reports-table": "reports", "reports-notify": "reports",
+};
+const ROLE_PERMISSIONS_JS = {
+  admin: new Set(["website", "aquaassist", "reports"]),
+  website: new Set(["website"]),
+  aquaassist: new Set(["aquaassist"]),
+  ops: new Set(["reports"]),
+};
+
+function setupStaffSidebar() {
+  $$(".staff-nav-btn[data-staff-section]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.style.display === "none") return;
+      $$(".staff-nav-btn").forEach((b) => b.classList.remove("active"));
+      $$(".staff-section").forEach((s) => s.classList.remove("active"));
+      btn.classList.add("active");
+      const section = $(`#staffSection-${btn.dataset.staffSection}`);
+      if (section) section.classList.add("active");
+      if (btn.dataset.staffSection === "reports-map" && state.staffMap) {
+        setTimeout(() => state.staffMap.invalidateSize(), 50);
+      }
+    });
+  });
+}
+
+function applyStaffRoleVisibility() {
+  const allowed = ROLE_PERMISSIONS_JS[state.staffRole] || new Set();
+  $$(".staff-nav-btn[data-staff-section]").forEach((btn) => {
+    const area = ROLE_SECTION_AREAS[btn.dataset.staffSection];
+    const visible = area === null || allowed.has(area);
+    btn.style.display = visible ? "" : "none";
+  });
+  $$(".staff-nav-group").forEach((g) => {
+    let sib = g.nextElementSibling, anyVisible = false;
+    while (sib && sib.classList.contains("staff-nav-btn")) {
+      if (sib.style.display !== "none") anyVisible = true;
+      sib = sib.nextElementSibling;
+    }
+    g.style.display = anyVisible ? "" : "none";
+  });
+  const active = $(".staff-nav-btn.active");
+  if (active && active.style.display === "none") {
+    const overviewBtn = $('.staff-nav-btn[data-staff-section="overview"]');
+    if (overviewBtn) overviewBtn.click();
+  }
+}
+
+async function refreshOverview() {
+  try {
+    const [reportsRes, outagesRes, tipsRes] = await Promise.all([
+      staffFetch("/api/reports"), fetch(`${API}/api/outages`), staffFetch("/api/tips/all"),
+    ]);
+    const reports = reportsRes.ok ? await reportsRes.json() : [];
+    const outages = outagesRes.ok ? await outagesRes.json() : [];
+    const tips = tipsRes.ok ? await tipsRes.json() : [];
+    renderOverviewCards(reports, outages, tips);
+  } catch (err) { /* non-critical */ }
+}
+
+function renderOverviewCards(reports, outages, tips) {
+  const wrap = $("#overviewCards");
+  if (!wrap) return;
+  const newCount = reports.filter((r) => r.status === "Received").length;
+  const inProgress = reports.filter((r) => ["Assigned", "Crew Dispatched", "In Progress"].includes(r.status)).length;
+  const resolved = reports.filter((r) => r.status === "Resolved").length;
+  wrap.innerHTML = `
+    <div class="metric-box"><div class="num">${outages.length}</div><div class="label">Active alerts</div></div>
+    <div class="metric-box"><div class="num">${tips.filter((t) => t.enabled).length}</div><div class="label">Active water tips</div></div>
+    <div class="metric-box"><div class="num">${newCount}</div><div class="label">🔴 New reports</div></div>
+    <div class="metric-box"><div class="num">${inProgress}</div><div class="label">🔵 In progress</div></div>
+    <div class="metric-box"><div class="num">${resolved}</div><div class="label">🟢 Resolved</div></div>
+  `;
+}
+
+async function loadOverviewAquaStats() {
+  const wrapAqua = $("#overviewCardsAqua");
+  if (!wrapAqua) return;
+  try {
+    const [unansweredRes, statsRes] = await Promise.all([
+      staffFetch("/api/unanswered"),
+      staffFetch("/api/chat-stats"),
+    ]);
+    const unanswered = unansweredRes.ok ? await unansweredRes.json() : [];
+    const stats = statsRes.ok ? await statsRes.json() : { conversations_today: 0, questions_answered_today: 0 };
+    wrapAqua.innerHTML = `
+      <div class="metric-box"><div class="num">${stats.conversations_today}</div><div class="label">💬 Conversations today</div></div>
+      <div class="metric-box"><div class="num">${stats.questions_answered_today}</div><div class="label">✅ Replies sent today</div></div>
+      <div class="metric-box"><div class="num">${unanswered.length}</div><div class="label">❓ Unanswered questions</div></div>
+    `;
+  } catch (err) {
+    wrapAqua.innerHTML = "";
+  }
+}
+
 // ---------------------------------------------------------------------
-// Staff portal
+// Knowledge Base (FAQ) admin
+// ---------------------------------------------------------------------
+async function loadFaqsAdmin() {
+  const res = await staffFetch("/api/faqs");
+  if (res.status === 401) { staffLogout(); return; }
+  if (res.status === 403) return;
+  const faqs = await res.json();
+  state.faqsAdmin = faqs;
+  renderFaqManageList(faqs);
+}
+
+function renderFaqManageList(faqs, query) {
+  const wrap = $("#faqManageList");
+  if (!wrap) return;
+  const q = (query || "").toLowerCase();
+  const filtered = faqs.filter((f) => !q || f.q.toLowerCase().includes(q) || f.a.toLowerCase().includes(q) || f.category.toLowerCase().includes(q));
+  wrap.innerHTML = "";
+  if (!filtered.length) { wrap.innerHTML = `<p class="hint-text">No FAQs found.</p>`; return; }
+  filtered.forEach((f) => {
+    const row = document.createElement("div");
+    row.className = "tip-manage-row";
+    const textSpan = document.createElement("span");
+    textSpan.className = "tip-manage-text" + (f.enabled ? "" : " tip-disabled");
+    textSpan.innerHTML = `<b>[${escapeHtml(f.category)}]</b> ${escapeHtml(f.q)}`;
+    row.appendChild(textSpan);
+
+    const actions = document.createElement("div");
+    actions.className = "tip-manage-actions";
+
+    const editBtn = document.createElement("button");
+    editBtn.type = "button"; editBtn.className = "btn-secondary"; editBtn.textContent = "Edit";
+    editBtn.addEventListener("click", async () => {
+      const newAnswer = prompt("Edit answer:", f.a);
+      if (newAnswer === null || !newAnswer.trim()) return;
+      await staffFetch(`/api/faqs/${f.id}`, { method: "PATCH", body: JSON.stringify({ a: newAnswer.trim() }) });
+      loadFaqsAdmin();
+    });
+
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button"; toggleBtn.className = "btn-secondary";
+    toggleBtn.textContent = f.enabled ? "Disable" : "Enable";
+    toggleBtn.addEventListener("click", async () => {
+      await staffFetch(`/api/faqs/${f.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !f.enabled }) });
+      loadFaqsAdmin();
+    });
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button"; deleteBtn.className = "btn-secondary tip-delete-btn"; deleteBtn.textContent = "Remove";
+    deleteBtn.addEventListener("click", async () => {
+      if (!confirm("Delete this FAQ?")) return;
+      await staffFetch(`/api/faqs/${f.id}`, { method: "DELETE" });
+      loadFaqsAdmin();
+    });
+
+    actions.appendChild(editBtn); actions.appendChild(toggleBtn); actions.appendChild(deleteBtn);
+    row.appendChild(actions);
+    wrap.appendChild(row);
+  });
+}
+
+// ---------------------------------------------------------------------
+// Unanswered questions admin
+// ---------------------------------------------------------------------
+async function loadUnansweredAdmin() {
+  const res = await staffFetch("/api/unanswered");
+  if (res.status === 401) { staffLogout(); return; }
+  if (res.status === 403) return;
+  renderUnansweredList(await res.json());
+}
+
+function renderUnansweredList(items) {
+  const wrap = $("#unansweredList");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  if (!items.length) { wrap.innerHTML = `<p class="hint-text">Nothing outstanding — AquaAssist has answered everything asked recently.</p>`; return; }
+  items.forEach((item) => {
+    const card = document.createElement("div");
+    card.className = "card";
+    const info = document.createElement("p");
+    info.style.margin = "0 0 .4rem"; info.style.fontWeight = "600";
+    info.textContent = item.question;
+    const meta = document.createElement("p");
+    meta.className = "hint-text"; meta.style.margin = "0 0 .6rem";
+    meta.textContent = `Asked ${item.timestamp}`;
+    card.appendChild(info);
+    card.appendChild(meta);
+
+    const catInput = document.createElement("input");
+    catInput.placeholder = "Category (e.g. Billing)";
+    const ansInput = document.createElement("textarea");
+    ansInput.rows = 2; ansInput.placeholder = "Write the answer to add to the FAQ...";
+    const btnRow = document.createElement("div");
+    btnRow.style.display = "flex"; btnRow.style.gap = ".5rem";
+
+    const addBtn = document.createElement("button");
+    addBtn.type = "button"; addBtn.className = "btn-primary"; addBtn.textContent = "Answer & add to FAQ";
+    addBtn.addEventListener("click", async () => {
+      const answer = ansInput.value.trim();
+      if (!answer) return;
+      await staffFetch(`/api/unanswered/${item.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ staff_answer: answer, add_to_faq: true, category: catInput.value.trim() || "General", question_text: item.question }),
+      });
+      loadUnansweredAdmin();
+      loadFaqsAdmin();
+    });
+
+    const dismissBtn = document.createElement("button");
+    dismissBtn.type = "button"; dismissBtn.className = "btn-secondary"; dismissBtn.textContent = "Dismiss";
+    dismissBtn.addEventListener("click", async () => {
+      await staffFetch(`/api/unanswered/${item.id}`, { method: "PATCH", body: JSON.stringify({ staff_answer: "" }) });
+      loadUnansweredAdmin();
+    });
+
+    btnRow.appendChild(addBtn); btnRow.appendChild(dismissBtn);
+    card.appendChild(catInput); card.appendChild(ansInput); card.appendChild(btnRow);
+    wrap.appendChild(card);
+  });
+}
+
+// ---------------------------------------------------------------------
+// Staff portal core (login, feature toggles, reports, map, outages, tips)
 // ---------------------------------------------------------------------
 function setupStaffPortal() {
   setupReportsTableActions();
+  setupStaffSidebar();
 
   $("#staffLoginBtn").addEventListener("click", async () => {
     const passcode = $("#staffPasscodeInput").value;
@@ -1847,7 +1841,9 @@ function setupStaffPortal() {
     const data = await res.json();
     if (data.ok) {
       state.staffPasscode = passcode;
+      state.staffRole = data.role;
       sessionStorage.setItem("aqua_staff_passcode", passcode);
+      sessionStorage.setItem("aqua_staff_role", data.role);
       staffLoginSuccess();
     } else {
       $("#staffLoginError").style.display = "block";
@@ -1855,10 +1851,7 @@ function setupStaffPortal() {
   });
 
   $("#staffLogoutBtn").addEventListener("click", () => {
-    state.staffPasscode = "";
-    sessionStorage.removeItem("aqua_staff_passcode");
-    $("#staffLoginCard").style.display = "block";
-    $("#staffDashboard").style.display = "none";
+    staffLogout();
   });
 
   populateSelect($("#outageParish"), state.config.parishes);
@@ -1874,6 +1867,7 @@ function setupStaffPortal() {
     await staffFetch("/api/outages", { method: "POST", body: JSON.stringify(body) });
     $("#outageForm").reset();
     loadOutages();
+    refreshOverview();
   });
 
   $("#quickStatusForm").addEventListener("submit", async (e) => {
@@ -1883,6 +1877,7 @@ function setupStaffPortal() {
     if (!ref) return;
     await staffFetch(`/api/reports/${encodeURIComponent(ref)}`, { method: "PATCH", body: JSON.stringify({ status }) });
     loadReports();
+    refreshOverview();
   });
 
   $("#tipForm").addEventListener("submit", async (e) => {
@@ -1892,7 +1887,20 @@ function setupStaffPortal() {
     await staffFetch("/api/tips", { method: "POST", body: JSON.stringify({ text }) });
     $("#tipForm").reset();
     loadTipsAdmin();
+    refreshOverview();
   });
+
+  $("#faqForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const category = $("#faqCategory").value.trim();
+    const q = $("#faqQuestion").value.trim();
+    const a = $("#faqAnswer").value.trim();
+    if (!category || !q || !a) return;
+    await staffFetch("/api/faqs", { method: "POST", body: JSON.stringify({ category, q, a }) });
+    $("#faqForm").reset();
+    loadFaqsAdmin();
+  });
+  $("#faqSearchAdmin").addEventListener("input", (e) => renderFaqManageList(state.faqsAdmin || [], e.target.value));
 
   $("#saveMaintenanceMessageBtn").addEventListener("click", async () => {
     const text = $("#maintenanceMessageText").value.trim();
@@ -1911,19 +1919,31 @@ function setupStaffPortal() {
 function staffLoginSuccess() {
   $("#staffLoginCard").style.display = "none";
   $("#staffDashboard").style.display = "block";
+  applyStaffRoleVisibility();
   loadReports();
   loadOutages();
   loadNotifySubscribers();
   loadTipsAdmin();
   loadFeaturesAdmin();
+  loadFaqsAdmin();
+  loadUnansweredAdmin();
+  refreshOverview();
+  loadOverviewAquaStats();
 }
 
-// ---------------------------------------------------------------------
-// Staff: Water Service Tips management
-// ---------------------------------------------------------------------
+function staffLogout() {
+  state.staffPasscode = "";
+  state.staffRole = null;
+  sessionStorage.removeItem("aqua_staff_passcode");
+  sessionStorage.removeItem("aqua_staff_role");
+  $("#staffLoginCard").style.display = "block";
+  $("#staffDashboard").style.display = "none";
+}
+
 async function loadTipsAdmin() {
   const res = await staffFetch("/api/tips/all");
   if (res.status === 401) { staffLogout(); return; }
+  if (res.status === 403) return;
   const tips = await res.json();
   renderTipManageList(tips);
 }
@@ -1986,12 +2006,10 @@ function renderTipManageList(tips) {
   });
 }
 
-// ---------------------------------------------------------------------
-// Staff: Customer Interface feature toggles
-// ---------------------------------------------------------------------
 async function loadFeaturesAdmin() {
   const res = await staffFetch("/api/features");
   if (res.status === 401) { staffLogout(); return; }
+  if (res.status === 403) return;
   const flags = await res.json();
   state.features = flags;
   renderFeatureToggleList(flags);
@@ -2026,18 +2044,12 @@ async function staffFetch(path, opts = {}) {
 async function loadReports() {
   const res = await staffFetch("/api/reports");
   if (res.status === 401) { staffLogout(); return; }
+  if (res.status === 403) return;
   const reports = await res.json();
   renderStatusMetrics(reports);
   renderReportsTable(reports);
   renderStaffMap(reports);
   populateSelect($("#quickStatusRef"), reports.map((r) => r.reference));
-}
-
-function staffLogout() {
-  state.staffPasscode = "";
-  sessionStorage.removeItem("aqua_staff_passcode");
-  $("#staffLoginCard").style.display = "block";
-  $("#staffDashboard").style.display = "none";
 }
 
 function renderStatusMetrics(reports) {
@@ -2058,9 +2070,6 @@ function renderReportsTable(reports) {
   const cols = ["reference", "timestamp", "name", "phone", "location", "issue_type", "severity", "status", "attachment", "delete"];
   thead.innerHTML = `<tr>${cols.map((c) => `<th>${c === "delete" ? "" : c}</th>`).join("")}</tr>`;
   tbody.innerHTML = "";
-  // Keyed by reference so the attachment viewer can look up the right
-  // mime/data when a row's button is clicked, without embedding large
-  // base64 blobs directly in inline onclick attributes.
   staffReportsCache = {};
   reports.slice().reverse().forEach((r) => {
     staffReportsCache[r.reference] = r;
@@ -2076,13 +2085,6 @@ function renderReportsTable(reports) {
 
 let staffReportsCache = {};
 
-// Builds the "attachment" cell for a staff report row. Opens the in-page
-// viewer modal instead of navigating to a data: URI directly — modern
-// browsers (Chrome in particular) block or silently no-op top-level
-// navigation to data: URIs triggered by target="_blank" link clicks, which
-// is exactly what used to happen here: clicking "Play audio" opened a
-// blank tab and nothing played. Rendering the media inline in a modal
-// sidesteps that entirely, and doubles as making it bigger/easier to view.
 function buildAttachmentCell(r) {
   const mime = r.attachment_mime, dataB64 = r.attachment_data;
   if (!mime || !dataB64) return `<span class="hint-text">—</span>`;
@@ -2111,8 +2113,6 @@ function openAttachmentViewer(mime, dataB64, refLabel) {
 }
 
 function closeAttachmentViewer() {
-  // Clearing the body stops any playing audio/video immediately, rather
-  // than letting it keep playing in the background after the modal closes.
   $("#attachmentViewerBody").innerHTML = "";
   $("#attachmentViewerModal").style.display = "none";
 }
@@ -2122,9 +2122,6 @@ function setupReportsTableActions() {
   $("#attachmentViewerModal").addEventListener("click", (e) => {
     if (e.target.id === "attachmentViewerModal") closeAttachmentViewer();
   });
-  // Delegated listener — the table body is rebuilt on every reports
-  // refresh, so binding once on the (stable) table element covers every
-  // row's attachment/delete buttons, past and future, without re-attaching.
   $("#reportsTable").addEventListener("click", async (e) => {
     const attachBtn = e.target.closest(".attachment-cell-btn");
     if (attachBtn) {
@@ -2140,6 +2137,7 @@ function setupReportsTableActions() {
       deleteBtn.disabled = true;
       await staffFetch(`/api/reports/${encodeURIComponent(ref)}`, { method: "DELETE" });
       loadReports();
+      refreshOverview();
     }
   });
 }
@@ -2151,13 +2149,6 @@ function renderStaffMap(reports) {
       attribution: "© OpenStreetMap contributors, SRTM | © OpenTopoMap (CC-BY-SA)",
     }).addTo(state.staffMap);
     state.staffMapLayer = L.layerGroup().addTo(state.staffMap);
-    // Leaflet computes its internal tile-grid size from the container's
-    // dimensions at the moment L.map() runs. If the dashboard was still
-    // mid layout/transition right then (e.g. just switched from
-    // display:none), the map can render as a permanently blank box that
-    // never recovers on its own — force a recalculation shortly after,
-    // once the browser has settled the real layout. Same fix already
-    // used for the customer-facing report map elsewhere in this file.
     setTimeout(() => { if (state.staffMap) state.staffMap.invalidateSize(); }, 200);
   }
   state.staffMapLayer.clearLayers();
@@ -2167,11 +2158,6 @@ function renderStaffMap(reports) {
     const m = gpsRe.exec(r.location || "");
     if (!m) return;
     const lat = parseFloat(m[1]), lng = parseFloat(m[2]);
-    // The circle's POSITION is always this exact GPS coordinate (accurate,
-    // straight from the device). Its COLOR is the report's status. Which
-    // parish that position visually falls within on the tile map is
-    // determined purely by real geography now — nothing here guesses a
-    // parish; see nearestParish() above for where that used to go wrong.
     L.circleMarker([lat, lng], { radius: 8, color: statusColors[r.status] || "gray", fillOpacity: 0.8 })
       .bindPopup(`<b>${r.reference}</b><br>${r.issue_type} — ${r.status}<br>Severity: ${r.severity}`)
       .addTo(state.staffMapLayer);
@@ -2196,6 +2182,7 @@ async function loadOutages() {
     btn.addEventListener("click", async () => {
       await staffFetch(`/api/outages/${o.id}`, { method: "DELETE" });
       loadOutages();
+      refreshOverview();
     });
     row.appendChild(btn);
     list.appendChild(row);
@@ -2205,6 +2192,7 @@ async function loadOutages() {
 async function loadNotifySubscribers() {
   const res = await staffFetch("/api/notify");
   if (res.status === 401) return;
+  if (res.status === 403) return;
   const subs = await res.json();
   const thead = $("#notifyTable thead"), tbody = $("#notifyTable tbody");
   thead.innerHTML = `<tr><th>timestamp</th><th>contact</th><th>categories</th></tr>`;
