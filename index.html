@@ -23,10 +23,6 @@
         <div class="mock-nav-logo-fallback" style="display:none;">NAWASA</div>
         <span class="mock-nav-name">NAWASA</span>
       </div>
-      <!-- Section labels mirror the real nawasa.gd main menu (Home, About
-           Us, Customer Care, Projects & Programmes, Resources, Media
-           Room, Contact Us) — linked out to the real site since this demo
-           doesn't reproduce those inner pages. -->
       <nav class="mock-nav-links">
         <a href="#" id="navHomeLink" class="active">Home</a>
         <a href="https://www.nawasa.gd/about-us/vision-mission" target="_blank" rel="noopener">About Us</a>
@@ -42,10 +38,6 @@
 
   <div id="mockSiteMain">
 
-  <!-- Announcement ticker — mirrors the scrolling "ANNOUNCEMENTS:" bar on
-       the real nawasa.gd homepage, using their actual current messaging
-       (dry-season storage advisory, the Water Wise radio programme, and
-       their Facebook call-out). -->
   <div class="mock-announce-bar">
     <span class="mock-announce-label">Announcements:</span>
     <span class="mock-announce-text">The dry season is here — always keep water storage on hand to last a minimum of three days. · Catch our Water Wise programme Mon, Wed &amp; Fri — WEE FM 7:15am, Real FM 7:30am, City Sound FM 10:30am. · Find us on Facebook — search NAWASA Grenada.</span>
@@ -59,21 +51,12 @@
       <div class="mock-hero-actions">
         <a href="https://www.nawasa.gd/contact-us" target="_blank" rel="noopener" class="mock-btn mock-btn-primary">Report a Leak</a>
         <a href="https://www.nawasa.gd/customer-care/customer-service-charter" target="_blank" rel="noopener" class="mock-btn mock-btn-ghost">Customer Service Charter</a>
-        <!-- Lets staff confirm the ElevenLabs Caribbean-accent voice is
-             actually configured and sounds right BEFORE the competition
-             starts, without opening the chat widget and hunting for a
-             message to read aloud. Wired up by setupVoiceTestButton() in
-             app.js, which hits the public /api/tts endpoint — no login
-             required. -->
         <button type="button" id="testVoiceBtn" class="mock-btn mock-btn-ghost">🔊 Test Caribbean Voice</button>
       </div>
       <p id="testVoiceStatus" class="hint-text" style="color:#fff; opacity:.85; margin-top:.6rem;"></p>
     </div>
   </section>
 
-  <!-- Three-card layout mirrors the real homepage's "Customer Care /
-       Media Room / Resources" section — descriptions paraphrased in our
-       own words, cards link out to the corresponding real pages. -->
   <section class="mock-content">
     <div class="mock-section-head">
       <h2>NAWASA — committed to meeting customers' needs</h2>
@@ -101,8 +84,6 @@
     </div>
   </section>
 
-  <!-- Latest News — the same three posts currently featured on the real
-       nawasa.gd homepage's blog carousel, linked out to the real posts. -->
   <section class="mock-content mock-content-alt">
     <div class="mock-section-head">
       <h2>Latest News</h2>
@@ -127,8 +108,6 @@
     </div>
   </section>
 
-  <!-- Customer Service Charter blurb — paraphrased from the real
-       homepage section of the same name. -->
   <section class="mock-content">
     <div class="mock-notice-card" style="border-left-color: var(--primary);">
       <span class="mock-notice-dot" style="background: var(--primary);"></span>
@@ -142,9 +121,6 @@
 
   </div><!-- /#mockSiteMain -->
 
-  <!-- Footer mirrors the real site's "Quicklinks" and "Connect With Us"
-       columns, including their actual phone/WhatsApp numbers and social
-       links. -->
   <footer class="mock-footer">
     <div class="mock-footer-inner">
       <div>
@@ -178,24 +154,17 @@
 
 
 <!-- =====================================================================
-     AQUAASSIST WIDGET — collapsed floating button by default; expands into
-     the full chatbot panel. Everything that was previously the full-page
-     app now lives inside #widgetBody, completely unchanged.
+     AQUAASSIST WIDGET
      ===================================================================== -->
 <div id="aquaWidget" class="aqua-widget collapsed">
 
-  <!-- Collapsed state: floating launcher button -->
   <button id="widgetToggleBtn" class="widget-fab" aria-haspopup="dialog" aria-expanded="false" aria-controls="widgetPanel">
     <span class="widget-fab-icon">💧</span>
     <span class="widget-fab-label">Need Help?</span>
   </button>
 
-  <!-- Expanded state: the chat panel -->
   <div id="widgetPanel" class="widget-panel" role="dialog" aria-modal="false" aria-label="AquaAssist chat" style="display:none;">
 
-    <!-- ===================== WATERY BACKGROUND — lives on the panel, not
-         the scrolling body, so it stays put as a backdrop no matter how
-         far the chat is scrolled. ===================== -->
     <div class="ocean-bg" aria-hidden="true">
       <div class="ocean-caustics"></div>
       <div class="ocean-bubbles">
@@ -208,7 +177,6 @@
       <div class="ocean-wave ocean-wave--mid"></div>
       <div class="ocean-wave ocean-wave--front"></div>
     </div>
-    <!-- =================== END WATERY BACKGROUND =================== -->
 
     <div class="widget-header">
       <div class="widget-header-brand">
@@ -256,7 +224,6 @@
       <!-- ===================== MAIN APP ===================== -->
       <div id="app" class="page" style="display:none;">
 
-        <!-- Customer portal hero -->
         <div id="customerHero" class="hero">
           <div class="hero-content">
             <div class="hero-brand">
@@ -273,9 +240,6 @@
           <svg class="wave" viewBox="0 0 500 40" preserveAspectRatio="none"><path class="wave-fill" d="M0,20 C150,45 350,-5 500,20 L500,40 L0,40 Z"></path></svg>
         </div>
 
-        <!-- CUSTOMER PORTAL (the Staff Portal used to live here too — it has
-             moved to its own tab on the demo site; see the "Staff Portal"
-             section near the end of <body>.) -->
         <div id="customerPortal">
           <nav class="tab-nav">
             <button class="tab-btn active" data-tab="chat">💬 Chat</button>
@@ -287,9 +251,6 @@
 
           <!-- CHAT TAB -->
           <section id="tab-chat" class="tab-panel active">
-            <!-- Shown INSTEAD of everything below when staff turn "Chatbot
-                 Available" off — a clean takeover, not a banner layered on
-                 top of a still-visible (if disabled) chat UI. -->
             <div id="maintenanceScreen" class="maintenance-screen" style="display:none;">
               <div id="maintenanceScreenText" class="maintenance-screen-text"></div>
               <div class="maintenance-screen-actions">
@@ -309,8 +270,6 @@
 
               <div id="outageBanners"></div>
 
-              <!-- Water Service Tip card — rotates through active tips every
-                   25s. Hidden entirely when staff disable "Water Tips". -->
               <div id="waterTipCard" class="water-tip-card" style="display:none;">
                 <span class="water-tip-icon">💧</span>
                 <div class="water-tip-body">
@@ -336,7 +295,6 @@
               </form>
               <div id="attachmentPreview" class="attachment-preview"></div>
               <p id="micStatus" class="hint-text" style="display:none;"></p>
-
 
               <div id="quickActionsLabel" class="section-label">💧 Quick actions</div>
               <div id="quickActions" class="quick-actions-grid"></div>
@@ -463,18 +421,21 @@
 </div><!-- /#aquaWidget -->
 
 <!-- =====================================================================
-     STAFF PORTAL — lives on the demo website itself (NOT inside the
-     customer chat widget). Reached via the "Staff Portal" link in the
-     mock site's nav. This is the same dashboard that previously lived
-     inside the widget's "Staff Portal" tab, moved out wholesale.
+     STAFF PORTAL — "NAWASA Digital Management Center"
+     Reorganized into a sidebar + 3 sections (Website / AquaAssist /
+     Reports & Operations) plus a Dashboard overview. Every panel below
+     that existed before (outages, tips, reports table, staff map, feature
+     toggles, maintenance message, notify subscribers) is present here
+     unchanged in ID and behavior — only regrouped. Two panels are new:
+     Knowledge Base (FAQ CRUD) and Unanswered Questions.
      ===================================================================== -->
 <section id="staffPortalSection" class="staff-site-section" style="display:none;">
   <div class="staff-site-inner">
     <div class="hero staff-site-hero">
       <div class="hero-content">
         <div>
-          <div class="hero-title">🔐 AquaAssist Staff Portal</div>
-          <div class="hero-subtitle">Internal dashboard — reports, outages, tips &amp; feature controls</div>
+          <div class="hero-title">🔐 NAWASA Digital Management</div>
+          <div class="hero-subtitle">Website, AquaAssist &amp; Reports — one dashboard</div>
         </div>
       </div>
       <svg class="wave" viewBox="0 0 500 40" preserveAspectRatio="none"><path class="wave-fill" d="M0,20 C150,45 350,-5 500,20 L500,40 L0,40 Z"></path></svg>
@@ -490,78 +451,161 @@
     <div id="staffDashboard" style="display:none;">
       <button id="staffLogoutBtn" class="btn-secondary" style="margin-bottom:1rem;">Log out</button>
 
-      <div class="section-label">📊 Overview</div>
-      <div id="statusMetrics" class="metrics-row"></div>
+      <div class="staff-shell">
+        <aside class="staff-sidebar">
+          <div class="staff-sidebar-title">NAWASA<br>Digital Management</div>
 
-      <div class="section-label">🗺️ Reports map</div>
-      <div id="staffMap" class="leaflet-map"></div>
+          <button class="staff-nav-btn active" data-staff-section="overview">📊 Dashboard</button>
 
-      <div class="section-label">📋 All reports</div>
-      <div class="card table-wrap">
-        <table id="reportsTable" class="reports-table">
-          <thead></thead>
-          <tbody></tbody>
-        </table>
-      </div>
+          <div class="staff-nav-group">🖥️ Website</div>
+          <button class="staff-nav-btn" data-staff-section="website-alerts">Service Alerts</button>
+          <button class="staff-nav-btn" data-staff-section="website-tips">Water Tips</button>
+          <button class="staff-nav-btn" data-staff-section="website-preview">Website Preview</button>
 
-      <div class="section-label">🔄 Update a report status</div>
-      <div class="card">
-        <form id="quickStatusForm" class="form-row-2">
-          <div>
-            <label class="field-label">Reference number</label>
-            <select id="quickStatusRef"></select>
-          </div>
-          <div>
-            <label class="field-label">New status</label>
-            <select id="quickStatusNew"></select>
-          </div>
-          <button type="submit" class="btn-primary" style="grid-column:1/-1;">Update status</button>
-        </form>
-      </div>
+          <div class="staff-nav-group">🤖 AquaAssist</div>
+          <button class="staff-nav-btn" data-staff-section="aqua-kb">Knowledge Base</button>
+          <button class="staff-nav-btn" data-staff-section="aqua-unanswered">Unanswered Questions</button>
+          <button class="staff-nav-btn" data-staff-section="aqua-settings">Settings</button>
 
-      <div class="section-label">📢 Outage announcements</div>
-      <div class="card">
-        <form id="outageForm">
-          <label class="field-label">Parish / Territory</label>
-          <select id="outageParish"></select>
-          <label class="field-label">Message to customers</label>
-          <textarea id="outageMessage" rows="2"></textarea>
-          <div class="form-row-2">
-            <div><label class="field-label">Start date</label><input id="outageStart" type="date" /></div>
-            <div><label class="field-label">End date</label><input id="outageEnd" type="date" /></div>
-          </div>
-          <button type="submit" class="btn-primary" style="margin-top:0.6rem;width:100%;">Post announcement</button>
-        </form>
-      </div>
-      <div id="outageList"></div>
+          <div class="staff-nav-group">📍 Reports &amp; Operations</div>
+          <button class="staff-nav-btn" data-staff-section="reports-map">Reporting Map</button>
+          <button class="staff-nav-btn" data-staff-section="reports-table">All Reports</button>
+          <button class="staff-nav-btn" data-staff-section="reports-notify">Notify Subscribers</button>
+        </aside>
 
-      <div class="section-label">💧 Water Service Tips</div>
-      <div class="card">
-        <form id="tipForm">
-          <label class="field-label">Tip text</label>
-          <textarea id="tipText" rows="2" placeholder="e.g. Turn off all taps and check your meter dial — if it's still moving, you may have a leak."></textarea>
-          <button type="submit" class="btn-primary" style="margin-top:0.6rem;width:100%;">Add tip</button>
-        </form>
-        <div id="tipList" class="tip-manage-list"></div>
-      </div>
+        <main class="staff-main">
 
-      <div class="section-label">🎛️ Customer Interface Controls</div>
-      <div class="card">
-        <p class="hint-text">Toggle which features customers can see and use in AquaAssist right now.</p>
-        <div id="featureToggleList" class="checkbox-group"></div>
-      </div>
+          <!-- ===== DASHBOARD OVERVIEW ===== -->
+          <section id="staffSection-overview" class="staff-section active">
+            <div class="section-label" style="margin-top:0;">📊 Overview</div>
+            <div id="overviewCards" class="metrics-row"></div>
+            <div id="overviewCardsAqua" class="metrics-row"></div>
+          </section>
 
-      <div class="section-label">🚧 Chatbot Maintenance Message</div>
-      <div class="card">
-        <p class="hint-text">Shown to customers on the Chat tab whenever "Chatbot Available" above is turned off. The rest of the app (Report &amp; Track, FAQ, etc.) keeps working normally — this only replaces the chat itself.</p>
-        <textarea id="maintenanceMessageText" rows="3" placeholder="e.g. We're sorry, AquaAssist is temporarily unavailable. Please contact NAWASA at (473) 440-2155."></textarea>
-        <button type="button" id="saveMaintenanceMessageBtn" class="btn-primary" style="margin-top:0.6rem;">Save message</button>
-        <p id="maintenanceMessageSaved" class="hint-text" style="display:none;color:#2E9E5B;">✓ Saved.</p>
-      </div>
+          <!-- ===== WEBSITE > Service Alerts ===== -->
+          <section id="staffSection-website-alerts" class="staff-section">
+            <div class="section-label" style="margin-top:0;">📢 Service Alerts</div>
+            <div class="card">
+              <form id="outageForm">
+                <label class="field-label">Parish / Territory</label>
+                <select id="outageParish"></select>
+                <label class="field-label">Message to customers</label>
+                <textarea id="outageMessage" rows="2"></textarea>
+                <div class="form-row-2">
+                  <div><label class="field-label">Start date</label><input id="outageStart" type="date" /></div>
+                  <div><label class="field-label">End date</label><input id="outageEnd" type="date" /></div>
+                </div>
+                <button type="submit" class="btn-primary" style="margin-top:0.6rem;width:100%;">Post announcement</button>
+              </form>
+            </div>
+            <div id="outageList"></div>
+            <p class="hint-text">Alerts posted here appear on the public website's outage banners AND are what AquaAssist's check_active_outages tool reads from — one entry, both places.</p>
+          </section>
 
-      <div class="section-label">🔔 Notification subscribers</div>
-      <div class="card table-wrap">
-        <table id="notifyTable" class="reports-table"><thead></thead><tbody></tbody></table>
+          <!-- ===== WEBSITE > Water Tips ===== -->
+          <section id="staffSection-website-tips" class="staff-section">
+            <div class="section-label" style="margin-top:0;">💧 Water Service Tips</div>
+            <div class="card">
+              <form id="tipForm">
+                <label class="field-label">Tip text</label>
+                <textarea id="tipText" rows="2" placeholder="e.g. Turn off all taps and check your meter dial — if it's still moving, you may have a leak."></textarea>
+                <button type="submit" class="btn-primary" style="margin-top:0.6rem;width:100%;">Add tip</button>
+              </form>
+              <div id="tipList" class="tip-manage-list"></div>
+            </div>
+          </section>
+
+          <!-- ===== WEBSITE > Website Preview ===== -->
+          <section id="staffSection-website-preview" class="staff-section">
+            <div class="section-label" style="margin-top:0;">🌐 Website Preview</div>
+            <div class="card">
+              <p class="hint-text">Opens the live public site in a new tab, exactly as customers currently see it.</p>
+              <a href="/" target="_blank" rel="noopener" class="btn-primary" style="display:inline-block;text-decoration:none;">↗ View Live Website</a>
+            </div>
+          </section>
+
+          <!-- ===== AQUAASSIST > Knowledge Base ===== -->
+          <section id="staffSection-aqua-kb" class="staff-section">
+            <div class="section-label" style="margin-top:0;">📚 Knowledge Base / FAQs</div>
+            <div class="card">
+              <form id="faqForm">
+                <label class="field-label">Category</label>
+                <input id="faqCategory" type="text" placeholder="e.g. Billing" required />
+                <label class="field-label">Question</label>
+                <input id="faqQuestion" type="text" required />
+                <label class="field-label">Answer</label>
+                <textarea id="faqAnswer" rows="2" required></textarea>
+                <button type="submit" class="btn-primary" style="margin-top:0.6rem;width:100%;">Add FAQ</button>
+              </form>
+            </div>
+            <input id="faqSearchAdmin" type="text" placeholder="Search FAQs..." style="margin-bottom:.8rem;" />
+            <div id="faqManageList" class="tip-manage-list"></div>
+          </section>
+
+          <!-- ===== AQUAASSIST > Unanswered Questions ===== -->
+          <section id="staffSection-aqua-unanswered" class="staff-section">
+            <div class="section-label" style="margin-top:0;">❓ Questions AquaAssist Couldn't Answer</div>
+            <p class="hint-text">Logged automatically whenever a customer's question doesn't match anything in the knowledge base. Answer it here to add it straight to the FAQ list above.</p>
+            <div id="unansweredList"></div>
+          </section>
+
+          <!-- ===== AQUAASSIST > Settings ===== -->
+          <section id="staffSection-aqua-settings" class="staff-section">
+            <div class="section-label" style="margin-top:0;">🎛️ Customer Interface Controls</div>
+            <div class="card">
+              <p class="hint-text">Toggle which features customers can see and use in AquaAssist right now.</p>
+              <div id="featureToggleList" class="checkbox-group"></div>
+            </div>
+            <div class="section-label">🚧 Chatbot Maintenance Message</div>
+            <div class="card">
+              <p class="hint-text">Shown to customers on the Chat tab whenever "Chatbot Available" above is turned off. The rest of the app (Report &amp; Track, FAQ, etc.) keeps working normally — this only replaces the chat itself.</p>
+              <textarea id="maintenanceMessageText" rows="3" placeholder="e.g. We're sorry, AquaAssist is temporarily unavailable. Please contact NAWASA at (473) 440-2155."></textarea>
+              <button type="button" id="saveMaintenanceMessageBtn" class="btn-primary" style="margin-top:0.6rem;">Save message</button>
+              <p id="maintenanceMessageSaved" class="hint-text" style="display:none;color:#2E9E5B;">✓ Saved.</p>
+            </div>
+          </section>
+
+          <!-- ===== REPORTS & OPERATIONS > Map ===== -->
+          <section id="staffSection-reports-map" class="staff-section">
+            <div class="section-label" style="margin-top:0;">🗺️ Reports Map</div>
+            <div id="staffMap" class="leaflet-map"></div>
+          </section>
+
+          <!-- ===== REPORTS & OPERATIONS > All Reports ===== -->
+          <section id="staffSection-reports-table" class="staff-section">
+            <div class="section-label" style="margin-top:0;">📋 All Reports</div>
+            <div id="statusMetrics" class="metrics-row"></div>
+            <div class="card table-wrap">
+              <table id="reportsTable" class="reports-table">
+                <thead></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="section-label">🔄 Update a report status</div>
+            <div class="card">
+              <form id="quickStatusForm" class="form-row-2">
+                <div>
+                  <label class="field-label">Reference number</label>
+                  <select id="quickStatusRef"></select>
+                </div>
+                <div>
+                  <label class="field-label">New status</label>
+                  <select id="quickStatusNew"></select>
+                </div>
+                <button type="submit" class="btn-primary" style="grid-column:1/-1;">Update status</button>
+              </form>
+            </div>
+          </section>
+
+          <!-- ===== REPORTS & OPERATIONS > Notify Subscribers ===== -->
+          <section id="staffSection-reports-notify" class="staff-section">
+            <div class="section-label" style="margin-top:0;">🔔 Notification Subscribers</div>
+            <div class="card table-wrap">
+              <table id="notifyTable" class="reports-table"><thead></thead><tbody></tbody></table>
+            </div>
+          </section>
+
+        </main>
       </div>
     </div>
   </div>
