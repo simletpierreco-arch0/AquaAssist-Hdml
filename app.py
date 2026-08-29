@@ -2,17 +2,13 @@
 AquaAssist backend — Flask API + a LangChain/LangGraph conversational agent
 (see agent.py), serving a static HTML/CSS/JS frontend (see ../frontend).
 
-STORAGE: report/notification/outage/tip/feature data now lives in db.py,
-backed by SQLite by default or Postgres if DATABASE_URL is set — see the
-docstring at the top of db.py for the full explanation, including the
-connection-pooling fix that removes a per-call reconnect penalty on every
-single database access. Everything else in this file (routes, business
-logic, the agent wiring) is unchanged from before.
-
 Run with:
     pip install -r requirements.txt
     export GEMINI_API_KEY=your-key-here
     export STAFF_PASSCODE=change-me
+    export STAFF_PASSCODE_WEBSITE=optional-website-manager-passcode
+    export STAFF_PASSCODE_AQUA=optional-aquaassist-manager-passcode
+    export STAFF_PASSCODE_OPS=optional-operations-passcode
     export ELEVENLABS_API_KEY=your-elevenlabs-key      # optional, enables Caribbean-accent read-aloud
     export ELEVENLABS_VOICE_ID=your-chosen-voice-id    # optional, from the ElevenLabs Voice Library
     export PINECONE_API_KEY=your-pinecone-key          # optional, enables live RAG retrieval (see agent.py)
@@ -21,26 +17,6 @@ Run with:
     python app.py
 
 Then open http://localhost:5000
-
-NOTE ON ATTACHMENTS: report attachments (photos/videos/voice notes) are
-stored inline (base64) in the reports table, not as separate files on
-disk — same reasoning as before: a host without a persistent disk would
-otherwise lose them on every restart. The trade-off is unchanged: this
-won't scale gracefully to a high volume of large video reports — if that
-happens, move to a real database + object storage (e.g. Postgres + S3/R2).
-
-NOTE ON THE AGENT: chat is handled by agent.py, which builds a LangGraph
-agent (via LangChain's ChatGoogleGenerativeAI + langchain.agents.create_agent)
-bound to 4 tools: log_water_report (write) and check_report_status (read)
-and check_active_outages (read), all defined here in app.py as
-session-scoped closures wrapped with @tool(parse_docstring=True); and
-search_knowledge_base (read), defined in agent.py, which does genuine
-Pinecone-backed RAG retrieval over the FAQ list — falling back to a static
-FAQ dump if PINECONE_API_KEY isn't set, so the bot never breaks because
-this integration is unavailable. check_report_status calls the same
-track_report() helper used by the /api/report/<reference> endpoint, and
-check_active_outages calls get_active_outages_for_parish(), so the model's
-answers reflect the real rows in the database rather than a guess.
 """
 
 import os
@@ -74,11 +50,42 @@ BASE_DIR = Path(__file__).parent
 FRONTEND_DIR = BASE_DIR
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+
+# ---------------------------------------------------------------------
+# Staff auth — role-based passcodes.
+#
+# Only STAFF_PASSCODE (Administrator) is required; the other three are
+# optional. Whichever passcode a staff member logs in with determines
+# their role and what parts of the Staff Portal they can see/use. If you
+# only set STAFF_PASSCODE, every staff login is an Administrator (full
+# access) — identical behavior to before this was added.
+# ---------------------------------------------------------------------
 STAFF_PASSCODE = os.environ.get("STAFF_PASSCODE", "changeme123")
+STAFF_PASSCODE_WEBSITE = os.environ.get("STAFF_PASSCODE_WEBSITE", "")
+STAFF_PASSCODE_AQUA = os.environ.get("STAFF_PASSCODE_AQUA", "")
+STAFF_PASSCODE_OPS = os.environ.get("STAFF_PASSCODE_OPS", "")
+
+ROLE_PERMISSIONS = {
+    "admin": {"website", "aquaassist", "reports"},
+    "website": {"website"},
+    "aquaassist": {"aquaassist"},
+    "ops": {"reports"},
+}
+
+
+def _role_for_passcode(passcode):
+    if passcode and passcode == STAFF_PASSCODE:
+        return "admin"
+    if passcode and STAFF_PASSCODE_WEBSITE and passcode == STAFF_PASSCODE_WEBSITE:
+        return "website"
+    if passcode and STAFF_PASSCODE_AQUA and passcode == STAFF_PASSCODE_AQUA:
+        return "aquaassist"
+    if passcode and STAFF_PASSCODE_OPS and passcode == STAFF_PASSCODE_OPS:
+        return "ops"
+    return None
+
 
 # ElevenLabs — used for Caribbean-accented read-aloud (see /api/tts below).
-# Both must be set for TTS to be active; otherwise the frontend silently
-# falls back to the browser's native voice.
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
 ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "")
 ELEVENLABS_MODEL_ID = os.environ.get("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
@@ -229,52 +236,35 @@ PARISH_CENTERS = {
 }
 GRENADA_CENTER = [12.1165, -61.6790]
 
-# FIX — staff map pins were landing next to the wrong parish label. The
-# pin's POSITION was always correct (it's just the customer's raw GPS
-# coordinate), but the PARISH NAME attached to it was being guessed by
-# finding the single nearest point in PARISH_CENTERS above — one dot per
-# parish, which is a poor approximation near any parish border. Instead
-# of one centroid, each parish now gets several real, well-known
-# reference points (its parish capital/main town plus a couple of spread
-# points), and the frontend matches a GPS coordinate against the nearest
-# of ALL of these points across every parish — effectively a coarse
-# Voronoi split using real places instead of one arbitrary center. This
-# is still an approximation (real parish boundary polygons would be the
-# proper fix and aren't available here), but it's meaningfully more
-# accurate than a single point per parish, especially near borders.
 PARISH_REFERENCE_POINTS = {
     "St. George's (Capital area)": [
-        [12.0561, -61.7488],  # St. George's (parish capital)
-        [12.0450, -61.7350],  # Grand Anse / L'Anse aux Epines
-        [12.0750, -61.7300],  # Beaulieu / northern edge toward St. John's
+        [12.0561, -61.7488], [12.0450, -61.7350], [12.0750, -61.7300],
     ],
     "St. David's": [
-        [12.0150, -61.6280],  # Westerhall area
-        [12.0400, -61.6600],  # inland, toward the St. George's border
+        [12.0150, -61.6280], [12.0400, -61.6600],
     ],
     "St. Andrew's": [
-        [12.1330, -61.6150],  # Grenville (parish capital)
-        [12.1100, -61.6600],  # central St. Andrew's
-        [12.0900, -61.6300],  # southern St. Andrew's, toward St. David's
+        [12.1330, -61.6150], [12.1100, -61.6600], [12.0900, -61.6300],
     ],
     "St. John's": [
-        [12.1300, -61.7250],  # Gouyave (parish capital)
-        [12.1550, -61.7100],  # inland toward St. Mark's
+        [12.1300, -61.7250], [12.1550, -61.7100],
     ],
     "St. Mark's": [
-        [12.1950, -61.6950],  # Victoria (parish capital)
-        [12.2100, -61.6700],  # inland toward St. Patrick's
+        [12.1950, -61.6950], [12.2100, -61.6700],
     ],
     "St. Patrick's": [
-        [12.2450, -61.6250],  # Sauteurs (parish capital)
-        [12.2200, -61.6100],  # southern St. Patrick's
+        [12.2450, -61.6250], [12.2200, -61.6100],
     ],
     "Carriacou and Petite Martinique": [
-        [12.4747, -61.4487],  # Hillsborough, Carriacou
-        [12.3000, -61.4000],  # Petite Martinique
+        [12.4747, -61.4487], [12.3000, -61.4000],
     ],
 }
 
+# NOTE: FAQS below is now used ONLY as one-time seed data for the `faqs`
+# database table (see db._seed_faqs_if_empty). After first startup, staff
+# edits via the Knowledge Base admin panel (/api/faqs) are what's actually
+# served to customers and fed into Pinecone — this constant is not read
+# again after the seed.
 FAQS = [
     {"category": "New Connections", "q": "How do I apply for a new connection?",
      "a": "Fill out the application for a new service connection. Review the Requirements for Private Water Service and the Terms and Conditions for Water Service on nawasa.gd."},
@@ -362,10 +352,21 @@ If a question is unrelated to NAWASA services, politely explain that you can onl
 """
 
 
-# Initialize the database (creates tables + seeds default tips/features on
-# first run — safe to call every time the app starts).
+# Initialize the database (creates tables + seeds default tips/features/FAQs
+# on first run — safe to call every time the app starts).
 db.init_db()
-agent.seed_knowledge_base(FAQS)
+db._seed_faqs_if_empty(FAQS)
+
+
+def _reseed_knowledge_base():
+    """Re-syncs Pinecone with whatever is currently enabled in the `faqs`
+    table. Call this after any staff create/update/delete on /api/faqs so
+    the bot's RAG retrieval never drifts from what the customer-facing FAQ
+    tab is showing."""
+    agent.seed_knowledge_base(db.load_faqs(include_disabled=False), force=True)
+
+
+agent.seed_knowledge_base(db.load_faqs(include_disabled=False))
 
 SESSIONS = {}  # session_id -> {"graph": compiled LangGraph agent, "territory": str}
 LAST_REPORT = {}
@@ -479,7 +480,9 @@ def _get_or_create_agent(session_id, territory):
             _make_log_tool(session_id),
             _make_check_status_tool(session_id),
             _make_check_outages_tool(session_id),
-            agent.make_search_knowledge_base_tool(),
+            agent.make_search_knowledge_base_tool(
+                on_no_match=lambda q: db.log_unanswered_question(q, session_id=session_id)
+            ),
         ]
         graph = agent.build_agent(tools, build_system_instruction(territory))
         sess = {"graph": graph, "territory": territory}
@@ -488,13 +491,36 @@ def _get_or_create_agent(session_id, territory):
 
 
 def require_staff(fn):
+    """Any valid staff passcode (any role) may reach routes using this
+    decorator — same behavior as before role-based auth was added. Use
+    @require_permission("website"/"aquaassist"/"reports") instead on routes
+    that should be restricted to a specific role."""
     @wraps(fn)
     def wrapper(*args, **kwargs):
         supplied = request.headers.get("X-Staff-Passcode", "")
-        if supplied != STAFF_PASSCODE:
+        role = _role_for_passcode(supplied)
+        if role is None:
             return jsonify({"error": "Invalid or missing staff passcode."}), 401
+        request.staff_role = role
         return fn(*args, **kwargs)
     return wrapper
+
+
+def require_permission(area):
+    """area is one of "website", "aquaassist", "reports"."""
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            supplied = request.headers.get("X-Staff-Passcode", "")
+            role = _role_for_passcode(supplied)
+            if role is None:
+                return jsonify({"error": "Invalid or missing staff passcode."}), 401
+            if area not in ROLE_PERMISSIONS.get(role, set()):
+                return jsonify({"error": "Your role doesn't have access to this."}), 403
+            request.staff_role = role
+            return fn(*args, **kwargs)
+        return wrapper
+    return decorator
 
 
 @app.route("/")
@@ -504,10 +530,6 @@ def serve_index():
 
 @app.route("/admin")
 def serve_admin():
-    # Same single-page app as "/" — app.js checks the URL path on load and
-    # jumps straight to the Staff Portal view when it's "/admin", so this
-    # gives staff a real, bookmarkable URL without standing up a second
-    # site or a second deploy.
     return send_from_directory(FRONTEND_DIR, "index.html")
 
 
@@ -528,7 +550,7 @@ def api_init():
         "issue_types": ISSUE_TYPES,
         "severity_levels": SEVERITY_LEVELS,
         "status_stages": STATUS_STAGES,
-        "faqs": FAQS,
+        "faqs": [{"category": f["category"], "q": f["q"], "a": f["a"]} for f in db.load_faqs(include_disabled=False)],
         "business_hours": get_business_hours_status(),
         "nawasa_phone": NAWASA_PHONE,
         "nawasa_website": NAWASA_WEBSITE,
@@ -545,11 +567,6 @@ def api_business_hours():
 
 @app.route("/api/ping")
 def api_ping():
-    # Lightweight, unauthenticated endpoint that does no real work — it
-    # exists purely as something for the keep-alive thread below (and, if
-    # you want, an external uptime monitor like UptimeRobot/cron-job.org)
-    # to hit, so hosts that suspend idle free-tier services don't spin
-    # this one down mid-competition.
     return jsonify({"ok": True, "time": datetime.now(timezone.utc).isoformat()})
 
 
@@ -558,12 +575,6 @@ def api_chat():
     body = request.get_json(force=True)
     session_id = body.get("session_id") or str(uuid.uuid4())
 
-    # Staff-controlled kill switch — checked first, before even the API-key
-    # check below, so staff can always put up a graceful message regardless
-    # of backend configuration issues. Also means this works even if a
-    # request reaches this endpoint directly (bypassing the frontend's own
-    # disabled input/buttons) and never burns a Gemini call while the bot
-    # is deliberately turned off.
     features = load_features()
     if not features.get("chatbot_available", True):
         return jsonify({
@@ -604,30 +615,26 @@ def api_chat():
         except Exception:
             continue
         mime = att.get("mime", "application/octet-stream")
-        # Keep the ORIGINAL bytes for staff viewing later (any browser can
-        # already play these back directly — no ffmpeg dependency needed
-        # just to look at what a customer sent).
         CURRENT_ATTACHMENT[session_id] = {"mime": mime, "data_base64": att["data_base64"]}
-        # Separately, normalize a COPY for what we actually send to Gemini.
         send_bytes, send_mime = _normalize_media_for_gemini(raw, mime)
         if send_mime.split("/")[0] in ("audio", "video"):
             has_media = True
         content_blocks.append({"type": "media", "mime_type": send_mime, "data": send_bytes})
 
-    # invoke_agent() raises on any failure (network, auth, malformed media,
-    # etc.) rather than returning a Gemini-SDK-specific "empty candidates"
-    # object, so all of that collapses into one try/except here.
     try:
         reply_text = agent.invoke_agent(graph, session_id, content_blocks)
         if not reply_text or not str(reply_text).strip():
             raise ValueError("Empty reply from agent")
+        db.log_chat_event(session_id, territory, had_error=False)
     except Exception as e:
         logger.error("Agent invocation failed for session %s: %s", session_id, e)
         if has_media:
             reply_text = ("I wasn't able to process that recording — it may not have come through "
                           "correctly. Could you try sending it again, use a shorter clip, or type a "
                           "quick summary instead?")
+            db.log_chat_event(session_id, territory, had_error=True)
         else:
+            db.log_chat_event(session_id, territory, had_error=True)
             return jsonify({"error": "I'm having trouble connecting right now. Please try again in a "
                                       "moment, or call/WhatsApp NAWASA directly if it's urgent."}), 502
 
@@ -664,13 +671,13 @@ def api_track_report(reference):
 
 
 @app.route("/api/reports")
-@require_staff
+@require_permission("reports")
 def api_list_reports():
     return jsonify(load_reports())
 
 
 @app.route("/api/reports/<reference>", methods=["PATCH"])
-@require_staff
+@require_permission("reports")
 def api_update_report(reference):
     body = request.get_json(force=True)
     new_status = body.get("status")
@@ -682,7 +689,7 @@ def api_update_report(reference):
 
 
 @app.route("/api/reports/<reference>", methods=["DELETE"])
-@require_staff
+@require_permission("reports")
 def api_delete_report(reference):
     if not delete_report(reference):
         return jsonify({"error": "Reference not found."}), 404
@@ -693,7 +700,8 @@ def api_delete_report(reference):
 def api_outages():
     if request.method == "GET":
         return jsonify(load_outages())
-    if request.headers.get("X-Staff-Passcode", "") != STAFF_PASSCODE:
+    role = _role_for_passcode(request.headers.get("X-Staff-Passcode", ""))
+    if role is None or "website" not in ROLE_PERMISSIONS.get(role, set()):
         return jsonify({"error": "Invalid or missing staff passcode."}), 401
     body = request.get_json(force=True)
     required = ["parish", "message", "start_date", "end_date"]
@@ -704,7 +712,7 @@ def api_outages():
 
 
 @app.route("/api/outages/<outage_id>", methods=["DELETE"])
-@require_staff
+@require_permission("website")
 def api_delete_outage(outage_id):
     delete_outage(outage_id)
     return jsonify({"deleted": outage_id})
@@ -713,7 +721,8 @@ def api_delete_outage(outage_id):
 @app.route("/api/notify", methods=["GET", "POST"])
 def api_notify():
     if request.method == "GET":
-        if request.headers.get("X-Staff-Passcode", "") != STAFF_PASSCODE:
+        role = _role_for_passcode(request.headers.get("X-Staff-Passcode", ""))
+        if role is None or "reports" not in ROLE_PERMISSIONS.get(role, set()):
             return jsonify({"error": "Invalid or missing staff passcode."}), 401
         return jsonify(load_notifications())
     body = request.get_json(force=True)
@@ -727,14 +736,12 @@ def api_notify():
 
 @app.route("/api/tips", methods=["GET"])
 def api_tips_list():
-    # Public — only enabled tips, and only id/text (no need to expose
-    # created_at/enabled internals to the customer widget).
     tips = [t for t in load_tips() if t["enabled"]]
     return jsonify([{"id": t["id"], "text": t["text"]} for t in tips])
 
 
 @app.route("/api/tips", methods=["POST"])
-@require_staff
+@require_permission("website")
 def api_tips_create():
     body = request.get_json(force=True)
     text = (body.get("text") or "").strip()
@@ -744,13 +751,13 @@ def api_tips_create():
 
 
 @app.route("/api/tips/all")
-@require_staff
+@require_permission("website")
 def api_tips_all():
     return jsonify(load_tips())
 
 
 @app.route("/api/tips/<tip_id>", methods=["PATCH"])
-@require_staff
+@require_permission("website")
 def api_tips_update(tip_id):
     body = request.get_json(force=True) or {}
     text = body.get("text")
@@ -764,7 +771,7 @@ def api_tips_update(tip_id):
 
 
 @app.route("/api/tips/<tip_id>", methods=["DELETE"])
-@require_staff
+@require_permission("website")
 def api_tips_delete(tip_id):
     if not delete_tip(tip_id):
         return jsonify({"error": "Tip not found."}), 404
@@ -773,13 +780,11 @@ def api_tips_delete(tip_id):
 
 @app.route("/api/features", methods=["GET"])
 def api_features_get():
-    # Public — the customer widget reads this on every load (and while
-    # open) to know which features to show right now.
     return jsonify(load_features())
 
 
 @app.route("/api/features", methods=["PATCH"])
-@require_staff
+@require_permission("aquaassist")
 def api_features_update():
     body = request.get_json(force=True) or {}
     return jsonify(save_features(body))
@@ -788,8 +793,8 @@ def api_features_update():
 @app.route("/api/staff/login", methods=["POST"])
 def api_staff_login():
     body = request.get_json(force=True)
-    ok = body.get("passcode") == STAFF_PASSCODE
-    return jsonify({"ok": ok}), (200 if ok else 401)
+    role = _role_for_passcode(body.get("passcode"))
+    return jsonify({"ok": role is not None, "role": role}), (200 if role else 401)
 
 
 @app.route("/api/tts", methods=["POST"])
@@ -829,25 +834,92 @@ def api_tts():
     return resp.content, 200, {"Content-Type": "audio/mpeg"}
 
 
+# =======================================================================
+# NEW: Knowledge base (FAQ) admin endpoints
+# =======================================================================
+@app.route("/api/faqs", methods=["GET"])
+@require_permission("aquaassist")
+def api_faqs_list():
+    return jsonify(db.load_faqs(include_disabled=True))
+
+
+@app.route("/api/faqs", methods=["POST"])
+@require_permission("aquaassist")
+def api_faqs_create():
+    body = request.get_json(force=True)
+    category = (body.get("category") or "").strip()
+    question = (body.get("q") or "").strip()
+    answer = (body.get("a") or "").strip()
+    if not category or not question or not answer:
+        return jsonify({"error": "category, q, and a are required."}), 400
+    row = db.save_faq(category, question, answer)
+    _reseed_knowledge_base()
+    return jsonify(row)
+
+
+@app.route("/api/faqs/<faq_id>", methods=["PATCH"])
+@require_permission("aquaassist")
+def api_faqs_update(faq_id):
+    body = request.get_json(force=True) or {}
+    row = db.update_faq(faq_id, category=body.get("category"), question=body.get("q"),
+                         answer=body.get("a"), enabled=body.get("enabled"))
+    if row is None:
+        return jsonify({"error": "FAQ not found."}), 404
+    _reseed_knowledge_base()
+    return jsonify(row)
+
+
+@app.route("/api/faqs/<faq_id>", methods=["DELETE"])
+@require_permission("aquaassist")
+def api_faqs_delete(faq_id):
+    if not db.delete_faq(faq_id):
+        return jsonify({"error": "FAQ not found."}), 404
+    _reseed_knowledge_base()
+    return jsonify({"deleted": faq_id})
+
+
+# =======================================================================
+# NEW: Unanswered questions
+# =======================================================================
+@app.route("/api/unanswered", methods=["GET"])
+@require_permission("aquaassist")
+def api_unanswered_list():
+    include_resolved = request.args.get("include_resolved") == "1"
+    return jsonify(db.load_unanswered_questions(include_resolved=include_resolved))
+
+
+@app.route("/api/unanswered/<q_id>", methods=["PATCH"])
+@require_permission("aquaassist")
+def api_unanswered_resolve(q_id):
+    body = request.get_json(force=True) or {}
+    staff_answer = (body.get("staff_answer") or "").strip()
+    if not db.resolve_unanswered_question(q_id, staff_answer=staff_answer):
+        return jsonify({"error": "Question not found."}), 404
+    if body.get("add_to_faq") and staff_answer:
+        db.save_faq(body.get("category") or "General", body.get("question_text") or "", staff_answer)
+        _reseed_knowledge_base()
+    return jsonify({"resolved": q_id})
+
+
+@app.route("/api/unanswered/<q_id>", methods=["DELETE"])
+@require_permission("aquaassist")
+def api_unanswered_delete(q_id):
+    if not db.delete_unanswered_question(q_id):
+        return jsonify({"error": "Question not found."}), 404
+    return jsonify({"deleted": q_id})
+
+
+# =======================================================================
+# NEW: Chat stats (staff Overview panel)
+# =======================================================================
+@app.route("/api/chat-stats")
+@require_permission("aquaassist")
+def api_chat_stats():
+    return jsonify(db.get_chat_stats_today())
+
+
 # ---------------------------------------------------------------------
-# Keep-alive — prevents free-tier hosts from spinning this app (and its
-# database) down mid-competition.
-#
-# Render's free web services sleep after ~15 minutes with no incoming
-# HTTP traffic; Neon's free Postgres suspends its compute after ~5
-# minutes idle. Both wake back up on the next request/query, but that
-# first request after a cold start can take many seconds to tens of
-# seconds — exactly the kind of "why is it suddenly slow" moment you
-# don't want during a demo. This background thread runs for the life of
-# the process and, every SELF_PING_INTERVAL_SECONDS:
-#   1. Runs a trivial DB read (keeps Postgres/Neon's compute warm).
-#   2. If SELF_PING_URL is set, makes a real outbound HTTP request to
-#      this app's own public URL (keeps Render's web service warm) — an
-#      in-process function call does NOT count as "traffic" for this
-#      purpose, it has to actually arrive over the network from outside.
-#
-# Set this in your environment before deploying:
-#   SELF_PING_URL=https://your-app.onrender.com
+# Keep-alive
 # ---------------------------------------------------------------------
 SELF_PING_URL = os.environ.get("SELF_PING_URL", "").strip()
 SELF_PING_INTERVAL_SECONDS = int(os.environ.get("SELF_PING_INTERVAL_SECONDS", "600"))
@@ -876,11 +948,4 @@ threading.Thread(target=_keep_alive_loop, daemon=True).start()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    # threaded=True lets Flask's dev server handle more than one request
-    # at a time (e.g. a staff dashboard refresh while a customer is mid-
-    # chat) instead of queueing requests behind each other one at a time.
-    # If you deploy behind gunicorn/uwsgi instead of running this file
-    # directly, set worker/thread counts there instead (e.g.
-    # `gunicorn -w 2 --threads 4 app:app`) — this line only affects
-    # `python app.py`.
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
