@@ -1,70 +1,18 @@
 """
 db.py — persistent storage for AquaAssist.
 
-Replaces the old local-file storage (reports.csv, notifications.csv,
-outages.csv, tips.csv, features.json) with a real database, because local
-files on most hosts (Render free tier included) live on an EPHEMERAL disk
-that gets wiped on every redeploy (and often on every restart / idle
-spin-down too) — that's the actual cause of reports, subscribers, and
-tracking "disappearing" or "not working".
+Backed by SQLite by default or Postgres if DATABASE_URL is set. See the
+original project docstring history for the ephemeral-disk rationale.
 
-BACKEND — controlled by the DATABASE_URL environment variable:
-
-  - DATABASE_URL set  -> uses that Postgres database. THIS is what survives
-    redeploys. Recommended: a Neon (neon.tech) free Postgres project — it
-    does not expire, unlike Render's own free Postgres tier (auto-deleted
-    30 days after creation). Any Postgres works here (Supabase, Railway,
-    Render's own paid Postgres, etc.) — this file only needs a standard
-    connection string. Requires `psycopg2-binary` in requirements.txt
-    (only imported when DATABASE_URL is actually set).
-
-  - DATABASE_URL not set -> falls back to a single SQLite file at
-    DATA_DIR/aquaassist.db. No new dependencies needed. Still an upgrade
-    over the old CSVs (atomic writes, no partial-write corruption, no
-    cross-instance inconsistency) — but if your host's disk is ephemeral,
-    this file is still wiped on redeploy, same as the CSVs were. Use this
-    only for local dev/testing, or if you know your host gives you a
-    persistent disk.
-
-MIGRATION: on first startup against a fresh/empty database, this module
-also checks DATA_DIR for the old reports.csv / outages.csv /
-notifications.csv files and imports their rows in — see
-migrate_legacy_storage() below. This only ever runs once per table (it
-no-ops the moment that table has any rows), so it's safe to leave this
-code in permanently and it will never duplicate or re-import data on
-later restarts.
-
-PERFORMANCE NOTE (fixed): every function used to open a brand-new database
-connection and close it again on every single call. Against Postgres in
-particular (SSL handshake + auth round trip every time) that adds roughly
-100-400ms of pure connection overhead on top of the actual query — and a
-single /api/chat turn can easily trigger 2-4 of these calls (load_features
-up front, plus whichever agent tool ends up running), so this was adding
-up to a very noticeable chunk of AquaAssist's total reply time. Connection
-handling now goes through a small pool (Postgres) / a single shared
-connection (SQLite) that lives for the life of the process — see
-_cursor() below — instead of reconnecting from scratch every time.
-
-RESILIENCE NOTE: hosts like Neon suspend their Postgres compute after a
-few minutes of inactivity, and it wakes back up on the next query — but a
-connection that was sitting idle in the pool when that suspend happened
-can come back from pool.getconn() looking fine while actually being dead
-underneath. Previously, a connection that broke mid-request (or was
-already dead when handed out) got returned to the pool anyway, so every
-future request would keep drawing that same broken connection and fail
-forever until the process was manually restarted — a single blip could
-permanently take the whole app down. _cursor() now (1) discards a
-connection that's already marked closed before using it, and (2) discards
-(rather than returns) any connection that raises a connection-level error
-mid-request, so the pool opens a fresh one next time instead of handing
-out the same corpse. The request that hit the blip still fails and
-surfaces an error to its caller (app.py's /api/chat already catches this
-and shows the customer a friendly retry message) — but the app recovers
-on the very next request instead of staying down.
-
-Every function here keeps the exact same name, signature, and return shape
-as the old CSV-based versions that used to live in app.py, so nothing else
-in the app needs to change.
+THIS VERSION adds (on top of the original reports/notifications/outages/
+tips/features tables):
+  - `faqs`               — staff-editable knowledge base entries, replacing
+                            the hardcoded FAQS list in app.py.
+  - `unanswered_questions`— questions AquaAssist couldn't find a knowledge-
+                            base match for, logged for staff review.
+  - `chat_events`         — one row per successful/failed /api/chat turn,
+                            used for the staff Overview "conversations
+                            today" counters.
 """
 
 import csv
@@ -98,11 +46,6 @@ logger = logging.getLogger("aquaassist.db")
 STATUS_DEFAULT = "Received"
 SEVERITY_DEFAULT = "Unknown"
 
-# Grenada runs a fixed UTC-4 offset year-round (no daylight saving). Used
-# below so "today" for outage matching always means Grenada's today, not
-# whatever timezone the server happens to be running in (most hosts run
-# UTC) — matches the same fix already applied on the frontend and to
-# business-hours logic in app.py.
 GRENADA_TZ = timezone(timedelta(hours=-4))
 
 DEFAULT_FEATURES = {
@@ -157,22 +100,9 @@ def _init_sqlite_conn():
 
 @contextmanager
 def _cursor(commit=False):
-    """Yields a DB cursor from the shared pool (Postgres) or the shared
-    connection (SQLite). Commits on the way out if commit=True, rolls back
-    on any exception, and always returns the connection cleanly — for
-    Postgres it goes back to the pool rather than being closed outright
-    (unless it's actually broken — see below); for SQLite access is
-    serialized with a lock, since SQLite only safely supports one writer
-    at a time."""
     if USE_POSTGRES:
         pool = _init_pg_pool()
         conn = pool.getconn()
-
-        # A connection that's already closed under us (e.g. Neon suspended
-        # its compute while this connection sat idle in the pool) would
-        # otherwise hand back a cursor that's guaranteed to fail. Discard
-        # it and grab a fresh one instead of finding out via a failed
-        # query.
         if conn.closed:
             pool.putconn(conn, close=True)
             conn = pool.getconn()
@@ -185,16 +115,6 @@ def _cursor(commit=False):
             if commit:
                 conn.commit()
         except (psycopg2.OperationalError, psycopg2.InterfaceError):
-            # The connection itself died mid-request (network blip, a
-            # Neon suspend/resume caught in the middle of a query, etc).
-            # Mark it broken so it gets closed instead of returned to the
-            # pool — otherwise every future request would keep drawing
-            # this same dead connection and fail forever until the
-            # process was restarted. The request that hit this still
-            # fails and raises up to the caller (app.py's /api/chat
-            # already catches this and shows a friendly retry message),
-            # but the app self-heals on the very next request instead of
-            # staying down.
             broken = True
             try:
                 conn.rollback()
@@ -236,7 +156,9 @@ def _rows(cur_rows):
 def init_db():
     """Creates all tables if they don't exist yet, migrates any legacy CSV
     data in, and seeds default tips/features on first run. Safe to call
-    every time the app starts."""
+    every time the app starts. FAQ seeding is a separate call
+    (_seed_faqs_if_empty) made from app.py, since app.py owns the default
+    FAQ list."""
     with _cursor(commit=True) as cur:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS reports (
@@ -276,6 +198,28 @@ def init_db():
         cur.execute("""
             CREATE TABLE IF NOT EXISTS features (
                 id INTEGER PRIMARY KEY, data TEXT
+            )
+        """)
+        # --- NEW TABLES ---
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS faqs (
+                id TEXT PRIMARY KEY,
+                category TEXT, question TEXT, answer TEXT,
+                enabled TEXT, created_at TEXT, updated_at TEXT
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS unanswered_questions (
+                id TEXT PRIMARY KEY,
+                question TEXT, timestamp TEXT, category TEXT,
+                session_id TEXT, resolved TEXT, staff_answer TEXT
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS chat_events (
+                id TEXT PRIMARY KEY,
+                session_id TEXT, territory TEXT, timestamp TEXT,
+                had_error TEXT
             )
         """)
 
@@ -331,7 +275,7 @@ def _insert_legacy_notification(row):
 
 def _migrate_legacy_csv(table, csv_name, insert_fn):
     if not _table_is_empty(table):
-        return  # already has data — either migrated already, or this is a fresh non-legacy DB
+        return
     path = DATA_DIR / csv_name
     if not path.exists():
         return
@@ -364,9 +308,6 @@ def _migrate_legacy_features_json():
 
 
 def migrate_legacy_storage():
-    """One-time import of the old CSV/JSON files, if they're still sitting
-    in DATA_DIR from before this database existed. No-ops completely once
-    each table has at least one row, so it's safe to run on every startup."""
     _migrate_legacy_csv("reports", "reports.csv", _insert_legacy_report)
     _migrate_legacy_csv("outages", "outages.csv", _insert_legacy_outage)
     _migrate_legacy_csv("notifications", "notifications.csv", _insert_legacy_notification)
@@ -483,20 +424,6 @@ def delete_outage(outage_id):
 
 
 def get_active_outages_for_parish(parish, today=None):
-    """Returns outages currently active (start_date <= today <= end_date)
-    for the given parish.
-
-    FIX: this used to compute "today" from the server's local/UTC clock.
-    Grenada runs a fixed UTC-4 offset with no daylight saving, so on a
-    server running in UTC (the common case on most hosts) that clock is
-    several hours ahead of Grenada for part of every day — which meant an
-    outage could show as active a few hours too early, or vanish a few
-    hours too early, right around the boundary of "today". "today" is now
-    computed in Grenada time by default, matching business-hours logic
-    elsewhere in the app and the same fix already applied on the frontend.
-    An explicit `today` ("YYYY-MM-DD") can still be passed in if a caller
-    ever needs to check a specific date instead of "right now".
-    """
     if today is None:
         today = datetime.now(GRENADA_TZ).strftime("%Y-%m-%d")
     ph = _ph()
@@ -621,3 +548,177 @@ def save_features(updates):
         else:
             cur.execute(f"INSERT OR REPLACE INTO features (id, data) VALUES (1, {ph})", (json.dumps(current),))
     return current
+
+
+# =======================================================================
+# NEW: Knowledge base (FAQs)
+# =======================================================================
+def _faq_out(row):
+    return {
+        "id": row["id"], "category": row["category"], "q": row["question"],
+        "a": row["answer"], "enabled": row.get("enabled", "1") == "1",
+        "created_at": row.get("created_at", ""), "updated_at": row.get("updated_at", ""),
+    }
+
+
+def _seed_faqs_if_empty(default_faqs):
+    """default_faqs: list of {"category","q","a"} dicts — app.py passes its
+    existing FAQS constant in here once, at startup. No-ops after the first
+    successful run (staff edits from then on live in the table)."""
+    with _cursor() as cur:
+        cur.execute("SELECT COUNT(*) AS c FROM faqs")
+        count = cur.fetchone()["c"]
+    if count:
+        return
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        for f in default_faqs:
+            cur.execute(
+                f"INSERT INTO faqs (id, category, question, answer, enabled, created_at, updated_at) "
+                f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (uuid.uuid4().hex[:8], f["category"], f["q"], f["a"], "1", now, now),
+            )
+
+
+def load_faqs(include_disabled=True):
+    with _cursor() as cur:
+        if include_disabled:
+            cur.execute("SELECT * FROM faqs ORDER BY category ASC, created_at ASC")
+        else:
+            ph = _ph()
+            cur.execute(f"SELECT * FROM faqs WHERE enabled = {ph} ORDER BY category ASC, created_at ASC", ("1",))
+        rows = _rows(cur.fetchall())
+    return [_faq_out(r) for r in rows]
+
+
+def save_faq(category, question, answer):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    row = {"id": uuid.uuid4().hex[:8], "category": category, "question": question,
+           "answer": answer, "enabled": "1", "created_at": now, "updated_at": now}
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"INSERT INTO faqs (id, category, question, answer, enabled, created_at, updated_at) "
+            f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (row["id"], row["category"], row["question"], row["answer"], row["enabled"],
+             row["created_at"], row["updated_at"]),
+        )
+    return _faq_out(row)
+
+
+def update_faq(faq_id, category=None, question=None, answer=None, enabled=None):
+    ph = _ph()
+    with _cursor() as cur:
+        cur.execute(f"SELECT * FROM faqs WHERE id = {ph}", (faq_id,))
+        existing = cur.fetchone()
+    if existing is None:
+        return None
+    existing = dict(existing)
+    new_vals = {
+        "category": category if category is not None else existing["category"],
+        "question": question if question is not None else existing["question"],
+        "answer": answer if answer is not None else existing["answer"],
+        "enabled": ("1" if enabled else "0") if enabled is not None else existing["enabled"],
+    }
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"UPDATE faqs SET category={ph}, question={ph}, answer={ph}, enabled={ph}, updated_at={ph} WHERE id={ph}",
+            (new_vals["category"], new_vals["question"], new_vals["answer"], new_vals["enabled"], now, faq_id),
+        )
+    return _faq_out({**existing, **new_vals, "id": faq_id, "updated_at": now})
+
+
+def delete_faq(faq_id):
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"DELETE FROM faqs WHERE id = {ph}", (faq_id,))
+        return cur.rowcount > 0
+
+
+# =======================================================================
+# NEW: Unanswered questions
+# =======================================================================
+def _unanswered_out(row):
+    return {
+        "id": row["id"], "question": row["question"], "timestamp": row["timestamp"],
+        "category": row.get("category") or "", "session_id": row.get("session_id") or "",
+        "resolved": row.get("resolved") == "1", "staff_answer": row.get("staff_answer") or "",
+    }
+
+
+def log_unanswered_question(question, session_id=""):
+    ph = _ph()
+    row = {
+        "id": uuid.uuid4().hex[:8], "question": question,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "category": "", "session_id": session_id, "resolved": "0", "staff_answer": "",
+    }
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"INSERT INTO unanswered_questions (id, question, timestamp, category, session_id, resolved, staff_answer) "
+            f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (row["id"], row["question"], row["timestamp"], row["category"],
+             row["session_id"], row["resolved"], row["staff_answer"]),
+        )
+    return row
+
+
+def load_unanswered_questions(include_resolved=False):
+    ph = _ph()
+    with _cursor() as cur:
+        if include_resolved:
+            cur.execute("SELECT * FROM unanswered_questions ORDER BY timestamp DESC")
+        else:
+            cur.execute(f"SELECT * FROM unanswered_questions WHERE resolved = {ph} ORDER BY timestamp DESC", ("0",))
+        rows = _rows(cur.fetchall())
+    return [_unanswered_out(r) for r in rows]
+
+
+def resolve_unanswered_question(q_id, staff_answer=""):
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"UPDATE unanswered_questions SET resolved={ph}, staff_answer={ph} WHERE id={ph}",
+            ("1", staff_answer, q_id),
+        )
+        return cur.rowcount > 0
+
+
+def delete_unanswered_question(q_id):
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"DELETE FROM unanswered_questions WHERE id = {ph}", (q_id,))
+        return cur.rowcount > 0
+
+
+# =======================================================================
+# NEW: Chat events (conversation stats for the staff Overview panel)
+# =======================================================================
+def log_chat_event(session_id, territory, had_error=False):
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"INSERT INTO chat_events (id, session_id, territory, timestamp, had_error) "
+            f"VALUES ({ph},{ph},{ph},{ph},{ph})",
+            (uuid.uuid4().hex[:8], session_id, territory,
+             datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "1" if had_error else "0"),
+        )
+
+
+def get_chat_stats_today():
+    today = datetime.now(GRENADA_TZ).strftime("%Y-%m-%d")
+    ph = _ph()
+    with _cursor() as cur:
+        cur.execute(f"SELECT * FROM chat_events WHERE timestamp LIKE {ph}", (f"{today}%",))
+        rows = _rows(cur.fetchall())
+    total = len(rows)
+    errors = sum(1 for r in rows if r.get("had_error") == "1")
+    distinct_sessions = len(set(r["session_id"] for r in rows))
+    return {
+        "messages_today": total,
+        "conversations_today": distinct_sessions,
+        "errors_today": errors,
+        "questions_answered_today": total - errors,
+    }
