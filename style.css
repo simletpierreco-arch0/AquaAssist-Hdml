@@ -686,6 +686,62 @@ body.dark .ocean-caustics { opacity: 0.14; }
 .nav-staff-link:hover { background: color-mix(in srgb, var(--primary) 18%, transparent); }
 .nav-staff-link.active { background: var(--primary); color:#fff !important; border-color: var(--primary); }
 
+/* ---------------- Announcement ticker — mirrors the real nawasa.gd
+   scrolling "ANNOUNCEMENTS:" bar just above the hero. ---------------- */
+.mock-announce-bar {
+  background: var(--ocean-deep);
+  color: #cfe6f5;
+  font-size: .8rem;
+  padding: .5rem 1.5rem;
+  display: flex;
+  gap: .5rem;
+  align-items: baseline;
+  overflow: hidden;
+}
+.mock-announce-label {
+  flex-shrink: 0;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  font-size: .7rem;
+  color: var(--accent);
+}
+.mock-announce-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: .9;
+}
+@media (max-width: 640px) {
+  .mock-announce-bar { font-size: .74rem; }
+}
+
+.mock-card-link {
+  display: inline-block;
+  margin-top: .6rem;
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--primary);
+  text-decoration: none;
+}
+.mock-card-link:hover { text-decoration: underline; }
+.mock-news-grid .mock-card { text-align: left; }
+.mock-news-cat {
+  font-size: .72rem;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  margin: 0;
+}
+.mock-footer-demo-note {
+  font-size: .78rem;
+  opacity: .75;
+  margin-top: .5rem;
+  max-width: 320px;
+}
+.mock-footer-demo-note a { color: #cfe6f5; text-decoration: underline; }
+
 .mock-hero {
   background: linear-gradient(135deg, var(--primary) 0%, var(--hover) 100%);
   padding: 4.5rem 1.5rem 5rem;
