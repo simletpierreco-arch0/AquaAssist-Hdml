@@ -16,6 +16,7 @@ const state = {
   staffPasscode: sessionStorage.getItem("aqua_staff_passcode") || "",
   staffRole: sessionStorage.getItem("aqua_staff_role") || null,
   faqsAdmin: [],
+  currentLiveChatSession: null,
   reportPin: null,
   reportMap: null,
   reportMarker: null,
@@ -215,6 +216,7 @@ function startApp() {
   setupMic();
   setupLocationShare();
   loadTips();
+  startStaffMessagePolling();
 
   setInterval(async () => {
     const res = await fetch(`${API}/api/business-hours`);
@@ -975,6 +977,38 @@ async function sendMessage(text, directAttachment, locationCard) {
 }
 
 // ---------------------------------------------------------------------
+// Staff live-message polling (customer widget side)
+//
+// A staff member can drop a message into an in-progress conversation from
+// the Staff Portal's Live Chat monitor without turning the bot off. This
+// polls for those out-of-band messages and drops them into the chat as
+// they arrive, labeled distinctly from the bot's own replies.
+// ---------------------------------------------------------------------
+let staffPollTimer = null;
+function startStaffMessagePolling() {
+  if (staffPollTimer) return;
+  staffPollTimer = setInterval(async () => {
+    if (!state.sessionId) return;
+    const lastIdKey = `aqua_last_staff_id_${state.sessionId}`;
+    const lastId = parseInt(localStorage.getItem(lastIdKey) || "0", 10);
+    try {
+      const res = await fetch(`${API}/api/chat/${state.sessionId}/updates?after=${lastId}`);
+      if (!res.ok) return;
+      const staffMsgs = await res.json();
+      if (!staffMsgs.length) return;
+      staffMsgs.forEach((m) => {
+        const displayText = `🧑‍💼 **NAWASA Support Team:**\n${m.content}`;
+        state.messages.push({ role: "assistant", content: displayText });
+        appendBubble("assistant", displayText);
+        localStorage.setItem(lastIdKey, String(m.id));
+      });
+      saveMessages();
+      renderFollowupChips();
+    } catch (err) { /* silent — this is a background poll */ }
+  }, 6000);
+}
+
+// ---------------------------------------------------------------------
 // Outage banners (customer)
 // ---------------------------------------------------------------------
 function grenadaTodayISO() {
@@ -1610,7 +1644,7 @@ function setupSettings() {
 const ROLE_SECTION_AREAS = {
   overview: null,
   "website-alerts": "website", "website-tips": "website", "website-preview": "website",
-  "aqua-kb": "aquaassist", "aqua-unanswered": "aquaassist", "aqua-settings": "aquaassist",
+  "aqua-kb": "aquaassist", "aqua-unanswered": "aquaassist", "aqua-livechat": "aquaassist", "aqua-settings": "aquaassist",
   "reports-map": "reports", "reports-table": "reports", "reports-notify": "reports",
 };
 const ROLE_PERMISSIONS_JS = {
@@ -1827,11 +1861,118 @@ function renderUnansweredList(items) {
 }
 
 // ---------------------------------------------------------------------
+// Live Chat monitor — staff can watch conversations as they come in and
+// optionally reply into them directly. The bot keeps responding normally;
+// a staff reply is just another turn added to the same transcript.
+// ---------------------------------------------------------------------
+let liveChatTranscriptTimer = null;
+let liveChatSessionsTimer = null;
+
+function formatChatRole(role) {
+  if (role === "user") return "🙂 Customer";
+  if (role === "staff") return "🧑‍💼 Staff";
+  return "💧 AquaAssist";
+}
+
+async function loadLiveChatSessions() {
+  const res = await staffFetch("/api/sessions");
+  if (res.status === 401) { staffLogout(); return; }
+  if (res.status === 403) return;
+  const sessions = await res.json();
+  renderLiveChatSessionList(sessions);
+}
+
+function renderLiveChatSessionList(sessions) {
+  const wrap = $("#liveChatSessionList");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  if (!sessions.length) {
+    wrap.innerHTML = `<p class="hint-text">No conversations yet today.</p>`;
+    return;
+  }
+  sessions.forEach((s) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "livechat-session-row" + (state.currentLiveChatSession === s.session_id ? " active" : "");
+    row.innerHTML = `
+      <div class="livechat-session-top">
+        <span class="livechat-session-territory">${escapeHtml(s.territory || "Grenada")}</span>
+        <span class="livechat-session-time">${escapeHtml(s.last_timestamp || "")}</span>
+      </div>
+      <div class="livechat-session-preview">${escapeHtml(formatChatRole(s.last_role))}: ${escapeHtml(s.last_message || "")}</div>
+    `;
+    row.addEventListener("click", () => openLiveChatSession(s.session_id));
+    wrap.appendChild(row);
+  });
+}
+
+function openLiveChatSession(sessionId) {
+  state.currentLiveChatSession = sessionId;
+  $("#liveChatEmptyState").style.display = "none";
+  $("#liveChatActive").style.display = "flex";
+  $("#liveChatSessionLabel").textContent = sessionId;
+  loadLiveChatTranscript();
+  if (liveChatTranscriptTimer) clearInterval(liveChatTranscriptTimer);
+  liveChatTranscriptTimer = setInterval(loadLiveChatTranscript, 5000);
+  $$(".livechat-session-row").forEach((r) => r.classList.remove("active"));
+}
+
+async function loadLiveChatTranscript() {
+  if (!state.currentLiveChatSession) return;
+  const res = await staffFetch(`/api/sessions/${encodeURIComponent(state.currentLiveChatSession)}/messages`);
+  if (res.status === 401) { staffLogout(); return; }
+  if (res.status === 403) return;
+  const messages = await res.json();
+  renderLiveChatTranscript(messages);
+}
+
+function renderLiveChatTranscript(messages) {
+  const wrap = $("#liveChatTranscript");
+  if (!wrap) return;
+  const wasAtBottom = wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 20;
+  wrap.innerHTML = "";
+  messages.forEach((m) => {
+    const row = document.createElement("div");
+    row.className = `livechat-msg livechat-msg-${m.role}`;
+    row.innerHTML = `<div class="livechat-msg-role">${escapeHtml(formatChatRole(m.role))} · <span class="hint-text">${escapeHtml(m.timestamp)}</span></div><div class="livechat-msg-text">${escapeHtml(m.content)}</div>`;
+    wrap.appendChild(row);
+  });
+  if (wasAtBottom || messages.length <= 2) wrap.scrollTop = wrap.scrollHeight;
+}
+
+function setupLiveChatMonitor() {
+  const form = $("#liveChatReplyForm");
+  if (!form) return;
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!state.currentLiveChatSession) return;
+    const input = $("#liveChatReplyText");
+    const text = input.value.trim();
+    if (!text) return;
+    input.disabled = true;
+    await staffFetch(`/api/sessions/${encodeURIComponent(state.currentLiveChatSession)}/staff-message`, {
+      method: "POST",
+      body: JSON.stringify({ message: text }),
+    });
+    input.value = "";
+    input.disabled = false;
+    loadLiveChatTranscript();
+    loadLiveChatSessions();
+  });
+
+  $("#liveChatRefreshBtn").addEventListener("click", () => {
+    loadLiveChatSessions();
+    if (state.currentLiveChatSession) loadLiveChatTranscript();
+  });
+}
+
+// ---------------------------------------------------------------------
 // Staff portal core (login, feature toggles, reports, map, outages, tips)
 // ---------------------------------------------------------------------
 function setupStaffPortal() {
   setupReportsTableActions();
   setupStaffSidebar();
+  setupLiveChatMonitor();
 
   $("#staffLoginBtn").addEventListener("click", async () => {
     const passcode = $("#staffPasscodeInput").value;
@@ -1929,11 +2070,17 @@ function staffLoginSuccess() {
   loadUnansweredAdmin();
   refreshOverview();
   loadOverviewAquaStats();
+  loadLiveChatSessions();
+  if (liveChatSessionsTimer) clearInterval(liveChatSessionsTimer);
+  liveChatSessionsTimer = setInterval(loadLiveChatSessions, 8000);
 }
 
 function staffLogout() {
   state.staffPasscode = "";
   state.staffRole = null;
+  state.currentLiveChatSession = null;
+  if (liveChatTranscriptTimer) { clearInterval(liveChatTranscriptTimer); liveChatTranscriptTimer = null; }
+  if (liveChatSessionsTimer) { clearInterval(liveChatSessionsTimer); liveChatSessionsTimer = null; }
   sessionStorage.removeItem("aqua_staff_passcode");
   sessionStorage.removeItem("aqua_staff_role");
   $("#staffLoginCard").style.display = "block";
