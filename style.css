@@ -667,7 +667,7 @@ body.dark .ocean-caustics { opacity: 0.14; }
 .staff-site-inner { max-width: 1180px; margin: 0 auto; }
 .staff-site-hero { border-radius: 20px; margin-bottom: 1.5rem; padding: 1.6rem 1.6rem 2.4rem; }
 
-/* ---------------- Staff Portal: sidebar shell (NEW) ---------------- */
+/* ---------------- Staff Portal: sidebar shell ---------------- */
 .staff-shell { display: flex; gap: 1.4rem; align-items: flex-start; }
 .staff-sidebar {
   flex: 0 0 210px; position: sticky; top: 1rem;
