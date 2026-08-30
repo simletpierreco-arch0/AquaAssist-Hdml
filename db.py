@@ -222,6 +222,29 @@ def init_db():
                 had_error TEXT
             )
         """)
+        # `chat_messages` holds the full per-session transcript (customer,
+        # bot, AND staff turns) so the Staff Portal's Live Chat monitor can
+        # show a real conversation feed and staff can drop a message into
+        # an in-progress chat. `id` is an autoincrementing integer (not a
+        # uuid, unlike the other tables) specifically so the widget can poll
+        # "give me every staff message with id greater than the last one I
+        # saw" cheaply.
+        if USE_POSTGRES:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id SERIAL PRIMARY KEY,
+                    session_id TEXT, territory TEXT, role TEXT,
+                    content TEXT, timestamp TEXT
+                )
+            """)
+        else:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT, territory TEXT, role TEXT,
+                    content TEXT, timestamp TEXT
+                )
+            """)
 
     migrate_legacy_storage()
     _seed_tips_if_empty()
@@ -705,6 +728,71 @@ def log_chat_event(session_id, territory, had_error=False):
             (uuid.uuid4().hex[:8], session_id, territory,
              datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "1" if had_error else "0"),
         )
+
+
+# =======================================================================
+# NEW: Chat transcripts (Live Chat monitor in the Staff Portal)
+# =======================================================================
+def log_chat_message(session_id, territory, role, content):
+    """role is 'user', 'assistant', or 'staff'. Called on every customer
+    message, every bot reply, and every message a staff member sends into
+    a live conversation, so the Staff Portal has a complete transcript to
+    display and app.js's widget-side poller has staff turns to pick up."""
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"INSERT INTO chat_messages (session_id, territory, role, content, timestamp) "
+            f"VALUES ({ph},{ph},{ph},{ph},{ph})",
+            (session_id, territory, role, content, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        )
+
+
+def load_recent_sessions(limit=50):
+    """One row per session_id, most-recently-active first, for the Staff
+    Portal's Live Chat session list. Cheap-ish aggregate query; fine at the
+    scale this app runs at."""
+    with _cursor() as cur:
+        cur.execute("SELECT * FROM chat_messages ORDER BY id DESC LIMIT 2000")
+        rows = _rows(cur.fetchall())
+    seen = {}
+    for r in rows:
+        sid = r["session_id"]
+        if sid in seen:
+            continue
+        seen[sid] = {
+            "session_id": sid,
+            "territory": r["territory"],
+            "last_message": r["content"][:120],
+            "last_role": r["role"],
+            "last_timestamp": r["timestamp"],
+        }
+        if len(seen) >= limit:
+            break
+    return list(seen.values())
+
+
+def load_session_messages(session_id):
+    ph = _ph()
+    with _cursor() as cur:
+        cur.execute(f"SELECT * FROM chat_messages WHERE session_id = {ph} ORDER BY id ASC", (session_id,))
+        rows = _rows(cur.fetchall())
+    return rows
+
+
+def load_new_staff_messages(session_id, after_id=0):
+    """Used by the customer-facing widget to poll for staff messages that
+    were dropped into their conversation out-of-band. Only returns 'staff'
+    role rows — the widget already has its own user/assistant turns from
+    the normal /api/chat request/response cycle, so re-sending those would
+    just duplicate bubbles."""
+    ph = _ph()
+    with _cursor() as cur:
+        cur.execute(
+            f"SELECT * FROM chat_messages WHERE session_id = {ph} AND role = {ph} AND id > {ph} ORDER BY id ASC",
+            (session_id, "staff", after_id),
+        )
+        rows = _rows(cur.fetchall())
+    return rows
 
 
 def get_chat_stats_today():
