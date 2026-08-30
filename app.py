@@ -592,6 +592,12 @@ def api_chat():
     if not message and not attachments:
         return jsonify({"error": "Empty message."}), 400
 
+    # Log the customer's turn to the transcript immediately, so it shows up
+    # in the Staff Portal's Live Chat monitor even if the agent call below
+    # ends up failing.
+    transcript_text = message if message else "[sent an attachment]"
+    db.log_chat_message(session_id, territory, "user", transcript_text)
+
     graph = _get_or_create_agent(session_id, territory)
     LAST_REPORT.pop(session_id, None)
 
@@ -637,6 +643,8 @@ def api_chat():
             db.log_chat_event(session_id, territory, had_error=True)
             return jsonify({"error": "I'm having trouble connecting right now. Please try again in a "
                                       "moment, or call/WhatsApp NAWASA directly if it's urgent."}), 502
+
+    db.log_chat_message(session_id, territory, "assistant", reply_text)
 
     result = {"session_id": session_id, "reply": reply_text}
     report_card = LAST_REPORT.pop(session_id, None)
@@ -916,6 +924,70 @@ def api_unanswered_delete(q_id):
 @require_permission("aquaassist")
 def api_chat_stats():
     return jsonify(db.get_chat_stats_today())
+
+
+# =======================================================================
+# NEW: Live Chat monitor — staff can watch conversations as they happen
+# and optionally drop a message in, without turning the bot off. The bot
+# keeps answering normally; a staff message is just another turn in the
+# same transcript, and the model is told about it via the LangGraph
+# checkpointer so its next reply is aware a human already responded.
+# =======================================================================
+@app.route("/api/sessions")
+@require_permission("aquaassist")
+def api_sessions_list():
+    return jsonify(db.load_recent_sessions())
+
+
+@app.route("/api/sessions/<session_id>/messages")
+@require_permission("aquaassist")
+def api_session_messages(session_id):
+    return jsonify(db.load_session_messages(session_id))
+
+
+@app.route("/api/sessions/<session_id>/staff-message", methods=["POST"])
+@require_permission("aquaassist")
+def api_session_staff_message(session_id):
+    body = request.get_json(force=True) or {}
+    text = (body.get("message") or "").strip()
+    if not text:
+        return jsonify({"error": "Message text is required."}), 400
+
+    sess = SESSIONS.get(session_id)
+    territory = sess["territory"] if sess else "Grenada"
+
+    db.log_chat_message(session_id, territory, "staff", text)
+
+    # Make sure the agent's own memory of this conversation includes what
+    # the staff member just said, so if the customer keeps chatting the bot
+    # doesn't contradict or repeat what a human already told them. If the
+    # session hasn't started an agent graph yet (never chatted with the
+    # bot), there's nothing to update — the message still landed in the
+    # transcript above and the widget poller will still deliver it.
+    if sess is not None:
+        try:
+            sess["graph"].update_state(
+                {"configurable": {"thread_id": session_id}},
+                {"messages": [{"role": "assistant", "content": f"[NAWASA support staff]: {text}"}]},
+            )
+        except Exception as e:
+            logger.warning("Could not sync staff message into agent memory for %s: %s", session_id, e)
+
+    return jsonify({"ok": True})
+
+
+@app.route("/api/chat/<session_id>/updates")
+def api_chat_updates(session_id):
+    """Public, unauthenticated polling endpoint for the customer widget —
+    only ever returns 'staff' role messages (never user/assistant, which
+    the widget already has locally), and only those newer than `after`.
+    session_id functions as a bearer token here, the same trust model the
+    existing /api/report/<reference> lookup already relies on."""
+    try:
+        after_id = int(request.args.get("after", 0))
+    except ValueError:
+        after_id = 0
+    return jsonify(db.load_new_staff_messages(session_id, after_id=after_id))
 
 
 # ---------------------------------------------------------------------
