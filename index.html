@@ -15,22 +15,22 @@
      be previewed the way it would look embedded on the real nawasa.gd site.
      Nothing in here is wired to app.js; it's static markup for context.
      ===================================================================== -->
-<div class="mock-site gov-site" aria-hidden="false">
-  <header class="gov-nav">
-    <div class="gov-nav-inner">
+<div class="mock-site" aria-hidden="false">
+  <header class="mock-nav">
+    <div class="mock-nav-inner">
       <div class="mock-nav-brand">
         <img src="nawasa_logo.png.png" alt="NAWASA" class="mock-nav-logo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
         <div class="mock-nav-logo-fallback" style="display:none;">NAWASA</div>
         <span class="mock-nav-name">NAWASA</span>
       </div>
-      <nav class="gov-nav-links">
-        <a href="#" id="navHomeLink" class="active"><span>Home</span></a>
-        <a href="#" onclick="return false;"><span>About Us</span></a>
-        <a href="#" onclick="return false;"><span>Customer Care</span></a>
-        <a href="#" onclick="return false;"><span>Resources</span></a>
-        <a href="#" onclick="return false;"><span>Media Room</span></a>
-        <a href="#" onclick="return false;"><span>Contact Us</span></a>
-        <a href="#" id="navStaffPortalLink" class="nav-staff-link"><span>Staff Portal</span></a>
+      <nav class="mock-nav-links">
+        <a href="#" id="navHomeLink" class="active">Home</a>
+        <a href="https://www.nawasa.gd/about-us/vision-mission" target="_blank" rel="noopener">About Us</a>
+        <a href="https://www.nawasa.gd/customer-care/customer-service-charter" target="_blank" rel="noopener">Customer Care</a>
+        <a href="https://www.nawasa.gd/resources" target="_blank" rel="noopener">Resources</a>
+        <a href="https://www.nawasa.gd/media-room" target="_blank" rel="noopener">Media Room</a>
+        <a href="https://www.nawasa.gd/contact-us" target="_blank" rel="noopener">Contact Us</a>
+        <a href="#" id="navStaffPortalLink" class="nav-staff-link">🔐 Staff Portal</a>
       </nav>
       <a href="#" id="navCustomerPortalCta" class="mock-nav-cta">Customer Portal</a>
     </div>
@@ -38,204 +38,111 @@
 
   <div id="mockSiteMain">
 
-  <div class="gov-announce-bar">
-    <span class="mock-announce-label">Notice</span>
+  <div class="mock-announce-bar">
+    <span class="mock-announce-label">Announcements:</span>
     <span class="mock-announce-text">The dry season is here — always keep water storage on hand to last a minimum of three days. · Catch our Water Wise programme Mon, Wed &amp; Fri — WEE FM 7:15am, Real FM 7:30am, City Sound FM 10:30am. · Find us on Facebook — search NAWASA Grenada.</span>
   </div>
 
-  <section class="gov-hero">
-    <div class="gov-hero-bg" aria-hidden="true">
-      <svg class="gov-hero-wave" viewBox="0 0 1600 300" preserveAspectRatio="none">
-        <path d="M0,120 C300,200 500,40 800,110 C1100,180 1300,60 1600,130 L1600,300 L0,300 Z" fill="rgba(255,255,255,0.05)"/>
-        <path d="M0,170 C320,110 560,230 900,160 C1180,105 1360,220 1600,170 L1600,300 L0,300 Z" fill="rgba(255,255,255,0.07)"/>
-      </svg>
-    </div>
-    <div class="gov-hero-inner">
-      <span class="gov-hero-eyebrow">National Water &amp; Sewerage Authority</span>
-      <h1>Committed to meeting<br>our customers' needs</h1>
-      <p class="gov-hero-sub">Delivering safe drinking water and modern sewerage services across Grenada, Carriacou &amp; Petite Martinique.</p>
-      <div class="gov-hero-locations">
-        <span>Grenada</span><span class="gov-hero-dot">·</span><span>Carriacou</span><span class="gov-hero-dot">·</span><span>Petite Martinique</span>
+  <section class="mock-hero">
+    <div class="mock-hero-inner">
+      <span class="mock-hero-eyebrow">National Water &amp; Sewerage Authority</span>
+      <h1>NAWASA — committed to meeting customers' needs</h1>
+      <p>Serving Grenada, Carriacou &amp; Petite Martinique with safe drinking water and modern sewerage services.</p>
+      <div class="mock-hero-actions">
+        <a href="https://www.nawasa.gd/contact-us" target="_blank" rel="noopener" class="mock-btn mock-btn-primary">Report a Leak</a>
+        <a href="https://www.nawasa.gd/customer-care/customer-service-charter" target="_blank" rel="noopener" class="mock-btn mock-btn-ghost">Customer Service Charter</a>
+        <button type="button" id="testVoiceBtn" class="mock-btn mock-btn-ghost">🔊 Test Caribbean Voice</button>
       </div>
-      <div class="gov-hero-actions">
-        <a href="#" id="heroReportLeakBtn" class="gov-btn gov-btn-primary">Report a Leak</a>
-        <a href="#" id="heroCustomerPortalBtn" class="gov-btn gov-btn-secondary">Customer Portal</a>
-        <a href="#" onclick="return false;" class="gov-btn gov-btn-ghost">Customer Service Charter</a>
-      </div>
-      <button type="button" id="testVoiceBtn" class="gov-voice-test-btn">🔊 Test Caribbean Voice</button>
-      <p id="testVoiceStatus" class="hint-text" style="color:#fff; opacity:.85; margin-top:.5rem;"></p>
+      <p id="testVoiceStatus" class="hint-text" style="color:#fff; opacity:.85; margin-top:.6rem;"></p>
     </div>
   </section>
 
-  <!-- ===== SERVICE STATUS ===== -->
-  <section class="gov-status-section">
-    <div class="gov-status-card">
-      <div class="gov-status-left">
-        <span id="serviceStatusDot" class="gov-status-dot ok"></span>
-        <div>
-          <div class="gov-status-label">Water Service Status</div>
-          <div id="serviceStatusText" class="gov-status-text">Checking current status…</div>
-        </div>
+  <section class="mock-content">
+    <div class="mock-section-head">
+      <h2>NAWASA — committed to meeting customers' needs</h2>
+      <p class="mock-section-sub">Everything you need to manage your NAWASA account, in one place.</p>
+    </div>
+    <div class="mock-card-grid">
+      <div class="mock-card">
+        <div class="mock-card-icon">🧾</div>
+        <h3>Customer Care</h3>
+        <p>Read NAWASA's Customer Service Charter to see what to expect from us, and what we ask of our customers.</p>
+        <a href="https://www.nawasa.gd/customer-care/customer-service-charter" target="_blank" rel="noopener" class="mock-card-link">Read more →</a>
       </div>
-      <div class="gov-status-right">
-        <div class="gov-status-metric">
-          <span id="serviceStatusCount" class="gov-status-metric-num">—</span>
-          <span class="gov-status-metric-label">Active notices</span>
-        </div>
-        <div class="gov-status-updated">Last updated <span id="serviceStatusUpdated">—</span></div>
+      <div class="mock-card">
+        <div class="mock-card-icon">📰</div>
+        <h3>Media Room</h3>
+        <p>Browse NAWASA press releases, photo and video galleries, newsletters, and brochures.</p>
+        <a href="https://www.nawasa.gd/media-room" target="_blank" rel="noopener" class="mock-card-link">Read more →</a>
+      </div>
+      <div class="mock-card">
+        <div class="mock-card-icon">📚</div>
+        <h3>Resources</h3>
+        <p>Explore legislation, annual reports, water treatment info, and other NAWASA research and publications.</p>
+        <a href="https://www.nawasa.gd/resources" target="_blank" rel="noopener" class="mock-card-link">Read more →</a>
       </div>
     </div>
   </section>
 
-  <!-- ===== QUICK SERVICES ===== -->
-  <section class="gov-section">
-    <div class="gov-section-head">
-      <span class="gov-eyebrow-sm">Quick Services</span>
-      <h2>Everything you need, in one place</h2>
-      <p class="gov-section-sub">Manage your NAWASA account, report issues, and reach us — all from here.</p>
-    </div>
-    <div class="gov-service-grid">
-      <a href="#" id="svcReportLeak" class="gov-service-card">
-        <span class="gov-service-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2c3 4 7 9 7 13a7 7 0 1 1-14 0c0-4 4-9 7-13z" stroke="currentColor" stroke-width="1.6"/></svg></span>
-        <h3>Report a Leak</h3>
-        <p>Spotted a leak or burst main? Log it with our team in under a minute.</p>
-        <span class="gov-service-arrow">→</span>
-      </a>
-      <a href="#" id="svcReportOutage" class="gov-service-card">
-        <span class="gov-service-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></span>
-        <h3>Report an Outage</h3>
-        <p>Tell us about interruptions or low pressure in your area.</p>
-        <span class="gov-service-arrow">→</span>
-      </a>
-      <a href="#" id="svcPayBill" class="gov-service-card">
-        <span class="gov-service-icon"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M3 10h18" stroke="currentColor" stroke-width="1.6"/></svg></span>
-        <h3>Pay Your Bill</h3>
-        <p>See your options for settling your NAWASA account.</p>
-        <span class="gov-service-arrow">→</span>
-      </a>
-      <a href="#" id="svcCustomerService" class="gov-service-card">
-        <span class="gov-service-icon"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.6"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7" stroke="currentColor" stroke-width="1.6"/></svg></span>
-        <h3>Customer Service</h3>
-        <p>Chat with AquaAssist or reach a representative directly.</p>
-        <span class="gov-service-arrow">→</span>
-      </a>
-      <a href="#" id="svcWaterInfo" class="gov-service-card">
-        <span class="gov-service-icon"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v5l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
-        <h3>Water Service Info</h3>
-        <p>Connection costs, billing, and general policy answers.</p>
-        <span class="gov-service-arrow">→</span>
-      </a>
-      <a href="#" onclick="return false;" class="gov-service-card">
-        <span class="gov-service-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16v12H4z" stroke="currentColor" stroke-width="1.6"/><path d="m4 7 8 6 8-6" stroke="currentColor" stroke-width="1.6"/></svg></span>
-        <h3>Contact NAWASA</h3>
-        <p>Phone, WhatsApp, office locations and hours.</p>
-        <span class="gov-service-arrow">→</span>
-      </a>
-    </div>
-  </section>
-
-  <!-- ===== ABOUT / STATS ===== -->
-  <section class="gov-section gov-section-alt">
-    <div class="gov-split">
-      <div class="gov-split-text">
-        <span class="gov-eyebrow-sm">About NAWASA</span>
-        <h2>Delivering safe, reliable water services across Grenada</h2>
-        <p>NAWASA is responsible for the treatment, supply, and quality of drinking water, along with sewerage services, across Grenada, Carriacou, and Petite Martinique. Our teams work around the clock to keep service reliable and respond quickly when something goes wrong.</p>
-        <a href="#" onclick="return false;" class="gov-text-link">Learn more about NAWASA →</a>
-      </div>
-      <div class="gov-split-stats">
-        <div class="gov-stat"><span class="gov-stat-num">40k+</span><span class="gov-stat-label">Customers Served</span></div>
-        <div class="gov-stat"><span class="gov-stat-num">7</span><span class="gov-stat-label">Parishes Supported</span></div>
-        <div class="gov-stat"><span class="gov-stat-num">5</span><span class="gov-stat-label">Service Offices</span></div>
-        <div class="gov-stat"><span class="gov-stat-num">60+</span><span class="gov-stat-label">Years of Service</span></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ===== WATER WISE (public tips) ===== -->
-  <section class="gov-section">
-    <div class="gov-waterwise-card">
-      <div class="gov-waterwise-head">
-        <span class="gov-waterwise-icon">💧</span>
-        <div>
-          <span class="gov-eyebrow-sm">Water Wise</span>
-          <h3>Tip of the Day</h3>
-        </div>
-      </div>
-      <p id="publicWaterTipText" class="gov-waterwise-text">Loading today's tip…</p>
-      <div id="publicWaterTipDots" class="gov-waterwise-dots"></div>
-    </div>
-  </section>
-
-  <!-- ===== NEWS ===== -->
-  <section class="gov-section gov-section-alt">
-    <div class="gov-section-head">
-      <span class="gov-eyebrow-sm">Media Room</span>
+  <section class="mock-content mock-content-alt">
+    <div class="mock-section-head">
       <h2>Latest News</h2>
+      <p class="mock-section-sub">From the NAWASA Blog.</p>
     </div>
-    <div class="gov-news-grid">
-      <a href="#" onclick="return false;" class="gov-news-featured">
-        <span class="gov-news-cat">NAWASA Blog</span>
-        <h3>NAWASA App — manage your account from your phone</h3>
-        <p>A look at what's new in the NAWASA customer app, from bill tracking to service alerts.</p>
-        <span class="gov-text-link">Read article →</span>
-      </a>
-      <div class="gov-news-side">
-        <a href="#" onclick="return false;" class="gov-news-item">
-          <span class="gov-news-cat">NAWASA Blog</span>
-          <h4>Bill payment — upside down</h4>
-          <span class="gov-text-link">Read article →</span>
-        </a>
-        <a href="#" onclick="return false;" class="gov-news-item">
-          <span class="gov-news-cat">NAWASA Blog</span>
-          <h4>Stay Connected</h4>
-          <span class="gov-text-link">Read article →</span>
-        </a>
+    <div class="mock-card-grid mock-news-grid">
+      <div class="mock-card">
+        <h3>NAWASA App</h3>
+        <p class="mock-news-cat">NAWASA Blog</p>
+        <a href="https://www.nawasa.gd/nawasa-blog/entry/nawasa-app" target="_blank" rel="noopener" class="mock-card-link">Read more →</a>
+      </div>
+      <div class="mock-card">
+        <h3>Bill payment — upside down</h3>
+        <p class="mock-news-cat">NAWASA Blog</p>
+        <a href="https://www.nawasa.gd/nawasa-blog/entry/bill-payment-upside-down" target="_blank" rel="noopener" class="mock-card-link">Read more →</a>
+      </div>
+      <div class="mock-card">
+        <h3>Stay Connected</h3>
+        <p class="mock-news-cat">NAWASA Blog</p>
+        <a href="https://www.nawasa.gd/nawasa-blog/entry/stay-connected" target="_blank" rel="noopener" class="mock-card-link">Read more →</a>
       </div>
     </div>
   </section>
 
-  <section class="gov-section">
+  <section class="mock-content">
     <div class="mock-notice-card" style="border-left-color: var(--primary);">
       <span class="mock-notice-dot" style="background: var(--primary);"></span>
       <div>
         <b>Customer Service Charter</b>
         <p>NAWASA's Customer Service Charter sets out our commitment to helping customers get the most from our services, and gives you a way to share feedback and suggestions with us directly.</p>
-        <a href="#" onclick="return false;" class="mock-card-link">Read the charter →</a>
+        <a href="https://www.nawasa.gd/customer-care/customer-service-charter" target="_blank" rel="noopener" class="mock-card-link">Read the charter →</a>
       </div>
     </div>
   </section>
 
   </div><!-- /#mockSiteMain -->
 
-  <footer class="gov-footer">
-    <div class="gov-footer-inner">
-      <div class="gov-footer-brand">
+  <footer class="mock-footer">
+    <div class="mock-footer-inner">
+      <div>
         <div class="mock-nav-name" style="color:#fff;">NAWASA</div>
         <p>National Water &amp; Sewerage Authority — Grenada, Carriacou &amp; Petite Martinique.</p>
         <p class="mock-footer-demo-note">This is a demo preview site built to showcase the AquaAssist chat widget — not NAWASA's official website. Visit the real site at <a href="https://www.nawasa.gd/" target="_blank" rel="noopener">nawasa.gd</a>.</p>
       </div>
       <div>
         <h4>Quicklinks</h4>
-        <p><a href="#" onclick="return false;">Events Calendar</a></p>
-        <p><a href="#" onclick="return false;">Report a Leak</a></p>
-        <p><a href="#" onclick="return false;">Make a Suggestion</a></p>
-        <p><a href="#" onclick="return false;">Job Opportunities</a></p>
-      </div>
-      <div>
-        <h4>Emergency &amp; Service</h4>
-        <p>Emergency Line: (473) 440-2155</p>
-        <p>24/7 AquaAssist Support</p>
-        <p><a href="#" onclick="return false;">Service Interruptions</a></p>
+        <p><a href="https://www.nawasa.gd/nawasa-calender" target="_blank" rel="noopener">Events Calendar</a></p>
+        <p><a href="https://www.nawasa.gd/contact-us" target="_blank" rel="noopener">Report a Leak</a></p>
+        <p><a href="https://www.nawasa.gd/contact-us" target="_blank" rel="noopener">Make a Suggestion</a></p>
+        <p><a href="https://www.nawasa.gd/career-opportunities" target="_blank" rel="noopener">Job Opportunities</a></p>
       </div>
       <div>
         <h4>Connect With Us</h4>
         <p>Phone: (473) 440-2155</p>
         <p>WhatsApp: 405 5245 / 459 6064 / 405 9143</p>
-        <p class="gov-footer-social">
-          <a href="https://www.facebook.com/nawasa.grenada" target="_blank" rel="noopener">Facebook</a>
-          <a href="https://twitter.com/NAWASAGrenada" target="_blank" rel="noopener">Twitter</a>
-          <a href="https://www.instagram.com/nawasa_gnd/" target="_blank" rel="noopener">Instagram</a>
+        <p>
+          <a href="https://www.facebook.com/nawasa.grenada" target="_blank" rel="noopener">Facebook</a> ·
+          <a href="https://twitter.com/NAWASAGrenada" target="_blank" rel="noopener">Twitter</a> ·
+          <a href="https://www.instagram.com/nawasa_gnd/" target="_blank" rel="noopener">Instagram</a> ·
           <a href="https://www.youtube.com/user/NAWASA1Grenada" target="_blank" rel="noopener">YouTube</a>
         </p>
       </div>
@@ -515,6 +422,12 @@
 
 <!-- =====================================================================
      STAFF PORTAL — "NAWASA Digital Management Center"
+     Reorganized into a sidebar + 3 sections (Website / AquaAssist /
+     Reports & Operations) plus a Dashboard overview. Every panel below
+     that existed before (outages, tips, reports table, staff map, feature
+     toggles, maintenance message, notify subscribers) is present here
+     unchanged in ID and behavior — only regrouped. Two panels are new:
+     Knowledge Base (FAQ CRUD) and Unanswered Questions.
      ===================================================================== -->
 <section id="staffPortalSection" class="staff-site-section" style="display:none;">
   <div class="staff-site-inner">
@@ -552,7 +465,6 @@
           <div class="staff-nav-group">🤖 AquaAssist</div>
           <button class="staff-nav-btn" data-staff-section="aqua-kb">Knowledge Base</button>
           <button class="staff-nav-btn" data-staff-section="aqua-unanswered">Unanswered Questions</button>
-          <button class="staff-nav-btn" data-staff-section="aqua-livechat">Live Chat</button>
           <button class="staff-nav-btn" data-staff-section="aqua-settings">Settings</button>
 
           <div class="staff-nav-group">📍 Reports &amp; Operations</div>
@@ -635,34 +547,6 @@
             <div class="section-label" style="margin-top:0;">❓ Questions AquaAssist Couldn't Answer</div>
             <p class="hint-text">Logged automatically whenever a customer's question doesn't match anything in the knowledge base. Answer it here to add it straight to the FAQ list above.</p>
             <div id="unansweredList"></div>
-          </section>
-
-          <!-- ===== AQUAASSIST > Live Chat ===== -->
-          <section id="staffSection-aqua-livechat" class="staff-section">
-            <div class="section-label" style="margin-top:0;">💬 Live Chat Monitor</div>
-            <p class="hint-text">Watch conversations as customers have them with AquaAssist. You can jump in and send a message yourself at any point — the bot keeps responding normally, your message just becomes part of the same conversation.</p>
-            <div class="livechat-shell">
-              <div class="livechat-sidebar">
-                <div class="livechat-sidebar-head">
-                  <span>Conversations</span>
-                  <button type="button" id="liveChatRefreshBtn" class="btn-secondary" style="padding:.25rem .6rem;font-size:.72rem;">⟳ Refresh</button>
-                </div>
-                <div id="liveChatSessionList" class="livechat-session-list"></div>
-              </div>
-              <div class="livechat-main">
-                <div id="liveChatEmptyState" class="card" style="text-align:center;">
-                  <p class="hint-text">Select a conversation on the left to view it.</p>
-                </div>
-                <div id="liveChatActive" style="display:none;flex-direction:column;height:100%;">
-                  <div class="livechat-header">Session: <code id="liveChatSessionLabel"></code></div>
-                  <div id="liveChatTranscript" class="livechat-transcript"></div>
-                  <form id="liveChatReplyForm" class="livechat-reply-form">
-                    <input id="liveChatReplyText" type="text" placeholder="Type a message to send as NAWASA Support..." autocomplete="off" />
-                    <button type="submit" class="btn-primary">Send</button>
-                  </form>
-                </div>
-              </div>
-            </div>
           </section>
 
           <!-- ===== AQUAASSIST > Settings ===== -->
