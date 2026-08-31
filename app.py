@@ -670,6 +670,14 @@ def api_chat():
     transcript_text = message if message else "[sent an attachment]"
     db.log_chat_message(session_id, territory, "user", transcript_text)
 
+    if db.is_session_paused(session_id):
+        # A staff member has taken this conversation over in the Live Chat
+        # monitor — the customer's message is still logged above (so staff
+        # see it in the transcript), but the bot must not reply. No agent
+        # call, no "reply" key: the frontend shows a one-time notice instead
+        # of a bot bubble, and waits for the staff-message poller.
+        return jsonify({"session_id": session_id, "paused": True})
+
     graph = _get_or_create_agent(session_id, territory)
     LAST_REPORT.pop(session_id, None)
 
@@ -1049,6 +1057,59 @@ def api_session_staff_message(session_id):
             logger.warning("Could not sync staff message into agent memory for %s: %s", session_id, e)
 
     return jsonify({"ok": True})
+
+
+# =======================================================================
+# NEW: Pause/resume — lets staff stop the bot from replying in a session
+# while they handle it directly, then hand it back once they're done.
+# Pausing also clears any open handoff flag, since staff has now taken
+# ownership of the conversation.
+# =======================================================================
+@app.route("/api/sessions/<session_id>/pause", methods=["POST"])
+@require_permission("aquaassist")
+def api_session_pause(session_id):
+    db.pause_session(session_id)
+    db.resolve_handoff_for_session(session_id)
+    return jsonify({"session_id": session_id, "paused": True})
+
+
+@app.route("/api/sessions/<session_id>/resume", methods=["POST"])
+@require_permission("aquaassist")
+def api_session_resume(session_id):
+    db.resume_session(session_id)
+    return jsonify({"session_id": session_id, "paused": False})
+
+
+@app.route("/api/sessions/<session_id>/status")
+@require_permission("aquaassist")
+def api_session_status(session_id):
+    return jsonify({"session_id": session_id, "paused": db.is_session_paused(session_id)})
+
+
+# =======================================================================
+# NEW: Deleting conversations from the Live Chat monitor. Per-session and
+# a "clear all" bulk action. Also drops the in-memory agent state for that
+# session (if any) so a deleted-and-reused session_id starts clean rather
+# than resuming old LangGraph memory the visible transcript no longer has.
+# =======================================================================
+@app.route("/api/sessions/<session_id>", methods=["DELETE"])
+@require_permission("aquaassist")
+def api_session_delete(session_id):
+    db.delete_session_messages(session_id)
+    SESSIONS.pop(session_id, None)
+    LAST_REPORT.pop(session_id, None)
+    CURRENT_ATTACHMENT.pop(session_id, None)
+    return jsonify({"deleted": session_id})
+
+
+@app.route("/api/sessions", methods=["DELETE"])
+@require_permission("aquaassist")
+def api_sessions_delete_all():
+    db.delete_all_sessions()
+    SESSIONS.clear()
+    LAST_REPORT.clear()
+    CURRENT_ATTACHMENT.clear()
+    return jsonify({"deleted": "all"})
 
 
 @app.route("/api/chat/<session_id>/updates")
