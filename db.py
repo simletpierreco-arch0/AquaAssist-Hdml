@@ -260,6 +260,17 @@ def init_db():
                 timestamp TEXT, resolved TEXT
             )
         """)
+        # `paused_sessions` — presence of a row means the bot must NOT
+        # respond in that session; a staff member is handling it directly
+        # in the Live Chat monitor. Toggled by the pause/resume buttons
+        # there (see api_session_pause/api_session_resume in app.py) and
+        # checked on every /api/chat request before the agent is invoked.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS paused_sessions (
+                session_id TEXT PRIMARY KEY,
+                paused_at TEXT
+            )
+        """)
 
     migrate_legacy_storage()
     _seed_tips_if_empty()
@@ -776,6 +787,7 @@ def load_recent_sessions(limit=50):
     with _cursor() as cur:
         cur.execute("SELECT * FROM chat_messages ORDER BY id DESC LIMIT 2000")
         rows = _rows(cur.fetchall())
+    paused_ids = load_paused_session_ids()
     seen = {}
     for r in rows:
         sid = r["session_id"]
@@ -787,6 +799,7 @@ def load_recent_sessions(limit=50):
             "last_message": r["content"][:120],
             "last_role": r["role"],
             "last_timestamp": r["timestamp"],
+            "paused": sid in paused_ids,
         }
         if len(seen) >= limit:
             break
@@ -892,3 +905,73 @@ def resolve_handoff_for_session(session_id):
             ("1", session_id, "0"),
         )
         return cur.rowcount > 0
+
+
+# =======================================================================
+# NEW: Pause/resume — staff can stop the bot from replying in a session
+# while they handle it live, then hand it back. Presence of a row in
+# paused_sessions means "the bot must not respond here right now"; checked
+# on every /api/chat request before the agent is invoked.
+# =======================================================================
+def pause_session(session_id):
+    ph = _ph()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _cursor(commit=True) as cur:
+        if USE_POSTGRES:
+            cur.execute(f"""
+                INSERT INTO paused_sessions (session_id, paused_at) VALUES ({ph}, {ph})
+                ON CONFLICT (session_id) DO UPDATE SET paused_at = EXCLUDED.paused_at
+            """, (session_id, now))
+        else:
+            cur.execute(
+                f"INSERT OR REPLACE INTO paused_sessions (session_id, paused_at) VALUES ({ph}, {ph})",
+                (session_id, now),
+            )
+
+
+def resume_session(session_id):
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"DELETE FROM paused_sessions WHERE session_id = {ph}", (session_id,))
+
+
+def is_session_paused(session_id):
+    ph = _ph()
+    with _cursor() as cur:
+        cur.execute(f"SELECT session_id FROM paused_sessions WHERE session_id = {ph}", (session_id,))
+        return cur.fetchone() is not None
+
+
+def load_paused_session_ids():
+    with _cursor() as cur:
+        cur.execute("SELECT session_id FROM paused_sessions")
+        rows = _rows(cur.fetchall())
+    return {r["session_id"] for r in rows}
+
+
+# =======================================================================
+# NEW: Deleting conversations — staff Live Chat cleanup. Removes the
+# transcript plus any related handoff/pause/stats rows for that session so
+# nothing orphaned is left behind (the session_id itself may still exist
+# in the in-memory LangGraph checkpointer in app.py — that's cleared
+# separately, on the same request, since it isn't part of this DB layer).
+# =======================================================================
+def delete_session_messages(session_id):
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"DELETE FROM chat_messages WHERE session_id = {ph}", (session_id,))
+        deleted = cur.rowcount > 0
+        cur.execute(f"DELETE FROM handoff_requests WHERE session_id = {ph}", (session_id,))
+        cur.execute(f"DELETE FROM paused_sessions WHERE session_id = {ph}", (session_id,))
+        cur.execute(f"DELETE FROM chat_events WHERE session_id = {ph}", (session_id,))
+    return deleted
+
+
+def delete_all_sessions():
+    """Wipes every conversation transcript, handoff flag, pause flag, and
+    chat-stats event. Used by the Live Chat monitor's "Clear all" action."""
+    with _cursor(commit=True) as cur:
+        cur.execute("DELETE FROM chat_messages")
+        cur.execute("DELETE FROM handoff_requests")
+        cur.execute("DELETE FROM paused_sessions")
+        cur.execute("DELETE FROM chat_events")
