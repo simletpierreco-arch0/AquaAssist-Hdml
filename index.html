@@ -463,6 +463,7 @@
           <button class="staff-nav-btn" data-staff-section="website-preview">Website Preview</button>
 
           <div class="staff-nav-group">🤖 AquaAssist</div>
+          <button class="staff-nav-btn" data-staff-section="aqua-livechat">Live Chat <span id="liveChatBadge" class="livechat-badge" style="display:none;">0</span></button>
           <button class="staff-nav-btn" data-staff-section="aqua-kb">Knowledge Base</button>
           <button class="staff-nav-btn" data-staff-section="aqua-unanswered">Unanswered Questions</button>
           <button class="staff-nav-btn" data-staff-section="aqua-settings">Settings</button>
@@ -524,6 +525,32 @@
             </div>
           </section>
 
+          <!-- ===== AQUAASSIST > Live Chat monitor ===== -->
+          <section id="staffSection-aqua-livechat" class="staff-section">
+            <div class="section-label" style="margin-top:0;">🆘 Live Chat</div>
+            <p class="hint-text">Conversations AquaAssist has flagged for a human (or that a customer asked for a person in) show at the top of the list. Open one to watch it live and drop in a reply — the bot stays on and keeps the transcript, it just won't answer for the customer once you've joined in.</p>
+            <div class="livechat-shell">
+              <div class="livechat-sidebar">
+                <div class="livechat-sidebar-head">
+                  <span>Conversations</span>
+                  <button type="button" id="liveChatRefreshBtn" class="btn-secondary" style="padding:.2rem .5rem;font-size:.72rem;">↻ Refresh</button>
+                </div>
+                <div id="liveChatSessionList" class="livechat-session-list"></div>
+              </div>
+              <div class="livechat-main">
+                <div id="liveChatEmptyState" class="hint-text" style="padding:2rem 1rem;text-align:center;">Select a conversation on the left to view it.</div>
+                <div id="liveChatActive" style="display:none;flex-direction:column;flex:1;min-height:0;">
+                  <div class="livechat-header">Session: <code id="liveChatSessionLabel"></code></div>
+                  <div id="liveChatTranscript" class="livechat-transcript"></div>
+                  <form id="liveChatReplyForm" class="livechat-reply-form">
+                    <input id="liveChatReplyText" type="text" placeholder="Reply to this customer as NAWASA staff..." autocomplete="off" />
+                    <button type="submit" class="btn-primary">Send</button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <!-- ===== AQUAASSIST > Knowledge Base ===== -->
           <section id="staffSection-aqua-kb" class="staff-section">
             <div class="section-label" style="margin-top:0;">📚 Knowledge Base / FAQs</div>
@@ -551,7 +578,12 @@
 
           <!-- ===== AQUAASSIST > Settings ===== -->
           <section id="staffSection-aqua-settings" class="staff-section">
-            <div class="section-label" style="margin-top:0;">🎛️ Customer Interface Controls</div>
+            <div class="section-label" style="margin-top:0;">🔔 Live Chat Notifications</div>
+            <div class="card">
+              <label class="toggle-row"><input type="checkbox" id="staffNotifyToggle" /> Notify me when a customer needs a live agent</label>
+              <p class="hint-text">When this is on, this browser will beep and (if you allow it) show a desktop notification the moment AquaAssist flags a new conversation for staff — whether the bot couldn't help, or the customer asked for a person directly. This is a per-browser setting, not shared with other staff.</p>
+            </div>
+            <div class="section-label">🎛️ Customer Interface Controls</div>
             <div class="card">
               <p class="hint-text">Toggle which features customers can see and use in AquaAssist right now.</p>
               <div id="featureToggleList" class="checkbox-group"></div>
