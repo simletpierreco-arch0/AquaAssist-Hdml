@@ -1723,16 +1723,19 @@ async function loadOverviewAquaStats() {
   const wrapAqua = $("#overviewCardsAqua");
   if (!wrapAqua) return;
   try {
-    const [unansweredRes, statsRes] = await Promise.all([
+    const [unansweredRes, statsRes, handoffsRes] = await Promise.all([
       staffFetch("/api/unanswered"),
       staffFetch("/api/chat-stats"),
+      staffFetch("/api/handoffs"),
     ]);
     const unanswered = unansweredRes.ok ? await unansweredRes.json() : [];
     const stats = statsRes.ok ? await statsRes.json() : { conversations_today: 0, questions_answered_today: 0 };
+    const handoffs = handoffsRes.ok ? await handoffsRes.json() : [];
     wrapAqua.innerHTML = `
       <div class="metric-box"><div class="num">${stats.conversations_today}</div><div class="label">💬 Conversations today</div></div>
       <div class="metric-box"><div class="num">${stats.questions_answered_today}</div><div class="label">✅ Replies sent today</div></div>
       <div class="metric-box"><div class="num">${unanswered.length}</div><div class="label">❓ Unanswered questions</div></div>
+      <div class="metric-box"><div class="num" id="overviewHandoffMetric">${handoffs.length}</div><div class="label">🆘 Needs a human</div></div>
     `;
   } catch (err) {
     wrapAqua.innerHTML = "";
@@ -1867,6 +1870,8 @@ function renderUnansweredList(items) {
 // ---------------------------------------------------------------------
 let liveChatTranscriptTimer = null;
 let liveChatSessionsTimer = null;
+let handoffsTimer = null;
+let knownOpenHandoffIds = new Set();
 
 function formatChatRole(role) {
   if (role === "user") return "🙂 Customer";
@@ -1967,12 +1972,88 @@ function setupLiveChatMonitor() {
 }
 
 // ---------------------------------------------------------------------
+// Live-agent handoff notifications
+//
+// The bot can call request_human_handoff (app.py) when it can't help a
+// customer, or the customer explicitly asks for a person. That creates an
+// open "handoff request" server-side. This polls for those, drives the
+// Live Chat nav badge + Dashboard metric, and — if the staff member has
+// opted in via the notification toggle in AquaAssist Settings — fires a
+// browser notification and a short beep the first time a NEW one appears,
+// so staff don't have to keep the Live Chat tab open to notice.
+// ---------------------------------------------------------------------
+function playNotifyBeep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.4);
+  } catch (err) { /* audio not available — ignore */ }
+}
+
+function updateHandoffBadge(handoffs) {
+  const badge = $("#liveChatBadge");
+  if (badge) {
+    if (handoffs.length) {
+      badge.textContent = String(handoffs.length);
+      badge.style.display = "inline-flex";
+    } else {
+      badge.style.display = "none";
+    }
+  }
+  const metric = $("#overviewHandoffMetric");
+  if (metric) metric.textContent = String(handoffs.length);
+}
+
+async function loadHandoffs(isFirstLoad = false) {
+  const res = await staffFetch("/api/handoffs");
+  if (res.status === 401) { staffLogout(); return; }
+  if (res.status === 403) return;
+  const handoffs = await res.json();
+  const currentIds = new Set(handoffs.map((h) => h.id));
+  const isNew = [...currentIds].some((id) => !knownOpenHandoffIds.has(id));
+
+  if (isNew && !isFirstLoad && localStorage.getItem("aqua_staff_notify") === "1") {
+    playNotifyBeep();
+    if ("Notification" in window && Notification.permission === "granted") {
+      const latest = handoffs.find((h) => !knownOpenHandoffIds.has(h.id));
+      new Notification("AquaAssist — customer needs a live agent", {
+        body: latest ? latest.reason : "A conversation was flagged for staff.",
+      });
+    }
+  }
+  knownOpenHandoffIds = currentIds;
+  updateHandoffBadge(handoffs);
+  return handoffs;
+}
+
+function setupStaffNotifySetting() {
+  const toggle = $("#staffNotifyToggle");
+  if (!toggle) return;
+  toggle.checked = localStorage.getItem("aqua_staff_notify") === "1";
+  toggle.addEventListener("change", async () => {
+    if (toggle.checked && "Notification" in window && Notification.permission === "default") {
+      await Notification.requestPermission();
+    }
+    localStorage.setItem("aqua_staff_notify", toggle.checked ? "1" : "0");
+  });
+}
+
+// ---------------------------------------------------------------------
 // Staff portal core (login, feature toggles, reports, map, outages, tips)
 // ---------------------------------------------------------------------
 function setupStaffPortal() {
   setupReportsTableActions();
   setupStaffSidebar();
   setupLiveChatMonitor();
+  setupStaffNotifySetting();
 
   $("#staffLoginBtn").addEventListener("click", async () => {
     const passcode = $("#staffPasscodeInput").value;
@@ -2073,6 +2154,10 @@ function staffLoginSuccess() {
   loadLiveChatSessions();
   if (liveChatSessionsTimer) clearInterval(liveChatSessionsTimer);
   liveChatSessionsTimer = setInterval(loadLiveChatSessions, 8000);
+  knownOpenHandoffIds = new Set();
+  loadHandoffs(true);
+  if (handoffsTimer) clearInterval(handoffsTimer);
+  handoffsTimer = setInterval(() => loadHandoffs(false), 8000);
 }
 
 function staffLogout() {
@@ -2081,6 +2166,8 @@ function staffLogout() {
   state.currentLiveChatSession = null;
   if (liveChatTranscriptTimer) { clearInterval(liveChatTranscriptTimer); liveChatTranscriptTimer = null; }
   if (liveChatSessionsTimer) { clearInterval(liveChatSessionsTimer); liveChatSessionsTimer = null; }
+  if (handoffsTimer) { clearInterval(handoffsTimer); handoffsTimer = null; }
+  knownOpenHandoffIds = new Set();
   sessionStorage.removeItem("aqua_staff_passcode");
   sessionStorage.removeItem("aqua_staff_role");
   $("#staffLoginCard").style.display = "block";
