@@ -533,14 +533,23 @@
               <div class="livechat-sidebar">
                 <div class="livechat-sidebar-head">
                   <span>Conversations</span>
-                  <button type="button" id="liveChatRefreshBtn" class="btn-secondary" style="padding:.2rem .5rem;font-size:.72rem;">↻ Refresh</button>
+                  <div style="display:flex;gap:.3rem;">
+                    <button type="button" id="liveChatRefreshBtn" class="btn-secondary" style="padding:.2rem .5rem;font-size:.72rem;">↻ Refresh</button>
+                    <button type="button" id="liveChatClearAllBtn" class="btn-secondary tip-delete-btn" style="padding:.2rem .5rem;font-size:.72rem;">🗑️ Clear all</button>
+                  </div>
                 </div>
                 <div id="liveChatSessionList" class="livechat-session-list"></div>
               </div>
               <div class="livechat-main">
                 <div id="liveChatEmptyState" class="hint-text" style="padding:2rem 1rem;text-align:center;">Select a conversation on the left to view it.</div>
                 <div id="liveChatActive" style="display:none;flex-direction:column;flex:1;min-height:0;">
-                  <div class="livechat-header">Session: <code id="liveChatSessionLabel"></code></div>
+                  <div class="livechat-header-row">
+                    <div class="livechat-header">Session: <code id="liveChatSessionLabel"></code></div>
+                    <div class="livechat-header-actions">
+                      <button type="button" id="liveChatPauseBtn" class="btn-secondary">⏸ Pause AI</button>
+                      <button type="button" id="liveChatDeleteBtn" class="btn-secondary tip-delete-btn">🗑️ Delete</button>
+                    </div>
+                  </div>
                   <div id="liveChatTranscript" class="livechat-transcript"></div>
                   <form id="liveChatReplyForm" class="livechat-reply-form">
                     <input id="liveChatReplyText" type="text" placeholder="Reply to this customer as NAWASA staff..." autocomplete="off" />
