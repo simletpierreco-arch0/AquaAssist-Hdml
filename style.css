@@ -825,17 +825,31 @@ body.aqua-widget-open { overflow: visible; }
   border-bottom: 1px solid color-mix(in srgb, var(--primary) 15%, transparent);
 }
 .livechat-session-list { flex: 1; overflow-y: auto; padding: .4rem; }
-.livechat-session-row {
-  display: block; width: 100%; text-align: left; background: none; border: none;
-  border-radius: 10px; padding: .55rem .6rem; margin-bottom: .2rem;
-}
+.livechat-session-row { display: flex; align-items: stretch; gap: .2rem; border-radius: 10px; margin-bottom: .2rem; }
 .livechat-session-row:hover { background: color-mix(in srgb, var(--primary) 8%, transparent); }
 .livechat-session-row.active { background: color-mix(in srgb, var(--primary) 14%, transparent); }
+.livechat-session-main {
+  flex: 1; min-width: 0; text-align: left; background: none; border: none;
+  border-radius: 10px; padding: .55rem .6rem;
+}
+.livechat-session-delete {
+  flex-shrink: 0; align-self: center; background: none; border: none; cursor: pointer;
+  padding: .3rem .5rem; font-size: .82rem; opacity: .55; border-radius: 8px; margin-right: .2rem;
+}
+.livechat-session-delete:hover { opacity: 1; background: #D6454518; }
+.livechat-paused-tag {
+  display: inline-block; margin-left: .3rem; padding: .05rem .4rem; border-radius: 999px;
+  background: #F5A62322; color: #C98A11; font-size: .6rem; font-weight: 800; text-transform: uppercase;
+}
 .livechat-session-top { display: flex; justify-content: space-between; font-size: .68rem; color: var(--primary); font-weight: 700; margin-bottom: .15rem; }
 .livechat-session-time { color: color-mix(in srgb, var(--text) 55%, transparent); font-weight: 500; }
 .livechat-session-preview { font-size: .78rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .livechat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.livechat-header-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .5rem; flex-wrap: wrap; }
+.livechat-header-actions { display: flex; gap: .4rem; flex-shrink: 0; }
+.livechat-header-actions button { padding: .4rem .7rem; font-size: .78rem; }
+#liveChatPauseBtn.livechat-paused-active { background: #F5A62322; border-color: #F5A62360; color: #C98A11; }
 .livechat-header { font-size: .78rem; color: color-mix(in srgb, var(--text) 65%, transparent); margin-bottom: .5rem; }
 .livechat-header code { background: color-mix(in srgb, var(--primary) 8%, transparent); padding: .1rem .4rem; border-radius: 6px; }
 .livechat-transcript {
