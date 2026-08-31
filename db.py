@@ -13,6 +13,10 @@ tips/features tables):
   - `chat_events`         — one row per successful/failed /api/chat turn,
                             used for the staff Overview "conversations
                             today" counters.
+  - `handoff_requests`    — conversations the bot has flagged for a live
+                            staff member to join (see request_human_handoff
+                            tool in app.py), used to drive the Live Chat
+                            monitor's notification badge.
 """
 
 import csv
@@ -245,6 +249,17 @@ def init_db():
                     content TEXT, timestamp TEXT
                 )
             """)
+        # `handoff_requests` — one open row per session currently flagged
+        # for a live staff member to take over. Created by the bot's
+        # request_human_handoff tool (app.py), cleared automatically the
+        # moment a staff member sends a message into that session.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS handoff_requests (
+                id TEXT PRIMARY KEY,
+                session_id TEXT, territory TEXT, reason TEXT,
+                timestamp TEXT, resolved TEXT
+            )
+        """)
 
     migrate_legacy_storage()
     _seed_tips_if_empty()
@@ -447,12 +462,19 @@ def delete_outage(outage_id):
 
 
 def get_active_outages_for_parish(parish, today=None):
+    """Case/whitespace-insensitive on purpose: the bot may pass a parish
+    string built from natural-language conversation rather than picked
+    from the exact staff dropdown, so an exact `=` match here was silently
+    dropping real, active alerts. app.py's check_active_outages tool also
+    normalizes common spellings before calling this, but this comparison
+    is the real safety net."""
     if today is None:
         today = datetime.now(GRENADA_TZ).strftime("%Y-%m-%d")
     ph = _ph()
     with _cursor() as cur:
         cur.execute(f"""
-            SELECT * FROM outages WHERE parish = {ph} AND start_date <= {ph} AND end_date >= {ph}
+            SELECT * FROM outages
+            WHERE LOWER(TRIM(parish)) = LOWER(TRIM({ph})) AND start_date <= {ph} AND end_date >= {ph}
         """, (parish, today, today))
         rows = _rows(cur.fetchall())
     return rows
@@ -810,3 +832,63 @@ def get_chat_stats_today():
         "errors_today": errors,
         "questions_answered_today": total - errors,
     }
+
+
+# =======================================================================
+# NEW: Live-agent handoff requests
+#
+# The bot calls request_human_handoff (app.py) whenever a customer asks
+# for a person, or the bot can't help them. That creates a row here; it's
+# what powers the Live Chat monitor's notification badge and the
+# Dashboard's "Needs a human" metric. A session can only have one *open*
+# handoff row at a time (create_handoff_request is idempotent), and it's
+# cleared the moment a staff member replies into that session.
+# =======================================================================
+def _handoff_out(row):
+    return {
+        "id": row["id"], "session_id": row["session_id"], "territory": row.get("territory") or "",
+        "reason": row.get("reason") or "", "timestamp": row["timestamp"],
+        "resolved": row.get("resolved") == "1",
+    }
+
+
+def create_handoff_request(session_id, territory, reason):
+    ph = _ph()
+    with _cursor() as cur:
+        cur.execute(f"SELECT id FROM handoff_requests WHERE session_id={ph} AND resolved={ph}",
+                    (session_id, "0"))
+        existing = cur.fetchone()
+    if existing:
+        return None  # already flagged and still open — don't duplicate
+    row = {
+        "id": uuid.uuid4().hex[:8], "session_id": session_id, "territory": territory or "",
+        "reason": (reason or "").strip() or "Customer needs a live representative.",
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "resolved": "0",
+    }
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"INSERT INTO handoff_requests (id, session_id, territory, reason, timestamp, resolved) "
+            f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph})",
+            (row["id"], row["session_id"], row["territory"], row["reason"], row["timestamp"], row["resolved"]),
+        )
+    return _handoff_out(row)
+
+
+def load_open_handoffs():
+    ph = _ph()
+    with _cursor() as cur:
+        cur.execute(f"SELECT * FROM handoff_requests WHERE resolved={ph} ORDER BY timestamp DESC", ("0",))
+        rows = _rows(cur.fetchall())
+    return [_handoff_out(r) for r in rows]
+
+
+def resolve_handoff_for_session(session_id):
+    """Called whenever a staff member sends a message into a session —
+    clears any open handoff flag for it, since a human has now stepped in."""
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"UPDATE handoff_requests SET resolved={ph} WHERE session_id={ph} AND resolved={ph}",
+            ("1", session_id, "0"),
+        )
+        return cur.rowcount > 0
