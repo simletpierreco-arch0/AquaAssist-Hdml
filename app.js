@@ -962,6 +962,22 @@ async function sendMessage(text, directAttachment, locationCard) {
     typingRow.remove();
     if (data.session_id) saveSession(data.session_id);
 
+    if (data.paused) {
+      // A staff member has taken this conversation over — don't show a
+      // bot bubble. Show a one-time notice per session instead, then wait
+      // for the staff reply to arrive via startStaffMessagePolling().
+      const noticeKey = `aqua_paused_notice_${state.sessionId}`;
+      if (!localStorage.getItem(noticeKey)) {
+        const noticeText = "🧑‍💼 A NAWASA representative is now handling this conversation directly — they'll reply here shortly.";
+        state.messages.push({ role: "assistant", content: noticeText });
+        saveMessages();
+        appendBubble("assistant", noticeText);
+        localStorage.setItem(noticeKey, "1");
+      }
+      renderFollowupChips();
+      return;
+    }
+
     if (data.error) {
       appendBubble("assistant", `⚠️ ${data.error}`);
       return;
@@ -1896,19 +1912,49 @@ function renderLiveChatSessionList(sessions) {
     return;
   }
   sessions.forEach((s) => {
-    const row = document.createElement("button");
-    row.type = "button";
+    const row = document.createElement("div");
     row.className = "livechat-session-row" + (state.currentLiveChatSession === s.session_id ? " active" : "");
     row.innerHTML = `
-      <div class="livechat-session-top">
-        <span class="livechat-session-territory">${escapeHtml(s.territory || "Grenada")}</span>
-        <span class="livechat-session-time">${escapeHtml(s.last_timestamp || "")}</span>
-      </div>
-      <div class="livechat-session-preview">${escapeHtml(formatChatRole(s.last_role))}: ${escapeHtml(s.last_message || "")}</div>
+      <button type="button" class="livechat-session-main">
+        <div class="livechat-session-top">
+          <span class="livechat-session-territory">${escapeHtml(s.territory || "Grenada")}${s.paused ? ' <span class="livechat-paused-tag">Paused</span>' : ""}</span>
+          <span class="livechat-session-time">${escapeHtml(s.last_timestamp || "")}</span>
+        </div>
+        <div class="livechat-session-preview">${escapeHtml(formatChatRole(s.last_role))}: ${escapeHtml(s.last_message || "")}</div>
+      </button>
+      <button type="button" class="livechat-session-delete" title="Delete this conversation">🗑️</button>
     `;
-    row.addEventListener("click", () => openLiveChatSession(s.session_id));
+    row.querySelector(".livechat-session-main").addEventListener("click", () => openLiveChatSession(s.session_id));
+    row.querySelector(".livechat-session-delete").addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!confirm("Delete this conversation? This can't be undone.")) return;
+      await staffFetch(`/api/sessions/${encodeURIComponent(s.session_id)}`, { method: "DELETE" });
+      if (state.currentLiveChatSession === s.session_id) {
+        closeLiveChatSession();
+      }
+      loadLiveChatSessions();
+      loadHandoffs();
+    });
     wrap.appendChild(row);
   });
+}
+
+function closeLiveChatSession() {
+  state.currentLiveChatSession = null;
+  if (liveChatTranscriptTimer) { clearInterval(liveChatTranscriptTimer); liveChatTranscriptTimer = null; }
+  $("#liveChatActive").style.display = "none";
+  $("#liveChatEmptyState").style.display = "block";
+}
+
+async function refreshLiveChatPauseButton() {
+  const btn = $("#liveChatPauseBtn");
+  if (!btn || !state.currentLiveChatSession) return;
+  const res = await staffFetch(`/api/sessions/${encodeURIComponent(state.currentLiveChatSession)}/status`);
+  if (!res.ok) return;
+  const data = await res.json();
+  btn.dataset.paused = data.paused ? "1" : "0";
+  btn.textContent = data.paused ? "▶ Resume AI" : "⏸ Pause AI";
+  btn.classList.toggle("livechat-paused-active", data.paused);
 }
 
 function openLiveChatSession(sessionId) {
@@ -1917,6 +1963,7 @@ function openLiveChatSession(sessionId) {
   $("#liveChatActive").style.display = "flex";
   $("#liveChatSessionLabel").textContent = sessionId;
   loadLiveChatTranscript();
+  refreshLiveChatPauseButton();
   if (liveChatTranscriptTimer) clearInterval(liveChatTranscriptTimer);
   liveChatTranscriptTimer = setInterval(loadLiveChatTranscript, 5000);
   $$(".livechat-session-row").forEach((r) => r.classList.remove("active"));
@@ -1963,11 +2010,44 @@ function setupLiveChatMonitor() {
     input.disabled = false;
     loadLiveChatTranscript();
     loadLiveChatSessions();
+    loadHandoffs();
   });
 
   $("#liveChatRefreshBtn").addEventListener("click", () => {
     loadLiveChatSessions();
     if (state.currentLiveChatSession) loadLiveChatTranscript();
+  });
+
+  $("#liveChatPauseBtn").addEventListener("click", async () => {
+    if (!state.currentLiveChatSession) return;
+    const btn = $("#liveChatPauseBtn");
+    const currentlyPaused = btn.dataset.paused === "1";
+    btn.disabled = true;
+    await staffFetch(
+      `/api/sessions/${encodeURIComponent(state.currentLiveChatSession)}/${currentlyPaused ? "resume" : "pause"}`,
+      { method: "POST" }
+    );
+    btn.disabled = false;
+    await refreshLiveChatPauseButton();
+    loadLiveChatSessions();
+    loadHandoffs();
+  });
+
+  $("#liveChatDeleteBtn").addEventListener("click", async () => {
+    if (!state.currentLiveChatSession) return;
+    if (!confirm("Delete this entire conversation? This can't be undone.")) return;
+    await staffFetch(`/api/sessions/${encodeURIComponent(state.currentLiveChatSession)}`, { method: "DELETE" });
+    closeLiveChatSession();
+    loadLiveChatSessions();
+    loadHandoffs();
+  });
+
+  $("#liveChatClearAllBtn").addEventListener("click", async () => {
+    if (!confirm("Delete ALL conversations? This removes every transcript for every customer and can't be undone.")) return;
+    await staffFetch("/api/sessions", { method: "DELETE" });
+    closeLiveChatSession();
+    loadLiveChatSessions();
+    loadHandoffs();
   });
 }
 
