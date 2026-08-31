@@ -158,6 +158,45 @@ ISSUE_TYPES = ["Leak", "No water supply", "Low pressure", "Billing issue",
                "Burst main", "Damaged hydrant", "Water quality concern", "Other"]
 
 
+# Common ways a customer (or the model paraphrasing them) might refer to a
+# parish that don't exactly match the canonical GRENADA_PARISHES strings
+# staff pick from in the Service Alerts form. Service Alerts posted by
+# staff were failing to reach the bot because check_active_outages queried
+# the database with whatever string the model produced — "St George's",
+# "Saint George", "the capital" — none of which equal the canonical
+# "St. George's (Capital area)" staff selected. This normalizes before the
+# lookup so a posted alert reliably surfaces however the customer phrases it.
+PARISH_ALIASES = {
+    "st george": "St. George's (Capital area)", "saint george": "St. George's (Capital area)",
+    "st georges": "St. George's (Capital area)", "capital": "St. George's (Capital area)",
+    "st andrew": "St. Andrew's", "saint andrew": "St. Andrew's",
+    "st david": "St. David's", "saint david": "St. David's",
+    "st john": "St. John's", "saint john": "St. John's",
+    "st mark": "St. Mark's", "saint mark": "St. Mark's",
+    "st patrick": "St. Patrick's", "saint patrick": "St. Patrick's",
+    "carriacou": "Carriacou and Petite Martinique",
+    "petite martinique": "Carriacou and Petite Martinique",
+    "petit martinique": "Carriacou and Petite Martinique",
+}
+
+
+def _normalize_parish(raw):
+    """Best-effort match of a free-text parish name to one of
+    GRENADA_PARISHES. Falls back to returning the input unchanged (the
+    case-insensitive comparison in db.get_active_outages_for_parish is the
+    final safety net) so this never raises on an unrecognized string."""
+    if not raw:
+        return raw
+    key = re.sub(r"[.\-']", "", raw.strip().lower())
+    for needle, canonical in PARISH_ALIASES.items():
+        if re.sub(r"[.\-']", "", needle) in key:
+            return canonical
+    for p in GRENADA_PARISHES:
+        if re.sub(r"[.\-']", "", p.lower()) == key:
+            return p
+    return raw
+
+
 def parse_report_coords(location_text):
     if not isinstance(location_text, str):
         return None
@@ -331,6 +370,9 @@ AquaAssist is not connected to NAWASA's billing or account systems. You do not h
 KNOWLEDGE BASE — use the search_knowledge_base tool, don't guess:
 NAWASA's official FAQ knowledge base (new connections, billing, disconnections, water usage & leaks, general info) is NOT pre-loaded into this prompt — it lives in a searchable knowledge base. Whenever a customer asks something that sounds like a policy, cost, process, or general-information question, call the search_knowledge_base tool with their question (or a short paraphrase of it) and answer using what it returns. Treat what it returns as authoritative — prefer it over general knowledge, and never contradict it. Paraphrase naturally in your own words rather than reciting it verbatim. If it returns no close match, say so plainly rather than guessing.
 
+LIVE STAFF HANDOFF — use the request_human_handoff tool when you can't help:
+Use the request_human_handoff tool whenever a customer explicitly asks to speak with a person, representative, or agent, or whenever you genuinely cannot resolve what they need (e.g. the knowledge base has no matching entry and the customer is still stuck after you've said so, a billing dispute needs a manual account review, or the situation calls for judgment you don't have). Calling this tool alerts NAWASA staff in the Live Chat monitor and flags the conversation so a person can step in and reply directly in this same chat — you do not need to end the conversation or stop responding, staff will simply join in. After calling it, tell the customer plainly (in your own words, matching the current business-hours status) that a NAWASA representative has been notified and will follow up here, or call/WhatsApp them directly if that's more urgent. Don't call this tool for questions you can actually answer yourself — it's for genuine dead ends or explicit requests for a human, not a substitute for trying the knowledge base first.
+
 Use the following facts to answer user questions:
 - Help customers report water leaks by collecting the location and relevant details.
 - When a customer asks about outages, low water pressure, "no water", or scheduled maintenance in their area, call the check_active_outages tool with their parish (from what they've told you, or shared earlier via GPS) rather than answering from general knowledge — it returns real, currently-active notices. If you don't know their parish yet, ask for it first.
@@ -457,6 +499,7 @@ def _make_check_outages_tool(session_id):
             A description of any active notices for that parish, or a message
             confirming there are none currently posted.
         """
+        parish = _normalize_parish(parish)
         active = get_active_outages_for_parish(parish)
         if not active:
             return (f"No active service notices are currently posted for {parish}. "
@@ -466,6 +509,34 @@ def _make_check_outages_tool(session_id):
         lines = [f"- {o['message']} (in effect {o['start_date']} to {o['end_date']})" for o in active]
         return f"Active service notice(s) for {parish}:\n" + "\n".join(lines)
     return tool(check_active_outages, parse_docstring=True)
+
+
+def _make_request_handoff_tool(session_id, territory):
+    def request_human_handoff(reason: str) -> str:
+        """Flags this conversation so a live NAWASA staff member is alerted and
+        can join in and reply directly, right here in the same chat. Call this
+        whenever the customer explicitly asks to speak with a person, agent, or
+        representative, or whenever you genuinely can't help them yourself (the
+        knowledge base has no matching answer and they're still stuck, or their
+        situation needs a judgment call or account access you don't have).
+        Don't call this for questions you can actually answer — try the
+        knowledge base and your other tools first.
+
+        Args:
+            reason: A short internal note for staff explaining why this
+                customer needs a person, e.g. "Disputes an estimated bill,
+                wants a manual review" or "Asked for a representative twice."
+
+        Returns:
+            Confirmation that staff have been notified, for you to relay to
+            the customer in your own words.
+        """
+        db.create_handoff_request(session_id, territory, reason)
+        return ("Staff have been notified in the Live Chat monitor and will join this "
+                "conversation as soon as possible. Tell the customer a NAWASA representative "
+                "has been alerted and will follow up here — and if it sounds urgent and the "
+                "office is currently open, you can also suggest they call or WhatsApp directly.")
+    return tool(request_human_handoff, parse_docstring=True)
 
 
 def _get_or_create_agent(session_id, territory):
@@ -480,6 +551,7 @@ def _get_or_create_agent(session_id, territory):
             _make_log_tool(session_id),
             _make_check_status_tool(session_id),
             _make_check_outages_tool(session_id),
+            _make_request_handoff_tool(session_id, territory),
             agent.make_search_knowledge_base_tool(
                 on_no_match=lambda q: db.log_unanswered_question(q, session_id=session_id)
             ),
@@ -957,6 +1029,9 @@ def api_session_staff_message(session_id):
     territory = sess["territory"] if sess else "Grenada"
 
     db.log_chat_message(session_id, territory, "staff", text)
+    # A human has now stepped into this conversation — clear any open
+    # handoff flag for it so it drops off the notification badge/list.
+    db.resolve_handoff_for_session(session_id)
 
     # Make sure the agent's own memory of this conversation includes what
     # the staff member just said, so if the customer keeps chatting the bot
@@ -988,6 +1063,19 @@ def api_chat_updates(session_id):
     except ValueError:
         after_id = 0
     return jsonify(db.load_new_staff_messages(session_id, after_id=after_id))
+
+
+# =======================================================================
+# NEW: Live-agent handoff requests — powers the Live Chat monitor's
+# notification badge and the Dashboard's "Needs a human" metric. Created
+# by the bot's request_human_handoff tool above; cleared automatically the
+# moment a staff member replies into that session (see
+# api_session_staff_message).
+# =======================================================================
+@app.route("/api/handoffs")
+@require_permission("aquaassist")
+def api_handoffs_list():
+    return jsonify(db.load_open_handoffs())
 
 
 # ---------------------------------------------------------------------
