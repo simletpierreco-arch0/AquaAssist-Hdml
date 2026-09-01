@@ -904,3 +904,110 @@ body.dark .livechat-msg-staff { background: #3A2E12; border-color: #6B5522; }
 #accountFormCard, #permissionsEditorCard {
   border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
 }
+
+/* =========================================================================
+   NEW: Mobile responsiveness pass — fixes overflow, cramped controls,
+   modal sizing, and input zoom on iPhone/Android/small & large phones/tablets.
+   Applied on top of the existing rules above without removing any of them.
+   ========================================================================= */
+html, body { overflow-x: hidden; max-width: 100%; }
+img, svg, video, canvas { max-width: 100%; height: auto; }
+* { min-width: 0; } /* stops flex/grid children from forcing horizontal overflow */
+
+/* iOS auto-zooms any input under 16px on focus — keep all inputs at/above
+   that size on touch screens, regardless of the large-text setting. */
+@media (max-width: 900px) {
+  input, select, textarea { font-size: 16px; }
+}
+
+/* Staff Portal shell — the fixed 210px sidebar was forcing a horizontal
+   scrollbar on phones; below 780px it already stacks (existing rule), this
+   tightens spacing so it doesn't feel cramped once stacked. */
+@media (max-width: 780px) {
+  .staff-site-section { padding: 1rem .6rem 3rem; }
+  .staff-site-hero { padding: 1.1rem 1.1rem 1.7rem; border-radius: 16px; }
+  .staff-site-hero .hero-title { font-size: 1.15rem; }
+  .staff-site-hero .hero-subtitle { font-size: .8rem; }
+  .staff-sidebar { padding: .6rem; gap: .15rem; }
+  .staff-nav-btn { font-size: .8rem; padding: .45rem .55rem; }
+  .staff-topbar { flex-direction: column; align-items: stretch; gap: .5rem; }
+  .staff-topbar #staffLogoutBtn { width: 100%; }
+  .staff-account-label { text-align: center; }
+  .metrics-row { gap: .4rem; }
+  .metric-box { min-width: 78px; padding: .5rem .3rem; }
+  .metric-box .num { font-size: 1.05rem; }
+  .metric-box .label { font-size: .62rem; }
+}
+
+/* Very small phones (iPhone SE and similar, ~360px and under) */
+@media (max-width: 380px) {
+  .section-label { font-size: .72rem; }
+  .card { padding: .85rem 1rem; }
+  .btn-primary, .btn-secondary { padding: .55rem .8rem; font-size: .85rem; }
+  .staff-nav-btn { font-size: .76rem; }
+  .metric-box { min-width: 68px; }
+}
+
+/* Reports/subscriber/audit tables never break page width — they already
+   scroll inside .table-wrap; make sure that container can't be forced
+   wider than the viewport by a long cell value. */
+.table-wrap { max-width: 100%; -webkit-overflow-scrolling: touch; }
+.reports-table th, .reports-table td { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+
+/* Chat widget on phones: buttons/input never overflow the row, and the
+   panel respects iOS safe-area insets (notch / home indicator) instead of
+   sitting flush under them. */
+@media (max-width: 640px) {
+  .widget-panel {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .chat-input-row { flex-wrap: nowrap; gap: .35rem; padding: .3rem .4rem; }
+  .attach-btn { width: 1.95rem; height: 1.95rem; font-size: .95rem; }
+  .send-btn { width: 2.15rem; height: 2.15rem; flex-shrink: 0; }
+  #chatText { min-width: 0; }
+  .quick-actions-grid { grid-template-columns: 1fr 1fr; gap: .5rem; }
+  .contact-row { gap: .5rem; }
+  .contact-card { min-width: 72px; padding: .55rem .4rem; }
+  .msg-bubble { max-width: 85%; }
+}
+@media (max-width: 360px) {
+  .quick-actions-grid { grid-template-columns: 1fr; }
+  .attach-btn { width: 1.8rem; height: 1.8rem; font-size: .88rem; }
+}
+
+/* Modals (camera capture, attachment viewer) must never exceed the
+   viewport height on short/landscape phone screens — add scroll instead
+   of clipping the action buttons off-screen. */
+.camera-modal-inner {
+  max-height: 92vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.attachment-viewer-inner { max-height: 92vh; overflow-y: auto; }
+
+/* Staff account / permissions forms: two-column rows collapse cleanly,
+   and the permission checkbox grid never gets squeezed unreadably. */
+@media (max-width: 560px) {
+  .form-row-2 { grid-template-columns: 1fr; }
+  .perm-grid { grid-template-columns: 1fr; }
+  .livechat-header-actions { width: 100%; }
+  .livechat-header-actions button { flex: 1; }
+}
+
+/* Mock public-site header: with the desktop nav links hidden below 900px
+   (existing rule), keep the remaining brand/staff-link/CTA row from
+   wrapping awkwardly or overflowing on narrow phones. */
+@media (max-width: 480px) {
+  .mock-nav-inner { padding: .6rem .8rem; gap: .5rem; }
+  .mock-nav-name { display: none; } /* logo alone is enough at this width */
+  .mock-nav-cta { padding: .5rem .8rem; font-size: .8rem; }
+  .nav-staff-link { padding: .28rem .55rem; font-size: .78rem; }
+}
+
+/* Tablets (iPad portrait and similar) — give the staff sidebar a middle
+   ground between full-width mobile stacking and the fixed 210px desktop
+   rail so nav buttons aren't oversized relative to the content pane. */
+@media (min-width: 781px) and (max-width: 1024px) {
+  .staff-sidebar { flex-basis: 180px; }
+}
