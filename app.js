@@ -1733,6 +1733,12 @@ function applyStaffRoleVisibility() {
   if (label && state.staffAccount) {
     label.textContent = `${state.staffAccount.avatar || "🙂"} ${state.staffAccount.full_name} — ${state.staffAccount.role}`;
   }
+
+  // Only AquaVission can change a password — hide the self-service panel
+  // (and everyone else's Reset Password button, handled elsewhere) for
+  // every other account.
+  const pwSection = $("#changePasswordSection");
+  if (pwSection) pwSection.style.display = (state.staffAccount && state.staffAccount.is_super_admin) ? "block" : "none";
 }
 
 async function refreshOverview() {
@@ -2216,7 +2222,7 @@ function renderStaffAccountsTable(accounts) {
       actionsTd.appendChild(permBtn);
     }
 
-    if (hasPerm("edit_accounts") && canManage) {
+    if (state.staffAccount && state.staffAccount.is_super_admin) {
       const resetBtn = document.createElement("button");
       resetBtn.type = "button"; resetBtn.className = "btn-secondary"; resetBtn.textContent = "Reset Password";
       resetBtn.style.marginRight = ".3rem";
@@ -2272,6 +2278,16 @@ function openAccountEditor(account) {
   $("#accountRole").value = account ? account.role : "";
   $("#accountAvatar").value = account ? account.avatar : "🙂";
   $("#accountPassword").value = "";
+  const iAmSuperAdmin = !!(state.staffAccount && state.staffAccount.is_super_admin);
+  // Only AquaVission may set/reset a password. Creating a brand-new
+  // account still needs an initial password from whoever has
+  // create_accounts; changing an EXISTING account's password does not —
+  // that's restricted to AquaVission only, so hide the field entirely
+  // when editing as anyone else.
+  const showPasswordField = !account || iAmSuperAdmin;
+  $("#accountPassword").style.display = showPasswordField ? "" : "none";
+  $("#accountPassword").previousElementSibling.style.display = showPasswordField ? "" : "none";
+  $("#accountPasswordHint").style.display = showPasswordField ? "none" : "block";
   $("#accountPassword").placeholder = account ? "Leave blank to keep current password" : "Set an initial password";
   $("#accountPassword").required = !account;
 
