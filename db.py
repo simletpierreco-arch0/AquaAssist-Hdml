@@ -73,6 +73,7 @@ DEFAULT_MAINTENANCE_MESSAGE = (
     "NAWASA directly at (473) 440-2155 or via WhatsApp, and we'll be back "
     "online as soon as possible."
 )
+DEFAULT_CHATBOT_NAME = "AquaAssist"
 DEFAULT_TIPS = [
     "Check for hidden leaks: turn off every tap in your home, then watch your meter dial. If it's still moving, water is escaping somewhere.",
     "Conserve water during dry months by fixing dripping taps promptly — a single slow drip can waste over 15 gallons a day.",
@@ -102,6 +103,7 @@ PERMISSION_DEFS = [
     ("view_website_analytics", "Website", "View Website Analytics"),
 
     ("view_aquaassist_dashboard", "AquaAssist", "View AquaAssist Dashboard"),
+    ("access_live_chat", "AquaAssist", "Access Live Chat (view & reply)"),
     ("manage_faqs", "AquaAssist", "Manage FAQs"),
     ("manage_knowledge_base", "AquaAssist", "Manage Knowledge Base"),
     ("review_unanswered_questions", "AquaAssist", "Review Unanswered Questions"),
@@ -120,6 +122,7 @@ PERMISSION_DEFS = [
     ("add_internal_notes", "Reports & Operations", "Add Internal Notes"),
     ("view_report_photos", "Reports & Operations", "View Report Photos"),
     ("view_report_statistics", "Reports & Operations", "View Report Statistics"),
+    ("manage_subscribers", "Reports & Operations", "Manage Subscribers"),
 
     ("manage_staff_accounts", "Administration", "Manage Staff Accounts"),
     ("create_accounts", "Administration", "Create Accounts"),
@@ -553,9 +556,16 @@ def save_notification_signup(contact, categories):
 
 def load_notifications():
     with _cursor() as cur:
-        cur.execute("SELECT timestamp, contact, categories FROM notifications ORDER BY id ASC")
+        cur.execute("SELECT id, timestamp, contact, categories FROM notifications ORDER BY id ASC")
         rows = _rows(cur.fetchall())
     return rows
+
+
+def delete_notification(notification_id):
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"DELETE FROM notifications WHERE id = {ph}", (notification_id,))
+        return cur.rowcount > 0
 
 
 # ---------------------------------------------------------------------
@@ -692,6 +702,7 @@ def load_features():
     merged = dict(DEFAULT_FEATURES)
     merged.update({k: bool(v) for k, v in saved.items() if k in DEFAULT_FEATURES})
     merged["maintenance_message"] = saved.get("maintenance_message") or DEFAULT_MAINTENANCE_MESSAGE
+    merged["chatbot_name"] = (saved.get("chatbot_name") or "").strip() or DEFAULT_CHATBOT_NAME
     return merged
 
 
@@ -703,6 +714,10 @@ def save_features(updates):
         elif k == "maintenance_message":
             text = (v or "").strip()
             current["maintenance_message"] = text or DEFAULT_MAINTENANCE_MESSAGE
+        # NOTE: chatbot_name is intentionally NOT settable through this
+        # generic function — it's changed only via set_chatbot_name()
+        # below, which app.py gates to the AquaVission Super Administrator
+        # account specifically, per the "AquaVission only" requirement.
     ph = _ph()
     with _cursor(commit=True) as cur:
         if USE_POSTGRES:
@@ -713,6 +728,25 @@ def save_features(updates):
         else:
             cur.execute(f"INSERT OR REPLACE INTO features (id, data) VALUES (1, {ph})", (json.dumps(current),))
     return current
+
+
+def set_chatbot_name(new_name):
+    """Dedicated setter so the AquaVission-only restriction lives entirely
+    in app.py's route (which checks is_super_admin before ever calling
+    this), rather than being bypassable through the general-purpose
+    save_features()."""
+    current = load_features()
+    current["chatbot_name"] = (new_name or "").strip() or DEFAULT_CHATBOT_NAME
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        if USE_POSTGRES:
+            cur.execute(f"""
+                INSERT INTO features (id, data) VALUES (1, {ph})
+                ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data
+            """, (json.dumps(current),))
+        else:
+            cur.execute(f"INSERT OR REPLACE INTO features (id, data) VALUES (1, {ph})", (json.dumps(current),))
+    return current["chatbot_name"]
 
 
 # =======================================================================
@@ -1162,7 +1196,7 @@ def create_staff_account(full_name, username, password, role, permissions, avata
         "id": uuid.uuid4().hex[:10], "full_name": full_name, "username": username,
         "username_lower": username.lower(), "password_hash": generate_password_hash(password),
         "role": role or "Staff", "permissions": json.dumps(_clean_permissions(permissions)),
-        "avatar": avatar or "🙂", "status": "Active", "is_super_admin": "0",
+        "avatar": avatar or "💧", "status": "Active", "is_super_admin": "0",
         "created_at": now, "updated_at": now, "created_by": created_by,
     }
     ph = _ph()
