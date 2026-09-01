@@ -11,9 +11,7 @@
 <body>
 
 <!-- =====================================================================
-     MOCK NAWASA WEBSITE — demo backdrop only, so the AquaAssist widget can
-     be previewed the way it would look embedded on the real nawasa.gd site.
-     Nothing in here is wired to app.js; it's static markup for context.
+     MOCK NAWASA WEBSITE — demo backdrop only.
      ===================================================================== -->
 <div class="mock-site" aria-hidden="false">
   <header class="mock-nav">
@@ -422,12 +420,6 @@
 
 <!-- =====================================================================
      STAFF PORTAL — "NAWASA Digital Management Center"
-     Reorganized into a sidebar + 3 sections (Website / AquaAssist /
-     Reports & Operations) plus a Dashboard overview. Every panel below
-     that existed before (outages, tips, reports table, staff map, feature
-     toggles, maintenance message, notify subscribers) is present here
-     unchanged in ID and behavior — only regrouped. Two panels are new:
-     Knowledge Base (FAQ CRUD) and Unanswered Questions.
      ===================================================================== -->
 <section id="staffPortalSection" class="staff-site-section" style="display:none;">
   <div class="staff-site-inner">
@@ -435,21 +427,27 @@
       <div class="hero-content">
         <div>
           <div class="hero-title">🔐 NAWASA Digital Management</div>
-          <div class="hero-subtitle">Website, AquaAssist &amp; Reports — one dashboard</div>
+          <div class="hero-subtitle">Website, AquaAssist, Reports &amp; Staff Accounts — one dashboard</div>
         </div>
       </div>
       <svg class="wave" viewBox="0 0 500 40" preserveAspectRatio="none"><path class="wave-fill" d="M0,20 C150,45 350,-5 500,20 L500,40 L0,40 Z"></path></svg>
     </div>
 
-    <div id="staffLoginCard" class="card">
-      <label class="field-label">Enter staff passcode</label>
-      <input id="staffPasscodeInput" type="password" />
-      <button id="staffLoginBtn" class="btn-primary" style="margin-top:0.6rem;">Log in</button>
-      <p id="staffLoginError" class="error-text" style="display:none;">Incorrect passcode.</p>
+    <!-- ===== LOGIN: username + password (replaces the old shared passcode) ===== -->
+    <div id="staffLoginCard" class="card" style="max-width: 380px;">
+      <label class="field-label">Username</label>
+      <input id="staffUsernameInput" type="text" autocomplete="username" placeholder="e.g. AquaVission" />
+      <label class="field-label">Password</label>
+      <input id="staffPasswordInputField" type="password" autocomplete="current-password" />
+      <button id="staffLoginBtn" class="btn-primary" style="margin-top:0.6rem;width:100%;">Log in</button>
+      <p id="staffLoginError" class="error-text" style="display:none;"></p>
     </div>
 
     <div id="staffDashboard" style="display:none;">
-      <button id="staffLogoutBtn" class="btn-secondary" style="margin-bottom:1rem;">Log out</button>
+      <div class="staff-topbar">
+        <span id="staffAccountLabel" class="staff-account-label"></span>
+        <button id="staffLogoutBtn" class="btn-secondary">Log out</button>
+      </div>
 
       <div class="staff-shell">
         <aside class="staff-sidebar">
@@ -472,6 +470,10 @@
           <button class="staff-nav-btn" data-staff-section="reports-map">Reporting Map</button>
           <button class="staff-nav-btn" data-staff-section="reports-table">All Reports</button>
           <button class="staff-nav-btn" data-staff-section="reports-notify">Notify Subscribers</button>
+
+          <div class="staff-nav-group">👑 Administration</div>
+          <button class="staff-nav-btn" data-staff-section="staff-accounts">Staff Accounts</button>
+          <button class="staff-nav-btn" data-staff-section="audit-log">Audit Log</button>
         </aside>
 
         <main class="staff-main">
@@ -481,6 +483,19 @@
             <div class="section-label" style="margin-top:0;">📊 Overview</div>
             <div id="overviewCards" class="metrics-row"></div>
             <div id="overviewCardsAqua" class="metrics-row"></div>
+
+            <div class="section-label">🔑 My Account</div>
+            <div class="card" style="max-width:420px;">
+              <form id="changePasswordForm">
+                <label class="field-label">Current password</label>
+                <input id="currentPasswordInput" type="password" required />
+                <label class="field-label">New password (min. 6 characters)</label>
+                <input id="newPasswordInput" type="password" minlength="6" required />
+                <button type="submit" class="btn-primary" style="margin-top:0.6rem;">Change password</button>
+              </form>
+              <p id="changePasswordError" class="error-text" style="display:none;"></p>
+              <p id="changePasswordSuccess" class="hint-text" style="display:none;color:#2E9E5B;">✓ Password changed.</p>
+            </div>
           </section>
 
           <!-- ===== WEBSITE > Service Alerts ===== -->
@@ -643,6 +658,68 @@
             <div class="section-label" style="margin-top:0;">🔔 Notification Subscribers</div>
             <div class="card table-wrap">
               <table id="notifyTable" class="reports-table"><thead></thead><tbody></tbody></table>
+            </div>
+          </section>
+
+          <!-- ===== ADMINISTRATION > Staff Accounts ===== -->
+          <section id="staffSection-staff-accounts" class="staff-section">
+            <div class="section-label" style="margin-top:0;">👑 Staff Accounts</div>
+            <p class="hint-text">AquaVission is the permanent Super Administrator and always has full access — it can't be edited, disabled, or deleted by any other account. Create additional accounts below and grant exactly the sections each person needs.</p>
+            <button type="button" id="createAccountBtn" class="btn-primary" style="margin-bottom:1rem;">＋ Create staff account</button>
+
+            <!-- Create / edit form (hidden until needed) -->
+            <div id="accountFormCard" class="card" style="display:none;">
+              <div class="section-label" id="accountFormTitle" style="margin-top:0;">Create staff account</div>
+              <form id="accountForm">
+                <label class="field-label">Full name</label>
+                <input id="accountFullName" type="text" required />
+                <label class="field-label">Username</label>
+                <input id="accountUsername" type="text" required />
+                <label class="field-label">Password</label>
+                <input id="accountPassword" type="password" minlength="6" />
+                <div class="form-row-2">
+                  <div>
+                    <label class="field-label">Role (display label)</label>
+                    <input id="accountRole" type="text" placeholder="e.g. Operations Staff" />
+                  </div>
+                  <div>
+                    <label class="field-label">Avatar (emoji)</label>
+                    <input id="accountAvatar" type="text" maxlength="4" placeholder="🙂" />
+                  </div>
+                </div>
+                <div id="accountFormPermissions"></div>
+                <p id="accountFormError" class="error-text" style="display:none;"></p>
+                <div style="display:flex;gap:.6rem;margin-top:.8rem;">
+                  <button type="submit" class="btn-primary">Save</button>
+                  <button type="button" id="accountFormCancelBtn" class="btn-secondary">Cancel</button>
+                </div>
+              </form>
+            </div>
+
+            <!-- Permissions editor (for existing accounts) -->
+            <div id="permissionsEditorCard" class="card" style="display:none;">
+              <div class="section-label" id="permissionsEditorTitle" style="margin-top:0;">Permissions</div>
+              <div id="permissionsEditorBody"></div>
+              <div style="display:flex;gap:.6rem;margin-top:.8rem;">
+                <button type="button" id="permissionsEditorSaveBtn" class="btn-primary">Save permissions</button>
+                <button type="button" id="permissionsEditorCancelBtn" class="btn-secondary">Cancel</button>
+              </div>
+            </div>
+
+            <div class="card table-wrap">
+              <table id="staffAccountsTable" class="reports-table">
+                <thead></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- ===== ADMINISTRATION > Audit Log ===== -->
+          <section id="staffSection-audit-log" class="staff-section">
+            <div class="section-label" style="margin-top:0;">📋 Audit Log</div>
+            <p class="hint-text">Every account change, permission change, password reset, and content change (alerts, tips, FAQs, report status) is recorded here for accountability.</p>
+            <div class="card table-wrap">
+              <table id="auditLogTable" class="reports-table"><thead></thead><tbody></tbody></table>
             </div>
           </section>
 
