@@ -1,14 +1,11 @@
 """
 AquaAssist backend — Flask API + a LangChain/LangGraph conversational agent
-(see agent.py), serving a static HTML/CSS/JS frontend (see ../frontend).
+(see agent.py), serving a static HTML/CSS/JS frontend.
 
 Run with:
     pip install -r requirements.txt
     export GEMINI_API_KEY=your-key-here
-    export STAFF_PASSCODE=change-me
-    export STAFF_PASSCODE_WEBSITE=optional-website-manager-passcode
-    export STAFF_PASSCODE_AQUA=optional-aquaassist-manager-passcode
-    export STAFF_PASSCODE_OPS=optional-operations-passcode
+    export AQUAVISSION_PASSWORD=change-me-immediately   # optional, default: Admin123
     export ELEVENLABS_API_KEY=your-elevenlabs-key      # optional, enables Caribbean-accent read-aloud
     export ELEVENLABS_VOICE_ID=your-chosen-voice-id    # optional, from the ElevenLabs Voice Library
     export PINECONE_API_KEY=your-pinecone-key          # optional, enables live RAG retrieval (see agent.py)
@@ -17,6 +14,15 @@ Run with:
     python app.py
 
 Then open http://localhost:5000
+
+STAFF AUTH — this version replaces the old shared-passcode model
+(STAFF_PASSCODE / STAFF_PASSCODE_WEBSITE / etc.) with individually named
+staff accounts and a granular, per-feature permission system. See db.py's
+PERMISSION_DEFS for the full list of permission keys and
+require_permission()/require_any_permission() below for how routes enforce
+them. A single Super Administrator account (username "AquaVission") is
+seeded automatically on first startup — see db._seed_super_admin_if_missing
+for the default password and how to override it.
 """
 
 import os
@@ -50,40 +56,6 @@ BASE_DIR = Path(__file__).parent
 FRONTEND_DIR = BASE_DIR
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-
-# ---------------------------------------------------------------------
-# Staff auth — role-based passcodes.
-#
-# Only STAFF_PASSCODE (Administrator) is required; the other three are
-# optional. Whichever passcode a staff member logs in with determines
-# their role and what parts of the Staff Portal they can see/use. If you
-# only set STAFF_PASSCODE, every staff login is an Administrator (full
-# access) — identical behavior to before this was added.
-# ---------------------------------------------------------------------
-STAFF_PASSCODE = os.environ.get("STAFF_PASSCODE", "changeme123")
-STAFF_PASSCODE_WEBSITE = os.environ.get("STAFF_PASSCODE_WEBSITE", "")
-STAFF_PASSCODE_AQUA = os.environ.get("STAFF_PASSCODE_AQUA", "")
-STAFF_PASSCODE_OPS = os.environ.get("STAFF_PASSCODE_OPS", "")
-
-ROLE_PERMISSIONS = {
-    "admin": {"website", "aquaassist", "reports"},
-    "website": {"website"},
-    "aquaassist": {"aquaassist"},
-    "ops": {"reports"},
-}
-
-
-def _role_for_passcode(passcode):
-    if passcode and passcode == STAFF_PASSCODE:
-        return "admin"
-    if passcode and STAFF_PASSCODE_WEBSITE and passcode == STAFF_PASSCODE_WEBSITE:
-        return "website"
-    if passcode and STAFF_PASSCODE_AQUA and passcode == STAFF_PASSCODE_AQUA:
-        return "aquaassist"
-    if passcode and STAFF_PASSCODE_OPS and passcode == STAFF_PASSCODE_OPS:
-        return "ops"
-    return None
-
 
 # ElevenLabs — used for Caribbean-accented read-aloud (see /api/tts below).
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
@@ -157,15 +129,6 @@ SEVERITY_LEVELS = ["Unknown", "Low", "Medium", "High"]
 ISSUE_TYPES = ["Leak", "No water supply", "Low pressure", "Billing issue",
                "Burst main", "Damaged hydrant", "Water quality concern", "Other"]
 
-
-# Common ways a customer (or the model paraphrasing them) might refer to a
-# parish that don't exactly match the canonical GRENADA_PARISHES strings
-# staff pick from in the Service Alerts form. Service Alerts posted by
-# staff were failing to reach the bot because check_active_outages queried
-# the database with whatever string the model produced — "St George's",
-# "Saint George", "the capital" — none of which equal the canonical
-# "St. George's (Capital area)" staff selected. This normalizes before the
-# lookup so a posted alert reliably surfaces however the customer phrases it.
 PARISH_ALIASES = {
     "st george": "St. George's (Capital area)", "saint george": "St. George's (Capital area)",
     "st georges": "St. George's (Capital area)", "capital": "St. George's (Capital area)",
@@ -181,10 +144,6 @@ PARISH_ALIASES = {
 
 
 def _normalize_parish(raw):
-    """Best-effort match of a free-text parish name to one of
-    GRENADA_PARISHES. Falls back to returning the input unchanged (the
-    case-insensitive comparison in db.get_active_outages_for_parish is the
-    final safety net) so this never raises on an unrecognized string."""
     if not raw:
         return raw
     key = re.sub(r"[.\-']", "", raw.strip().lower())
@@ -299,11 +258,6 @@ PARISH_REFERENCE_POINTS = {
     ],
 }
 
-# NOTE: FAQS below is now used ONLY as one-time seed data for the `faqs`
-# database table (see db._seed_faqs_if_empty). After first startup, staff
-# edits via the Knowledge Base admin panel (/api/faqs) are what's actually
-# served to customers and fed into Pinecone — this constant is not read
-# again after the seed.
 FAQS = [
     {"category": "New Connections", "q": "How do I apply for a new connection?",
      "a": "Fill out the application for a new service connection. Review the Requirements for Private Water Service and the Terms and Conditions for Water Service on nawasa.gd."},
@@ -395,16 +349,13 @@ If a question is unrelated to NAWASA services, politely explain that you can onl
 
 
 # Initialize the database (creates tables + seeds default tips/features/FAQs
-# on first run — safe to call every time the app starts).
+# and the AquaVission Super Administrator account on first run).
 db.init_db()
 db._seed_faqs_if_empty(FAQS)
+db._seed_super_admin_if_missing()
 
 
 def _reseed_knowledge_base():
-    """Re-syncs Pinecone with whatever is currently enabled in the `faqs`
-    table. Call this after any staff create/update/delete on /api/faqs so
-    the bot's RAG retrieval never drifts from what the customer-facing FAQ
-    tab is showing."""
     agent.seed_knowledge_base(db.load_faqs(include_disabled=False), force=True)
 
 
@@ -540,11 +491,6 @@ def _make_request_handoff_tool(session_id, territory):
 
 
 def _get_or_create_agent(session_id, territory):
-    """Returns a compiled LangGraph agent for this session, rebuilding it if
-    the territory changed (the system prompt is territory-specific). Chat
-    history itself is NOT lost on rebuild — that lives in agent.py's shared
-    checkpointer, keyed by session_id (used as the LangGraph thread_id), not
-    in this per-session graph object."""
     sess = SESSIONS.get(session_id)
     if sess is None or sess["territory"] != territory:
         tools = [
@@ -562,34 +508,62 @@ def _get_or_create_agent(session_id, territory):
     return sess["graph"]
 
 
-def require_staff(fn):
-    """Any valid staff passcode (any role) may reach routes using this
-    decorator — same behavior as before role-based auth was added. Use
-    @require_permission("website"/"aquaassist"/"reports") instead on routes
-    that should be restricted to a specific role."""
+# =======================================================================
+# NEW: Staff auth — token-based, per-account, granular permissions.
+#
+# Every authenticated staff request carries an "X-Staff-Token" header
+# (issued by POST /api/staff/login). require_login() validates the token
+# and attaches the account to request.staff_account; require_permission()
+# additionally checks a specific permission key, with Super Administrators
+# always passing regardless of their stored permission list.
+# =======================================================================
+def _actor_label():
+    """Human-readable "who did this" for audit log entries."""
+    account = getattr(request, "staff_account", None)
+    if account:
+        return f"{account['full_name']} ({account['username']})"
+    return "unknown"
+
+
+def require_login(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        supplied = request.headers.get("X-Staff-Passcode", "")
-        role = _role_for_passcode(supplied)
-        if role is None:
-            return jsonify({"error": "Invalid or missing staff passcode."}), 401
-        request.staff_role = role
+        token = request.headers.get("X-Staff-Token", "")
+        account = db.get_account_for_token(token)
+        if account is None:
+            return jsonify({"error": "Invalid or expired session. Please log in again."}), 401
+        request.staff_account = account
         return fn(*args, **kwargs)
     return wrapper
 
 
-def require_permission(area):
-    """area is one of "website", "aquaassist", "reports"."""
+def require_permission(perm_key):
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            supplied = request.headers.get("X-Staff-Passcode", "")
-            role = _role_for_passcode(supplied)
-            if role is None:
-                return jsonify({"error": "Invalid or missing staff passcode."}), 401
-            if area not in ROLE_PERMISSIONS.get(role, set()):
-                return jsonify({"error": "Your role doesn't have access to this."}), 403
-            request.staff_role = role
+            token = request.headers.get("X-Staff-Token", "")
+            account = db.get_account_for_token(token)
+            if account is None:
+                return jsonify({"error": "Invalid or expired session. Please log in again."}), 401
+            if not db.account_has_permission(account, perm_key):
+                return jsonify({"error": "Your account doesn't have permission for this."}), 403
+            request.staff_account = account
+            return fn(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+def require_any_permission(*perm_keys):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            token = request.headers.get("X-Staff-Token", "")
+            account = db.get_account_for_token(token)
+            if account is None:
+                return jsonify({"error": "Invalid or expired session. Please log in again."}), 401
+            if not any(db.account_has_permission(account, k) for k in perm_keys):
+                return jsonify({"error": "Your account doesn't have permission for this."}), 403
+            request.staff_account = account
             return fn(*args, **kwargs)
         return wrapper
     return decorator
@@ -664,18 +638,10 @@ def api_chat():
     if not message and not attachments:
         return jsonify({"error": "Empty message."}), 400
 
-    # Log the customer's turn to the transcript immediately, so it shows up
-    # in the Staff Portal's Live Chat monitor even if the agent call below
-    # ends up failing.
     transcript_text = message if message else "[sent an attachment]"
     db.log_chat_message(session_id, territory, "user", transcript_text)
 
     if db.is_session_paused(session_id):
-        # A staff member has taken this conversation over in the Live Chat
-        # monitor — the customer's message is still logged above (so staff
-        # see it in the transcript), but the bot must not reply. No agent
-        # call, no "reply" key: the frontend shows a one-time notice instead
-        # of a bot bubble, and waits for the staff-message poller.
         return jsonify({"session_id": session_id, "paused": True})
 
     graph = _get_or_create_agent(session_id, territory)
@@ -759,13 +725,13 @@ def api_track_report(reference):
 
 
 @app.route("/api/reports")
-@require_permission("reports")
+@require_permission("view_reports")
 def api_list_reports():
     return jsonify(load_reports())
 
 
 @app.route("/api/reports/<reference>", methods=["PATCH"])
-@require_permission("reports")
+@require_permission("change_report_status")
 def api_update_report(reference):
     body = request.get_json(force=True)
     new_status = body.get("status")
@@ -773,45 +739,70 @@ def api_update_report(reference):
         return jsonify({"error": "Invalid status."}), 400
     if not update_report_status(reference, new_status):
         return jsonify({"error": "Reference not found."}), 404
+    db.log_audit(_actor_label(), "Report status changed", item=reference, details=f"New status: {new_status}")
     return jsonify({"reference": reference, "status": new_status})
 
 
 @app.route("/api/reports/<reference>", methods=["DELETE"])
-@require_permission("reports")
+@require_permission("edit_reports")
 def api_delete_report(reference):
     if not delete_report(reference):
         return jsonify({"error": "Reference not found."}), 404
+    db.log_audit(_actor_label(), "Report deleted", item=reference)
     return jsonify({"deleted": reference})
+
+
+@app.route("/api/reports/<reference>/notes", methods=["GET"])
+@require_permission("view_reports")
+def api_report_notes_list(reference):
+    return jsonify(db.load_report_notes(reference))
+
+
+@app.route("/api/reports/<reference>/notes", methods=["POST"])
+@require_permission("add_internal_notes")
+def api_report_notes_create(reference):
+    body = request.get_json(force=True) or {}
+    note = (body.get("note") or "").strip()
+    if not note:
+        return jsonify({"error": "Note text is required."}), 400
+    row = db.add_report_note(reference, _actor_label(), note)
+    db.log_audit(_actor_label(), "Internal note added", item=reference)
+    return jsonify(row)
 
 
 @app.route("/api/outages", methods=["GET", "POST"])
 def api_outages():
     if request.method == "GET":
         return jsonify(load_outages())
-    role = _role_for_passcode(request.headers.get("X-Staff-Passcode", ""))
-    if role is None or "website" not in ROLE_PERMISSIONS.get(role, set()):
-        return jsonify({"error": "Invalid or missing staff passcode."}), 401
+    token = request.headers.get("X-Staff-Token", "")
+    account = db.get_account_for_token(token)
+    if account is None or not db.account_has_permission(account, "manage_service_alerts"):
+        return jsonify({"error": "Invalid session or missing permission."}), 401
+    request.staff_account = account
     body = request.get_json(force=True)
     required = ["parish", "message", "start_date", "end_date"]
     if any(not body.get(f) for f in required):
         return jsonify({"error": "parish, message, start_date, and end_date are required."}), 400
     row = save_outage(body["parish"], body["message"], body["start_date"], body["end_date"])
+    db.log_audit(_actor_label(), "Service alert created", item=body["parish"], details=body["message"])
     return jsonify(row)
 
 
 @app.route("/api/outages/<outage_id>", methods=["DELETE"])
-@require_permission("website")
+@require_permission("manage_service_alerts")
 def api_delete_outage(outage_id):
     delete_outage(outage_id)
+    db.log_audit(_actor_label(), "Service alert removed", item=outage_id)
     return jsonify({"deleted": outage_id})
 
 
 @app.route("/api/notify", methods=["GET", "POST"])
 def api_notify():
     if request.method == "GET":
-        role = _role_for_passcode(request.headers.get("X-Staff-Passcode", ""))
-        if role is None or "reports" not in ROLE_PERMISSIONS.get(role, set()):
-            return jsonify({"error": "Invalid or missing staff passcode."}), 401
+        token = request.headers.get("X-Staff-Token", "")
+        account = db.get_account_for_token(token)
+        if account is None or not db.account_has_permission(account, "view_reports"):
+            return jsonify({"error": "Invalid session or missing permission."}), 401
         return jsonify(load_notifications())
     body = request.get_json(force=True)
     contact = body.get("contact", "").strip()
@@ -829,23 +820,25 @@ def api_tips_list():
 
 
 @app.route("/api/tips", methods=["POST"])
-@require_permission("website")
+@require_permission("manage_water_tips")
 def api_tips_create():
     body = request.get_json(force=True)
     text = (body.get("text") or "").strip()
     if not text:
         return jsonify({"error": "Tip text is required."}), 400
-    return jsonify(save_tip(text))
+    row = save_tip(text)
+    db.log_audit(_actor_label(), "Water tip added", item=row["id"], details=text)
+    return jsonify(row)
 
 
 @app.route("/api/tips/all")
-@require_permission("website")
+@require_permission("manage_water_tips")
 def api_tips_all():
     return jsonify(load_tips())
 
 
 @app.route("/api/tips/<tip_id>", methods=["PATCH"])
-@require_permission("website")
+@require_permission("manage_water_tips")
 def api_tips_update(tip_id):
     body = request.get_json(force=True) or {}
     text = body.get("text")
@@ -859,7 +852,7 @@ def api_tips_update(tip_id):
 
 
 @app.route("/api/tips/<tip_id>", methods=["DELETE"])
-@require_permission("website")
+@require_permission("manage_water_tips")
 def api_tips_delete(tip_id):
     if not delete_tip(tip_id):
         return jsonify({"error": "Tip not found."}), 404
@@ -872,17 +865,225 @@ def api_features_get():
 
 
 @app.route("/api/features", methods=["PATCH"])
-@require_permission("aquaassist")
+@require_permission("manage_chatbot_settings")
 def api_features_update():
     body = request.get_json(force=True) or {}
-    return jsonify(save_features(body))
+    result = save_features(body)
+    db.log_audit(_actor_label(), "Chatbot/website settings changed", details=str(body))
+    return jsonify(result)
+
+
+# =======================================================================
+# NEW: Staff account authentication + management
+# =======================================================================
+@app.route("/api/staff/permission-defs")
+def api_staff_permission_defs():
+    """Public (read-only, no secrets) — lets the login/setup screen and the
+    permissions panel render checkboxes without hardcoding the list twice."""
+    return jsonify([{"key": k, "category": c, "label": l} for (k, c, l) in db.PERMISSION_DEFS])
 
 
 @app.route("/api/staff/login", methods=["POST"])
 def api_staff_login():
-    body = request.get_json(force=True)
-    role = _role_for_passcode(body.get("passcode"))
-    return jsonify({"ok": role is not None, "role": role}), (200 if role else 401)
+    body = request.get_json(force=True) or {}
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    if not username or not password:
+        return jsonify({"error": "Username and password are required."}), 400
+
+    row = db.verify_login(username, password)
+    if row is None:
+        return jsonify({"error": "Incorrect username or password."}), 401
+    if row.get("status") != "Active":
+        return jsonify({"error": "This account has been disabled. Contact your Super Administrator."}), 403
+
+    token = db.create_session(row["id"])
+    account = db.get_account_for_token(token)
+    db.log_audit(f"{account['full_name']} ({account['username']})", "Staff login")
+    return jsonify({"ok": True, "token": token, "account": account})
+
+
+@app.route("/api/staff/logout", methods=["POST"])
+@require_login
+def api_staff_logout():
+    token = request.headers.get("X-Staff-Token", "")
+    db.delete_session(token)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/staff/me")
+@require_login
+def api_staff_me():
+    return jsonify(request.staff_account)
+
+
+@app.route("/api/staff/change-password", methods=["POST"])
+@require_login
+def api_staff_change_password():
+    """Self-service password change for the logged-in account — including
+    the Super Administrator, per the spec's "Super Administrator should
+    also be able to change the password" requirement."""
+    body = request.get_json(force=True) or {}
+    current_password = body.get("current_password") or ""
+    new_password = body.get("new_password") or ""
+    if not new_password or len(new_password) < 6:
+        return jsonify({"error": "New password must be at least 6 characters."}), 400
+
+    account = request.staff_account
+    full = db.get_account_by_id(account["id"])
+    from werkzeug.security import check_password_hash
+    if not check_password_hash(full["password_hash"], current_password):
+        return jsonify({"error": "Current password is incorrect."}), 401
+
+    db.set_staff_password(account["id"], new_password)
+    db.log_audit(_actor_label(), "Password changed (self-service)", item=account["username"])
+    return jsonify({"ok": True})
+
+
+@app.route("/api/staff/accounts", methods=["GET"])
+@require_permission("manage_staff_accounts")
+def api_staff_accounts_list():
+    return jsonify(db.load_staff_accounts())
+
+
+@app.route("/api/staff/accounts", methods=["POST"])
+@require_permission("create_accounts")
+def api_staff_accounts_create():
+    body = request.get_json(force=True) or {}
+    full_name = (body.get("full_name") or "").strip()
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    role = (body.get("role") or "").strip()
+    permissions = body.get("permissions") or []
+    avatar = (body.get("avatar") or "").strip()
+
+    if not full_name or not username or not password:
+        return jsonify({"error": "Full name, username, and password are required."}), 400
+    if len(password) < 6:
+        return jsonify({"error": "Password must be at least 6 characters."}), 400
+    if username.lower() == db.SUPER_ADMIN_USERNAME.lower():
+        return jsonify({"error": "That username is reserved for the Super Administrator."}), 400
+
+    # Only someone who already has manage_permissions may grant permissions
+    # beyond none at creation time — otherwise an Administration-only
+    # account (create_accounts but not manage_permissions) could mint a
+    # fully-privileged account and hand it off.
+    if permissions and not db.account_has_permission(request.staff_account, "manage_permissions"):
+        return jsonify({"error": "You don't have permission to assign permissions. "
+                                  "Create the account first, then ask a Super Administrator "
+                                  "to grant access."}), 403
+
+    account, error = db.create_staff_account(
+        full_name, username, password, role, permissions, avatar,
+        created_by=_actor_label(),
+    )
+    if error:
+        return jsonify({"error": error}), 400
+    db.log_audit(_actor_label(), "Account created", item=account["username"],
+                 details=f"Role: {account['role']}")
+    return jsonify(account)
+
+
+@app.route("/api/staff/accounts/<account_id>", methods=["PATCH"])
+@require_permission("edit_accounts")
+def api_staff_accounts_update(account_id):
+    target = db.get_account_by_id(account_id)
+    if target is None:
+        return jsonify({"error": "Account not found."}), 404
+    if target.get("is_super_admin") == "1" and target["id"] != request.staff_account["id"]:
+        return jsonify({"error": "The Super Administrator account can't be edited by other accounts."}), 403
+
+    body = request.get_json(force=True) or {}
+    account, error = db.update_staff_account(
+        account_id,
+        full_name=body.get("full_name"), username=body.get("username"),
+        role=body.get("role"), avatar=body.get("avatar"),
+    )
+    if error:
+        return jsonify({"error": error}), 400
+    db.log_audit(_actor_label(), "Account edited", item=account["username"])
+    return jsonify(account)
+
+
+@app.route("/api/staff/accounts/<account_id>/permissions", methods=["PATCH"])
+@require_permission("manage_permissions")
+def api_staff_accounts_permissions(account_id):
+    target = db.get_account_by_id(account_id)
+    if target is None:
+        return jsonify({"error": "Account not found."}), 404
+    if target.get("is_super_admin") == "1":
+        return jsonify({"error": "The Super Administrator always has full access and can't be changed."}), 403
+
+    body = request.get_json(force=True) or {}
+    permissions = body.get("permissions") or []
+    db.update_staff_permissions(account_id, permissions)
+    db.log_audit(_actor_label(), "Permission changed", item=target["username"],
+                 details=f"Permissions: {', '.join(sorted(db._clean_permissions(permissions))) or '(none)'}")
+    return jsonify(db.get_account_by_id(account_id) and db._account_out(db.get_account_by_id(account_id)))
+
+
+@app.route("/api/staff/accounts/<account_id>/status", methods=["PATCH"])
+@require_permission("disable_accounts")
+def api_staff_accounts_status(account_id):
+    target = db.get_account_by_id(account_id)
+    if target is None:
+        return jsonify({"error": "Account not found."}), 404
+    if target.get("is_super_admin") == "1":
+        return jsonify({"error": "The Super Administrator account can't be disabled."}), 403
+
+    body = request.get_json(force=True) or {}
+    status = body.get("status")
+    if status not in ("Active", "Disabled"):
+        return jsonify({"error": "status must be 'Active' or 'Disabled'."}), 400
+
+    db.set_staff_status(account_id, status)
+    if status == "Disabled":
+        db.delete_sessions_for_account(account_id)
+    db.log_audit(_actor_label(), f"Account {status.lower()}", item=target["username"])
+    return jsonify({"id": account_id, "status": status})
+
+
+@app.route("/api/staff/accounts/<account_id>/reset-password", methods=["POST"])
+@require_permission("edit_accounts")
+def api_staff_accounts_reset_password(account_id):
+    target = db.get_account_by_id(account_id)
+    if target is None:
+        return jsonify({"error": "Account not found."}), 404
+    if target.get("is_super_admin") == "1" and target["id"] != request.staff_account["id"]:
+        return jsonify({"error": "Only the Super Administrator can reset their own password "
+                                  "(use Change Password instead)."}), 403
+
+    body = request.get_json(force=True) or {}
+    new_password = body.get("new_password") or ""
+    if len(new_password) < 6:
+        return jsonify({"error": "New password must be at least 6 characters."}), 400
+
+    db.set_staff_password(account_id, new_password)
+    db.delete_sessions_for_account(account_id)
+    db.log_audit(_actor_label(), "Password reset", item=target["username"])
+    return jsonify({"ok": True})
+
+
+@app.route("/api/staff/accounts/<account_id>", methods=["DELETE"])
+@require_permission("delete_accounts")
+def api_staff_accounts_delete(account_id):
+    target = db.get_account_by_id(account_id)
+    if target is None:
+        return jsonify({"error": "Account not found."}), 404
+    if target.get("is_super_admin") == "1":
+        return jsonify({"error": "The Super Administrator account can't be deleted."}), 403
+    if target["id"] == request.staff_account["id"]:
+        return jsonify({"error": "You can't delete your own account while logged in."}), 400
+
+    db.delete_staff_account(account_id)
+    db.log_audit(_actor_label(), "Account deleted", item=target["username"])
+    return jsonify({"deleted": account_id})
+
+
+@app.route("/api/audit-log")
+@require_any_permission("system_settings", "manage_staff_accounts")
+def api_audit_log():
+    return jsonify(db.load_audit_log())
 
 
 @app.route("/api/tts", methods=["POST"])
@@ -923,16 +1124,16 @@ def api_tts():
 
 
 # =======================================================================
-# NEW: Knowledge base (FAQ) admin endpoints
+# Knowledge base (FAQ) admin endpoints
 # =======================================================================
 @app.route("/api/faqs", methods=["GET"])
-@require_permission("aquaassist")
+@require_any_permission("manage_faqs", "manage_knowledge_base")
 def api_faqs_list():
     return jsonify(db.load_faqs(include_disabled=True))
 
 
 @app.route("/api/faqs", methods=["POST"])
-@require_permission("aquaassist")
+@require_any_permission("manage_faqs", "manage_knowledge_base")
 def api_faqs_create():
     body = request.get_json(force=True)
     category = (body.get("category") or "").strip()
@@ -942,11 +1143,12 @@ def api_faqs_create():
         return jsonify({"error": "category, q, and a are required."}), 400
     row = db.save_faq(category, question, answer)
     _reseed_knowledge_base()
+    db.log_audit(_actor_label(), "AquaAssist FAQ added", item=question)
     return jsonify(row)
 
 
 @app.route("/api/faqs/<faq_id>", methods=["PATCH"])
-@require_permission("aquaassist")
+@require_any_permission("manage_faqs", "manage_knowledge_base")
 def api_faqs_update(faq_id):
     body = request.get_json(force=True) or {}
     row = db.update_faq(faq_id, category=body.get("category"), question=body.get("q"),
@@ -954,30 +1156,32 @@ def api_faqs_update(faq_id):
     if row is None:
         return jsonify({"error": "FAQ not found."}), 404
     _reseed_knowledge_base()
+    db.log_audit(_actor_label(), "AquaAssist FAQ changed", item=row["q"])
     return jsonify(row)
 
 
 @app.route("/api/faqs/<faq_id>", methods=["DELETE"])
-@require_permission("aquaassist")
+@require_any_permission("manage_faqs", "manage_knowledge_base")
 def api_faqs_delete(faq_id):
     if not db.delete_faq(faq_id):
         return jsonify({"error": "FAQ not found."}), 404
     _reseed_knowledge_base()
+    db.log_audit(_actor_label(), "AquaAssist FAQ deleted", item=faq_id)
     return jsonify({"deleted": faq_id})
 
 
 # =======================================================================
-# NEW: Unanswered questions
+# Unanswered questions
 # =======================================================================
 @app.route("/api/unanswered", methods=["GET"])
-@require_permission("aquaassist")
+@require_permission("review_unanswered_questions")
 def api_unanswered_list():
     include_resolved = request.args.get("include_resolved") == "1"
     return jsonify(db.load_unanswered_questions(include_resolved=include_resolved))
 
 
 @app.route("/api/unanswered/<q_id>", methods=["PATCH"])
-@require_permission("aquaassist")
+@require_permission("review_unanswered_questions")
 def api_unanswered_resolve(q_id):
     body = request.get_json(force=True) or {}
     staff_answer = (body.get("staff_answer") or "").strip()
@@ -986,11 +1190,13 @@ def api_unanswered_resolve(q_id):
     if body.get("add_to_faq") and staff_answer:
         db.save_faq(body.get("category") or "General", body.get("question_text") or "", staff_answer)
         _reseed_knowledge_base()
+        db.log_audit(_actor_label(), "AquaAssist FAQ added from unanswered question",
+                     item=body.get("question_text") or "")
     return jsonify({"resolved": q_id})
 
 
 @app.route("/api/unanswered/<q_id>", methods=["DELETE"])
-@require_permission("aquaassist")
+@require_permission("review_unanswered_questions")
 def api_unanswered_delete(q_id):
     if not db.delete_unanswered_question(q_id):
         return jsonify({"error": "Question not found."}), 404
@@ -998,35 +1204,31 @@ def api_unanswered_delete(q_id):
 
 
 # =======================================================================
-# NEW: Chat stats (staff Overview panel)
+# Chat stats (staff Overview panel)
 # =======================================================================
 @app.route("/api/chat-stats")
-@require_permission("aquaassist")
+@require_permission("view_chat_analytics")
 def api_chat_stats():
     return jsonify(db.get_chat_stats_today())
 
 
 # =======================================================================
-# NEW: Live Chat monitor — staff can watch conversations as they happen
-# and optionally drop a message in, without turning the bot off. The bot
-# keeps answering normally; a staff message is just another turn in the
-# same transcript, and the model is told about it via the LangGraph
-# checkpointer so its next reply is aware a human already responded.
+# Live Chat monitor
 # =======================================================================
 @app.route("/api/sessions")
-@require_permission("aquaassist")
+@require_permission("view_aquaassist_dashboard")
 def api_sessions_list():
     return jsonify(db.load_recent_sessions())
 
 
 @app.route("/api/sessions/<session_id>/messages")
-@require_permission("aquaassist")
+@require_permission("view_aquaassist_dashboard")
 def api_session_messages(session_id):
     return jsonify(db.load_session_messages(session_id))
 
 
 @app.route("/api/sessions/<session_id>/staff-message", methods=["POST"])
-@require_permission("aquaassist")
+@require_permission("manage_chatbot_settings")
 def api_session_staff_message(session_id):
     body = request.get_json(force=True) or {}
     text = (body.get("message") or "").strip()
@@ -1037,16 +1239,8 @@ def api_session_staff_message(session_id):
     territory = sess["territory"] if sess else "Grenada"
 
     db.log_chat_message(session_id, territory, "staff", text)
-    # A human has now stepped into this conversation — clear any open
-    # handoff flag for it so it drops off the notification badge/list.
     db.resolve_handoff_for_session(session_id)
 
-    # Make sure the agent's own memory of this conversation includes what
-    # the staff member just said, so if the customer keeps chatting the bot
-    # doesn't contradict or repeat what a human already told them. If the
-    # session hasn't started an agent graph yet (never chatted with the
-    # bot), there's nothing to update — the message still landed in the
-    # transcript above and the widget poller will still deliver it.
     if sess is not None:
         try:
             sess["graph"].update_state(
@@ -1059,14 +1253,8 @@ def api_session_staff_message(session_id):
     return jsonify({"ok": True})
 
 
-# =======================================================================
-# NEW: Pause/resume — lets staff stop the bot from replying in a session
-# while they handle it directly, then hand it back once they're done.
-# Pausing also clears any open handoff flag, since staff has now taken
-# ownership of the conversation.
-# =======================================================================
 @app.route("/api/sessions/<session_id>/pause", methods=["POST"])
-@require_permission("aquaassist")
+@require_permission("manage_chatbot_settings")
 def api_session_pause(session_id):
     db.pause_session(session_id)
     db.resolve_handoff_for_session(session_id)
@@ -1074,26 +1262,20 @@ def api_session_pause(session_id):
 
 
 @app.route("/api/sessions/<session_id>/resume", methods=["POST"])
-@require_permission("aquaassist")
+@require_permission("manage_chatbot_settings")
 def api_session_resume(session_id):
     db.resume_session(session_id)
     return jsonify({"session_id": session_id, "paused": False})
 
 
 @app.route("/api/sessions/<session_id>/status")
-@require_permission("aquaassist")
+@require_permission("view_aquaassist_dashboard")
 def api_session_status(session_id):
     return jsonify({"session_id": session_id, "paused": db.is_session_paused(session_id)})
 
 
-# =======================================================================
-# NEW: Deleting conversations from the Live Chat monitor. Per-session and
-# a "clear all" bulk action. Also drops the in-memory agent state for that
-# session (if any) so a deleted-and-reused session_id starts clean rather
-# than resuming old LangGraph memory the visible transcript no longer has.
-# =======================================================================
 @app.route("/api/sessions/<session_id>", methods=["DELETE"])
-@require_permission("aquaassist")
+@require_permission("manage_chatbot_settings")
 def api_session_delete(session_id):
     db.delete_session_messages(session_id)
     SESSIONS.pop(session_id, None)
@@ -1103,7 +1285,7 @@ def api_session_delete(session_id):
 
 
 @app.route("/api/sessions", methods=["DELETE"])
-@require_permission("aquaassist")
+@require_permission("manage_chatbot_settings")
 def api_sessions_delete_all():
     db.delete_all_sessions()
     SESSIONS.clear()
@@ -1114,11 +1296,6 @@ def api_sessions_delete_all():
 
 @app.route("/api/chat/<session_id>/updates")
 def api_chat_updates(session_id):
-    """Public, unauthenticated polling endpoint for the customer widget —
-    only ever returns 'staff' role messages (never user/assistant, which
-    the widget already has locally), and only those newer than `after`.
-    session_id functions as a bearer token here, the same trust model the
-    existing /api/report/<reference> lookup already relies on."""
     try:
         after_id = int(request.args.get("after", 0))
     except ValueError:
@@ -1126,15 +1303,8 @@ def api_chat_updates(session_id):
     return jsonify(db.load_new_staff_messages(session_id, after_id=after_id))
 
 
-# =======================================================================
-# NEW: Live-agent handoff requests — powers the Live Chat monitor's
-# notification badge and the Dashboard's "Needs a human" metric. Created
-# by the bot's request_human_handoff tool above; cleared automatically the
-# moment a staff member replies into that session (see
-# api_session_staff_message).
-# =======================================================================
 @app.route("/api/handoffs")
-@require_permission("aquaassist")
+@require_permission("view_aquaassist_dashboard")
 def api_handoffs_list():
     return jsonify(db.load_open_handoffs())
 
