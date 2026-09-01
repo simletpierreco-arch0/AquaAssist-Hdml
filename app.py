@@ -292,8 +292,9 @@ FAQS = [
 
 def build_system_instruction(territory):
     territory_whatsapp = TERRITORY_WHATSAPP.get(territory, TERRITORY_WHATSAPP["Grenada"])
+    chatbot_name = load_features().get("chatbot_name") or "AquaAssist"
     return f"""
-You are AquaAssist, a friendly virtual customer assistant for the National Water and Sewerage Authority (NAWASA) of Grenada, serving the {territory} territory.
+You are {chatbot_name}, a friendly virtual customer assistant for the National Water and Sewerage Authority (NAWASA) of Grenada, serving the {territory} territory. Always refer to yourself as "{chatbot_name}" — never by any other name, even if a previous name is mentioned in older conversation history.
 
 LANGUAGE RULE:
 Always reply in clear, professional Standard English, regardless of what language or dialect the customer writes in. You must still fully UNDERSTAND Grenadian Creole (patois) if a customer writes in it — correctly interpret their meaning and intent — but your reply itself must always be in Standard English. Never reply in Creole, patois, or any other language, even if asked to.
@@ -603,6 +604,7 @@ def api_init():
         "gemini_configured": bool(GEMINI_API_KEY),
         "tts_configured": bool(ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID),
         "rag_configured": bool(agent.PINECONE_API_KEY),
+        "chatbot_name": load_features().get("chatbot_name") or "AquaAssist",
     })
 
 
@@ -801,7 +803,8 @@ def api_notify():
     if request.method == "GET":
         token = request.headers.get("X-Staff-Token", "")
         account = db.get_account_for_token(token)
-        if account is None or not db.account_has_permission(account, "view_reports"):
+        if account is None or not (db.account_has_permission(account, "view_reports")
+                                    or db.account_has_permission(account, "manage_subscribers")):
             return jsonify({"error": "Invalid session or missing permission."}), 401
         return jsonify(load_notifications())
     body = request.get_json(force=True)
@@ -811,6 +814,15 @@ def api_notify():
         return jsonify({"error": "contact and at least one category are required."}), 400
     save_notification_signup(contact, categories)
     return jsonify({"ok": True})
+
+
+@app.route("/api/notify/<notification_id>", methods=["DELETE"])
+@require_permission("manage_subscribers")
+def api_notify_delete(notification_id):
+    if not db.delete_notification(notification_id):
+        return jsonify({"error": "Subscriber not found."}), 404
+    db.log_audit(_actor_label(), "Subscriber deleted", item=notification_id)
+    return jsonify({"deleted": notification_id})
 
 
 @app.route("/api/tips", methods=["GET"])
@@ -871,6 +883,26 @@ def api_features_update():
     result = save_features(body)
     db.log_audit(_actor_label(), "Chatbot/website settings changed", details=str(body))
     return jsonify(result)
+
+
+@app.route("/api/settings/chatbot-name", methods=["PATCH"])
+@require_login
+def api_settings_chatbot_name():
+    """Renaming the chatbot is restricted to the AquaVission Super
+    Administrator account specifically — not just anyone holding
+    manage_chatbot_settings — per the "AquaVission only" requirement."""
+    if not request.staff_account.get("is_super_admin"):
+        return jsonify({"error": "Only the AquaVission Super Administrator account can rename the chatbot."}), 403
+    body = request.get_json(force=True) or {}
+    new_name = (body.get("name") or "").strip()
+    if not new_name:
+        return jsonify({"error": "A chatbot name is required."}), 400
+    if len(new_name) > 40:
+        return jsonify({"error": "Keep the chatbot name under 40 characters."}), 400
+    saved_name = db.set_chatbot_name(new_name)
+    SESSIONS.clear()  # in-flight agent graphs were built with the old system prompt — rebuild lazily with the new name
+    db.log_audit(_actor_label(), "Chatbot renamed", details=f"New name: {saved_name}")
+    return jsonify({"chatbot_name": saved_name})
 
 
 # =======================================================================
@@ -1229,19 +1261,19 @@ def api_chat_stats():
 # Live Chat monitor
 # =======================================================================
 @app.route("/api/sessions")
-@require_permission("view_aquaassist_dashboard")
+@require_any_permission("access_live_chat", "view_aquaassist_dashboard")
 def api_sessions_list():
     return jsonify(db.load_recent_sessions())
 
 
 @app.route("/api/sessions/<session_id>/messages")
-@require_permission("view_aquaassist_dashboard")
+@require_any_permission("access_live_chat", "view_aquaassist_dashboard")
 def api_session_messages(session_id):
     return jsonify(db.load_session_messages(session_id))
 
 
 @app.route("/api/sessions/<session_id>/staff-message", methods=["POST"])
-@require_permission("manage_chatbot_settings")
+@require_any_permission("access_live_chat", "manage_chatbot_settings")
 def api_session_staff_message(session_id):
     body = request.get_json(force=True) or {}
     text = (body.get("message") or "").strip()
@@ -1267,7 +1299,7 @@ def api_session_staff_message(session_id):
 
 
 @app.route("/api/sessions/<session_id>/pause", methods=["POST"])
-@require_permission("manage_chatbot_settings")
+@require_any_permission("access_live_chat", "manage_chatbot_settings")
 def api_session_pause(session_id):
     db.pause_session(session_id)
     db.resolve_handoff_for_session(session_id)
@@ -1275,20 +1307,20 @@ def api_session_pause(session_id):
 
 
 @app.route("/api/sessions/<session_id>/resume", methods=["POST"])
-@require_permission("manage_chatbot_settings")
+@require_any_permission("access_live_chat", "manage_chatbot_settings")
 def api_session_resume(session_id):
     db.resume_session(session_id)
     return jsonify({"session_id": session_id, "paused": False})
 
 
 @app.route("/api/sessions/<session_id>/status")
-@require_permission("view_aquaassist_dashboard")
+@require_any_permission("access_live_chat", "view_aquaassist_dashboard")
 def api_session_status(session_id):
     return jsonify({"session_id": session_id, "paused": db.is_session_paused(session_id)})
 
 
 @app.route("/api/sessions/<session_id>", methods=["DELETE"])
-@require_permission("manage_chatbot_settings")
+@require_any_permission("access_live_chat", "manage_chatbot_settings")
 def api_session_delete(session_id):
     db.delete_session_messages(session_id)
     SESSIONS.pop(session_id, None)
@@ -1298,7 +1330,7 @@ def api_session_delete(session_id):
 
 
 @app.route("/api/sessions", methods=["DELETE"])
-@require_permission("manage_chatbot_settings")
+@require_any_permission("access_live_chat", "manage_chatbot_settings")
 def api_sessions_delete_all():
     db.delete_all_sessions()
     SESSIONS.clear()
@@ -1317,7 +1349,7 @@ def api_chat_updates(session_id):
 
 
 @app.route("/api/handoffs")
-@require_permission("view_aquaassist_dashboard")
+@require_any_permission("access_live_chat", "view_aquaassist_dashboard")
 def api_handoffs_list():
     return jsonify(db.load_open_handoffs())
 
