@@ -29,6 +29,7 @@ const state = {
   tips: [],
   tipIndex: 0,
   tipTimer: null,
+  chatbotName: "AquaAssist",
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -40,6 +41,22 @@ function saveMessages() {
 function saveSession(id) {
   state.sessionId = id;
   localStorage.setItem("aqua_session_id", id);
+}
+
+function applyChatbotName(name) {
+  const clean = (name || "AquaAssist").trim() || "AquaAssist";
+  const changed = state.chatbotName !== clean;
+  state.chatbotName = clean;
+  ["chatbotNameWidgetHeader", "chatbotNameLoginTitle", "chatbotNameHeroTitle"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = clean;
+  });
+  // If the greeting bubble is still just the default welcome message (no
+  // real conversation yet), refresh it in place so a rename propagates
+  // without the customer needing to start a new chat.
+  if (changed && state.messages.length === 0) {
+    renderChat();
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -94,6 +111,7 @@ async function init() {
   applyPrefsFromStorage();
   const res = await fetch(`${API}/api/init`);
   state.config = await res.json();
+  applyChatbotName(state.config.chatbot_name);
 
   populateSelect($("#territorySelect"), state.config.territories);
   $("#territorySelect").value = state.territory;
@@ -228,6 +246,22 @@ function startApp() {
     state.config.business_hours = await res.json();
     renderHero();
   }, 60000);
+
+  // Near-real-time sync: AquaVission-only changes (chatbot name) and
+  // staff-controlled feature toggles/maintenance message propagate to
+  // every open customer tab within ~20s, no manual refresh needed.
+  setInterval(async () => {
+    try {
+      const [featRes, initRes] = await Promise.all([
+        fetch(`${API}/api/features`),
+        fetch(`${API}/api/init`),
+      ]);
+      state.features = await featRes.json();
+      const initData = await initRes.json();
+      applyChatbotName(initData.chatbot_name);
+      applyFeatureVisibility();
+    } catch (err) { /* silent — best-effort background sync */ }
+  }, 20000);
 }
 
 // ---------------------------------------------------------------------
@@ -592,7 +626,7 @@ function renderChat() {
 }
 
 function welcomeText() {
-  return "👋 **Welcome to AquaAssist**\n\nI'm NAWASA's official virtual assistant, available 24/7 to help with water outages, billing, new connections, reporting leaks, office locations, FAQs, and general support.\n\nHow may I assist you today?";
+  return `👋 **Welcome to ${state.chatbotName}**\n\nI'm NAWASA's official virtual assistant, available 24/7 to help with water outages, billing, new connections, reporting leaks, office locations, FAQs, and general support.\n\nHow may I assist you today?`;
 }
 
 function appendBubble(role, content, attachmentName, reportCard, attachmentMime, locationCard, isLive = true) {
@@ -1661,15 +1695,16 @@ const SECTION_PERMISSIONS = {
   "website-alerts": ["manage_service_alerts", "view_website_management"],
   "website-tips": ["manage_water_tips", "view_website_management"],
   "website-preview": ["view_website_management"],
-  "aqua-livechat": ["view_aquaassist_dashboard"],
+  "aqua-livechat": ["access_live_chat", "view_aquaassist_dashboard"],
   "aqua-kb": ["manage_faqs", "manage_knowledge_base"],
   "aqua-unanswered": ["review_unanswered_questions"],
   "aqua-settings": ["manage_chatbot_settings"],
   "reports-map": ["view_reporting_map"],
   "reports-table": ["view_reports"],
-  "reports-notify": ["view_reports"],
+  "reports-notify": ["view_reports", "manage_subscribers"],
   "staff-accounts": ["manage_staff_accounts"],
   "audit-log": ["system_settings", "manage_staff_accounts"],
+  "chatbot-name": "SUPER_ADMIN_ONLY", // special-cased below — no permission unlocks this except AquaVission itself
 };
 
 function hasPerm(key) {
@@ -1706,6 +1741,7 @@ function setupStaffSidebar() {
       }
       if (btn.dataset.staffSection === "staff-accounts") loadStaffAccountsAdmin();
       if (btn.dataset.staffSection === "audit-log") loadAuditLog();
+      if (btn.dataset.staffSection === "chatbot-name") $("#chatbotNameInput").value = state.chatbotName;
     });
   });
 }
@@ -1713,7 +1749,10 @@ function setupStaffSidebar() {
 function applyStaffRoleVisibility() {
   $$(".staff-nav-btn[data-staff-section]").forEach((btn) => {
     const perms = SECTION_PERMISSIONS[btn.dataset.staffSection];
-    btn.style.display = hasAnyPerm(perms) ? "" : "none";
+    const visible = perms === "SUPER_ADMIN_ONLY"
+      ? !!(state.staffAccount && state.staffAccount.is_super_admin)
+      : hasAnyPerm(perms);
+    btn.style.display = visible ? "" : "none";
   });
   $$(".staff-nav-group").forEach((g) => {
     let sib = g.nextElementSibling, anyVisible = false;
@@ -1922,7 +1961,7 @@ let knownOpenHandoffIds = new Set();
 
 function formatChatRole(role) {
   if (role === "user") return "🙂 Customer";
-  if (role === "staff") return "🧑‍💼 Staff";
+  if (role === "staff") return "💧 Staff";
   return "💧 AquaAssist";
 }
 
@@ -2026,19 +2065,29 @@ function renderLiveChatTranscript(messages) {
 function setupLiveChatMonitor() {
   const form = $("#liveChatReplyForm");
   if (!form) return;
+  let liveChatSending = false;
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!state.currentLiveChatSession) return;
+    if (liveChatSending) return; // guards against double-tap / double-submit on mobile
     const input = $("#liveChatReplyText");
     const text = input.value.trim();
     if (!text) return;
+    const submitBtn = form.querySelector('button[type="submit"]');
+    liveChatSending = true;
     input.disabled = true;
-    await staffFetch(`/api/sessions/${encodeURIComponent(state.currentLiveChatSession)}/staff-message`, {
-      method: "POST",
-      body: JSON.stringify({ message: text }),
-    });
-    input.value = "";
-    input.disabled = false;
+    if (submitBtn) submitBtn.disabled = true;
+    try {
+      await staffFetch(`/api/sessions/${encodeURIComponent(state.currentLiveChatSession)}/staff-message`, {
+        method: "POST",
+        body: JSON.stringify({ message: text }),
+      });
+      input.value = "";
+    } finally {
+      liveChatSending = false;
+      input.disabled = false;
+      if (submitBtn) submitBtn.disabled = false;
+    }
     loadLiveChatTranscript();
     loadLiveChatSessions();
     loadHandoffs();
@@ -2276,7 +2325,7 @@ function openAccountEditor(account) {
   $("#accountUsername").value = account ? account.username : "";
   $("#accountUsername").disabled = !!account;
   $("#accountRole").value = account ? account.role : "";
-  $("#accountAvatar").value = account ? account.avatar : "🙂";
+  $("#accountAvatar").value = account ? account.avatar : "💧";
   $("#accountPassword").value = "";
   const iAmSuperAdmin = !!(state.staffAccount && state.staffAccount.is_super_admin);
   // Only AquaVission may set/reset a password. Creating a brand-new
@@ -2402,6 +2451,26 @@ function setupStaffAccountsUI() {
       if (data.error) { errEl.textContent = data.error; errEl.style.display = "block"; return; }
       okEl.style.display = "block";
       changePwForm.reset();
+    });
+  }
+
+  const chatbotNameForm = $("#chatbotNameForm");
+  if (chatbotNameForm) {
+    chatbotNameForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errEl = $("#chatbotNameError");
+      const okEl = $("#chatbotNameSuccess");
+      errEl.style.display = "none"; okEl.style.display = "none";
+      const name = $("#chatbotNameInput").value.trim();
+      if (!name) return;
+      const res = await staffFetch("/api/settings/chatbot-name", {
+        method: "PATCH", body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (data.error) { errEl.textContent = data.error; errEl.style.display = "block"; return; }
+      applyChatbotName(data.chatbot_name);
+      okEl.style.display = "block";
+      setTimeout(() => { okEl.style.display = "none"; }, 2500);
     });
   }
 }
@@ -2824,9 +2893,48 @@ async function loadNotifySubscribers() {
   if (res.status === 401) return;
   if (res.status === 403) return;
   const subs = await res.json();
+  renderSubscribersTable(subs);
+}
+
+function renderSubscribersTable(subs) {
+  const countEl = $("#subscriberCount");
+  if (countEl) countEl.textContent = `${subs.length} subscriber${subs.length === 1 ? "" : "s"}`;
+
   const thead = $("#notifyTable thead"), tbody = $("#notifyTable tbody");
-  thead.innerHTML = `<tr><th>timestamp</th><th>contact</th><th>categories</th></tr>`;
-  tbody.innerHTML = subs.map((s) => `<tr><td>${escapeHtml(s.timestamp)}</td><td>${escapeHtml(s.contact)}</td><td>${escapeHtml(s.categories)}</td></tr>`).join("");
+  const canManage = hasPerm("manage_subscribers");
+  thead.innerHTML = `<tr><th>Subscribed</th><th>Contact</th><th>Categories</th>${canManage ? "<th></th>" : ""}</tr>`;
+  tbody.innerHTML = "";
+  if (!subs.length) {
+    tbody.innerHTML = `<tr><td colspan="4"><span class="hint-text">No subscribers yet.</span></td></tr>`;
+    return;
+  }
+  subs.slice().reverse().forEach((s) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${escapeHtml(s.timestamp)}</td>
+      <td>${escapeHtml(s.contact)}</td>
+      <td>${escapeHtml(s.categories)}</td>
+      ${canManage ? "<td></td>" : ""}
+    `;
+    if (canManage) {
+      const delBtn = document.createElement("button");
+      delBtn.type = "button"; delBtn.className = "btn-secondary tip-delete-btn"; delBtn.textContent = "Delete";
+      delBtn.addEventListener("click", async () => {
+        if (!confirm(`Remove subscriber "${s.contact}"? This can't be undone.`)) return;
+        delBtn.disabled = true;
+        const res2 = await staffFetch(`/api/notify/${s.id}`, { method: "DELETE" });
+        if (!res2.ok) {
+          const data = await res2.json().catch(() => ({}));
+          alert(data.error || "Couldn't delete this subscriber.");
+          delBtn.disabled = false;
+          return;
+        }
+        loadNotifySubscribers();
+      });
+      tr.lastElementChild.appendChild(delBtn);
+    }
+    tbody.appendChild(tr);
+  });
 }
 
 init();
