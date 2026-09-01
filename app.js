@@ -13,8 +13,12 @@ const state = {
   sessionId: localStorage.getItem("aqua_session_id") || null,
   territory: localStorage.getItem("aqua_territory") || "Grenada",
   messages: JSON.parse(localStorage.getItem("aqua_messages") || "[]"),
-  staffPasscode: sessionStorage.getItem("aqua_staff_passcode") || "",
-  staffRole: sessionStorage.getItem("aqua_staff_role") || null,
+  // NEW: token-based staff auth (replaces the old shared-passcode model)
+  staffToken: sessionStorage.getItem("aqua_staff_token") || "",
+  staffAccount: JSON.parse(sessionStorage.getItem("aqua_staff_account") || "null"),
+  permissionDefs: [], // [{key, category, label}, ...] loaded from /api/staff/permission-defs
+  staffAccountsCache: [],
+  editingAccountId: null,
   faqsAdmin: [],
   currentLiveChatSession: null,
   reportPin: null,
@@ -95,6 +99,7 @@ async function init() {
   $("#territorySelect").value = state.territory;
 
   setupSiteNav();
+  await loadPermissionDefs();
   setupStaffPortal();
   setupVoiceTestButton();
 
@@ -147,7 +152,7 @@ function setupSiteNav() {
     if (pushUrl && window.location.pathname !== "/admin") {
       history.pushState({ view: "admin" }, "", "/admin");
     }
-    if (state.staffPasscode) {
+    if (state.staffToken && state.staffAccount) {
       staffLoginSuccess();
     }
   };
@@ -963,9 +968,6 @@ async function sendMessage(text, directAttachment, locationCard) {
     if (data.session_id) saveSession(data.session_id);
 
     if (data.paused) {
-      // A staff member has taken this conversation over — don't show a
-      // bot bubble. Show a one-time notice per session instead, then wait
-      // for the staff reply to arrive via startStaffMessagePolling().
       const noticeKey = `aqua_paused_notice_${state.sessionId}`;
       if (!localStorage.getItem(noticeKey)) {
         const noticeText = "🧑‍💼 A NAWASA representative is now handling this conversation directly — they'll reply here shortly.";
@@ -994,11 +996,6 @@ async function sendMessage(text, directAttachment, locationCard) {
 
 // ---------------------------------------------------------------------
 // Staff live-message polling (customer widget side)
-//
-// A staff member can drop a message into an in-progress conversation from
-// the Staff Portal's Live Chat monitor without turning the bot off. This
-// polls for those out-of-band messages and drops them into the chat as
-// they arrive, labeled distinctly from the bot's own replies.
 // ---------------------------------------------------------------------
 let staffPollTimer = null;
 function startStaffMessagePolling() {
@@ -1657,18 +1654,43 @@ function setupSettings() {
 // STAFF PORTAL — "NAWASA Digital Management Center"
 // =========================================================================
 
-const ROLE_SECTION_AREAS = {
-  overview: null,
-  "website-alerts": "website", "website-tips": "website", "website-preview": "website",
-  "aqua-kb": "aquaassist", "aqua-unanswered": "aquaassist", "aqua-livechat": "aquaassist", "aqua-settings": "aquaassist",
-  "reports-map": "reports", "reports-table": "reports", "reports-notify": "reports",
+// Which permission (or set of permissions — any one is enough) unlocks each
+// sidebar section. `null` means "any logged-in staff member can see this".
+const SECTION_PERMISSIONS = {
+  "overview": null,
+  "website-alerts": ["manage_service_alerts", "view_website_management"],
+  "website-tips": ["manage_water_tips", "view_website_management"],
+  "website-preview": ["view_website_management"],
+  "aqua-livechat": ["view_aquaassist_dashboard"],
+  "aqua-kb": ["manage_faqs", "manage_knowledge_base"],
+  "aqua-unanswered": ["review_unanswered_questions"],
+  "aqua-settings": ["manage_chatbot_settings"],
+  "reports-map": ["view_reporting_map"],
+  "reports-table": ["view_reports"],
+  "reports-notify": ["view_reports"],
+  "staff-accounts": ["manage_staff_accounts"],
+  "audit-log": ["system_settings", "manage_staff_accounts"],
 };
-const ROLE_PERMISSIONS_JS = {
-  admin: new Set(["website", "aquaassist", "reports"]),
-  website: new Set(["website"]),
-  aquaassist: new Set(["aquaassist"]),
-  ops: new Set(["reports"]),
-};
+
+function hasPerm(key) {
+  const acct = state.staffAccount;
+  if (!acct) return false;
+  if (acct.is_super_admin) return true;
+  return (acct.permissions || []).includes(key);
+}
+function hasAnyPerm(keys) {
+  if (!keys) return true; // null => always visible
+  return keys.some((k) => hasPerm(k));
+}
+
+async function loadPermissionDefs() {
+  try {
+    const res = await fetch(`${API}/api/staff/permission-defs`);
+    state.permissionDefs = await res.json();
+  } catch (err) {
+    state.permissionDefs = [];
+  }
+}
 
 function setupStaffSidebar() {
   $$(".staff-nav-btn[data-staff-section]").forEach((btn) => {
@@ -1682,16 +1704,16 @@ function setupStaffSidebar() {
       if (btn.dataset.staffSection === "reports-map" && state.staffMap) {
         setTimeout(() => state.staffMap.invalidateSize(), 50);
       }
+      if (btn.dataset.staffSection === "staff-accounts") loadStaffAccountsAdmin();
+      if (btn.dataset.staffSection === "audit-log") loadAuditLog();
     });
   });
 }
 
 function applyStaffRoleVisibility() {
-  const allowed = ROLE_PERMISSIONS_JS[state.staffRole] || new Set();
   $$(".staff-nav-btn[data-staff-section]").forEach((btn) => {
-    const area = ROLE_SECTION_AREAS[btn.dataset.staffSection];
-    const visible = area === null || allowed.has(area);
-    btn.style.display = visible ? "" : "none";
+    const perms = SECTION_PERMISSIONS[btn.dataset.staffSection];
+    btn.style.display = hasAnyPerm(perms) ? "" : "none";
   });
   $$(".staff-nav-group").forEach((g) => {
     let sib = g.nextElementSibling, anyVisible = false;
@@ -1705,6 +1727,11 @@ function applyStaffRoleVisibility() {
   if (active && active.style.display === "none") {
     const overviewBtn = $('.staff-nav-btn[data-staff-section="overview"]');
     if (overviewBtn) overviewBtn.click();
+  }
+
+  const label = $("#staffAccountLabel");
+  if (label && state.staffAccount) {
+    label.textContent = `${state.staffAccount.avatar || "🙂"} ${state.staffAccount.full_name} — ${state.staffAccount.role}`;
   }
 }
 
@@ -1880,9 +1907,7 @@ function renderUnansweredList(items) {
 }
 
 // ---------------------------------------------------------------------
-// Live Chat monitor — staff can watch conversations as they come in and
-// optionally reply into them directly. The bot keeps responding normally;
-// a staff reply is just another turn added to the same transcript.
+// Live Chat monitor
 // ---------------------------------------------------------------------
 let liveChatTranscriptTimer = null;
 let liveChatSessionsTimer = null;
@@ -2051,17 +2076,6 @@ function setupLiveChatMonitor() {
   });
 }
 
-// ---------------------------------------------------------------------
-// Live-agent handoff notifications
-//
-// The bot can call request_human_handoff (app.py) when it can't help a
-// customer, or the customer explicitly asks for a person. That creates an
-// open "handoff request" server-side. This polls for those, drives the
-// Live Chat nav badge + Dashboard metric, and — if the staff member has
-// opted in via the notification toggle in AquaAssist Settings — fires a
-// browser notification and a short beep the first time a NEW one appears,
-// so staff don't have to keep the Live Chat tab open to notice.
-// ---------------------------------------------------------------------
 function playNotifyBeep() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -2126,6 +2140,277 @@ function setupStaffNotifySetting() {
   });
 }
 
+// =========================================================================
+// NEW: Staff Accounts management (Administration)
+// =========================================================================
+function permissionCheckboxesHTML(idPrefix, checkedKeys) {
+  const checked = new Set(checkedKeys || []);
+  const byCategory = {};
+  state.permissionDefs.forEach((p) => {
+    (byCategory[p.category] = byCategory[p.category] || []).push(p);
+  });
+  let html = "";
+  Object.entries(byCategory).forEach(([category, perms]) => {
+    html += `<div class="perm-category-label">${escapeHtml(category)}</div><div class="perm-grid">`;
+    perms.forEach((p) => {
+      const isChecked = checked.has(p.key) ? "checked" : "";
+      html += `<label class="perm-check"><input type="checkbox" data-perm="${p.key}" id="${idPrefix}-${p.key}" ${isChecked} /> ${escapeHtml(p.label)}</label>`;
+    });
+    html += `</div>`;
+  });
+  return html;
+}
+
+function collectCheckedPermissions(container) {
+  return $$(`#${container.id} input[data-perm]:checked`).map((el) => el.dataset.perm);
+}
+
+function accountCanBeManagedByMe(account) {
+  // The Super Administrator can only be modified by itself (e.g. password
+  // change); everyone else is fair game for someone with the right
+  // permission (server enforces this too — this just drives the UI).
+  if (!account.is_super_admin) return true;
+  return state.staffAccount && state.staffAccount.id === account.id;
+}
+
+async function loadStaffAccountsAdmin() {
+  const res = await staffFetch("/api/staff/accounts");
+  if (res.status === 401) { staffLogout(); return; }
+  if (res.status === 403) return;
+  const accounts = await res.json();
+  state.staffAccountsCache = accounts;
+  renderStaffAccountsTable(accounts);
+}
+
+function renderStaffAccountsTable(accounts) {
+  const thead = $("#staffAccountsTable thead"), tbody = $("#staffAccountsTable tbody");
+  thead.innerHTML = `<tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th>Access</th><th></th></tr>`;
+  tbody.innerHTML = "";
+  accounts.forEach((a) => {
+    const tr = document.createElement("tr");
+    const access = a.is_super_admin ? "Everything" : (a.permissions.length ? `${a.permissions.length} permission(s)` : "None yet");
+    tr.innerHTML = `
+      <td>${escapeHtml(a.avatar || "")} ${escapeHtml(a.full_name)}</td>
+      <td>${escapeHtml(a.username)}</td>
+      <td>${escapeHtml(a.role)}${a.is_super_admin ? " 👑" : ""}</td>
+      <td>${a.status === "Active" ? '<span style="color:#2E9E5B;font-weight:700;">Active</span>' : '<span style="color:#D64545;font-weight:700;">Disabled</span>'}</td>
+      <td>${escapeHtml(access)}</td>
+      <td></td>
+    `;
+    const actionsTd = tr.lastElementChild;
+    const canManage = accountCanBeManagedByMe(a);
+
+    if (hasPerm("edit_accounts") && canManage) {
+      const editBtn = document.createElement("button");
+      editBtn.type = "button"; editBtn.className = "btn-secondary"; editBtn.textContent = "Edit";
+      editBtn.style.marginRight = ".3rem";
+      editBtn.addEventListener("click", () => openAccountEditor(a));
+      actionsTd.appendChild(editBtn);
+    }
+
+    if (hasPerm("manage_permissions") && !a.is_super_admin) {
+      const permBtn = document.createElement("button");
+      permBtn.type = "button"; permBtn.className = "btn-secondary"; permBtn.textContent = "Permissions";
+      permBtn.style.marginRight = ".3rem";
+      permBtn.addEventListener("click", () => openPermissionsEditor(a));
+      actionsTd.appendChild(permBtn);
+    }
+
+    if (hasPerm("edit_accounts") && canManage) {
+      const resetBtn = document.createElement("button");
+      resetBtn.type = "button"; resetBtn.className = "btn-secondary"; resetBtn.textContent = "Reset Password";
+      resetBtn.style.marginRight = ".3rem";
+      resetBtn.addEventListener("click", async () => {
+        const newPass = prompt(`New password for ${a.username} (min 6 characters):`);
+        if (!newPass) return;
+        const res2 = await staffFetch(`/api/staff/accounts/${a.id}/reset-password`, {
+          method: "POST", body: JSON.stringify({ new_password: newPass }),
+        });
+        const data = await res2.json();
+        if (data.error) { alert(data.error); return; }
+        alert("Password reset.");
+      });
+      actionsTd.appendChild(resetBtn);
+    }
+
+    if (hasPerm("disable_accounts") && !a.is_super_admin) {
+      const toggleBtn = document.createElement("button");
+      toggleBtn.type = "button"; toggleBtn.className = "btn-secondary"; toggleBtn.style.marginRight = ".3rem";
+      toggleBtn.textContent = a.status === "Active" ? "Disable" : "Enable";
+      toggleBtn.addEventListener("click", async () => {
+        const newStatus = a.status === "Active" ? "Disabled" : "Active";
+        if (newStatus === "Disabled" && !confirm(`Disable ${a.username}? They'll immediately lose access to the Staff Portal.`)) return;
+        await staffFetch(`/api/staff/accounts/${a.id}/status`, { method: "PATCH", body: JSON.stringify({ status: newStatus }) });
+        loadStaffAccountsAdmin();
+      });
+      actionsTd.appendChild(toggleBtn);
+    }
+
+    if (hasPerm("delete_accounts") && !a.is_super_admin && (!state.staffAccount || a.id !== state.staffAccount.id)) {
+      const delBtn = document.createElement("button");
+      delBtn.type = "button"; delBtn.className = "btn-secondary tip-delete-btn"; delBtn.textContent = "Delete";
+      delBtn.addEventListener("click", async () => {
+        if (!confirm(`Permanently delete the account "${a.username}"? This can't be undone.`)) return;
+        const res2 = await staffFetch(`/api/staff/accounts/${a.id}`, { method: "DELETE" });
+        const data = await res2.json();
+        if (data.error) { alert(data.error); return; }
+        loadStaffAccountsAdmin();
+      });
+      actionsTd.appendChild(delBtn);
+    }
+
+    tbody.appendChild(tr);
+  });
+}
+
+function openAccountEditor(account) {
+  state.editingAccountId = account ? account.id : null;
+  $("#accountFormTitle").textContent = account ? `Edit ${account.username}` : "Create staff account";
+  $("#accountFullName").value = account ? account.full_name : "";
+  $("#accountUsername").value = account ? account.username : "";
+  $("#accountUsername").disabled = !!account;
+  $("#accountRole").value = account ? account.role : "";
+  $("#accountAvatar").value = account ? account.avatar : "🙂";
+  $("#accountPassword").value = "";
+  $("#accountPassword").placeholder = account ? "Leave blank to keep current password" : "Set an initial password";
+  $("#accountPassword").required = !account;
+
+  const permsWrap = $("#accountFormPermissions");
+  const canAssignPerms = hasPerm("manage_permissions");
+  if (!account && canAssignPerms) {
+    permsWrap.innerHTML = permissionCheckboxesHTML("newacct", []);
+    permsWrap.style.display = "block";
+  } else {
+    permsWrap.innerHTML = "";
+    permsWrap.style.display = "none";
+  }
+
+  $("#accountFormCard").style.display = "block";
+  $("#accountFormCard").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function closeAccountEditor() {
+  state.editingAccountId = null;
+  $("#accountFormCard").style.display = "none";
+  $("#accountForm").reset();
+}
+
+async function submitAccountForm(e) {
+  e.preventDefault();
+  const full_name = $("#accountFullName").value.trim();
+  const username = $("#accountUsername").value.trim();
+  const role = $("#accountRole").value.trim();
+  const avatar = $("#accountAvatar").value.trim() || "🙂";
+  const password = $("#accountPassword").value;
+  const errEl = $("#accountFormError");
+  errEl.style.display = "none";
+
+  if (state.editingAccountId) {
+    const res = await staffFetch(`/api/staff/accounts/${state.editingAccountId}`, {
+      method: "PATCH", body: JSON.stringify({ full_name, role, avatar }),
+    });
+    const data = await res.json();
+    if (data.error) { errEl.textContent = data.error; errEl.style.display = "block"; return; }
+    if (password) {
+      const res2 = await staffFetch(`/api/staff/accounts/${state.editingAccountId}/reset-password`, {
+        method: "POST", body: JSON.stringify({ new_password: password }),
+      });
+      const data2 = await res2.json();
+      if (data2.error) { errEl.textContent = data2.error; errEl.style.display = "block"; return; }
+    }
+  } else {
+    const permsWrap = $("#accountFormPermissions");
+    const permissions = permsWrap.style.display !== "none" ? collectCheckedPermissions(permsWrap) : [];
+    const res = await staffFetch("/api/staff/accounts", {
+      method: "POST",
+      body: JSON.stringify({ full_name, username, password, role, avatar, permissions }),
+    });
+    const data = await res.json();
+    if (data.error) { errEl.textContent = data.error; errEl.style.display = "block"; return; }
+  }
+  closeAccountEditor();
+  loadStaffAccountsAdmin();
+}
+
+function openPermissionsEditor(account) {
+  $("#permissionsEditorTitle").textContent = `Permissions — ${account.full_name} (${account.username})`;
+  $("#permissionsEditorBody").innerHTML = permissionCheckboxesHTML("permedit", account.permissions);
+  $("#permissionsEditorCard").dataset.accountId = account.id;
+  $("#permissionsEditorCard").style.display = "block";
+  $("#permissionsEditorCard").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function closePermissionsEditor() {
+  $("#permissionsEditorCard").style.display = "none";
+  $("#permissionsEditorBody").innerHTML = "";
+}
+
+async function submitPermissionsEditor() {
+  const accountId = $("#permissionsEditorCard").dataset.accountId;
+  const permissions = collectCheckedPermissions($("#permissionsEditorBody"));
+  const res = await staffFetch(`/api/staff/accounts/${accountId}/permissions`, {
+    method: "PATCH", body: JSON.stringify({ permissions }),
+  });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  closePermissionsEditor();
+  loadStaffAccountsAdmin();
+}
+
+function setupStaffAccountsUI() {
+  const createBtn = $("#createAccountBtn");
+  if (createBtn) createBtn.addEventListener("click", () => openAccountEditor(null));
+  const cancelBtn = $("#accountFormCancelBtn");
+  if (cancelBtn) cancelBtn.addEventListener("click", closeAccountEditor);
+  const form = $("#accountForm");
+  if (form) form.addEventListener("submit", submitAccountForm);
+
+  const permCancelBtn = $("#permissionsEditorCancelBtn");
+  if (permCancelBtn) permCancelBtn.addEventListener("click", closePermissionsEditor);
+  const permSaveBtn = $("#permissionsEditorSaveBtn");
+  if (permSaveBtn) permSaveBtn.addEventListener("click", submitPermissionsEditor);
+
+  const changePwForm = $("#changePasswordForm");
+  if (changePwForm) {
+    changePwForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errEl = $("#changePasswordError");
+      const okEl = $("#changePasswordSuccess");
+      errEl.style.display = "none"; okEl.style.display = "none";
+      const current_password = $("#currentPasswordInput").value;
+      const new_password = $("#newPasswordInput").value;
+      const res = await staffFetch("/api/staff/change-password", {
+        method: "POST", body: JSON.stringify({ current_password, new_password }),
+      });
+      const data = await res.json();
+      if (data.error) { errEl.textContent = data.error; errEl.style.display = "block"; return; }
+      okEl.style.display = "block";
+      changePwForm.reset();
+    });
+  }
+}
+
+// ---------------------------------------------------------------------
+// Audit Log
+// ---------------------------------------------------------------------
+async function loadAuditLog() {
+  const res = await staffFetch("/api/audit-log");
+  if (res.status === 401) { staffLogout(); return; }
+  if (res.status === 403) return;
+  const entries = await res.json();
+  const thead = $("#auditLogTable thead"), tbody = $("#auditLogTable tbody");
+  thead.innerHTML = `<tr><th>Timestamp</th><th>User</th><th>Action</th><th>Item</th><th>Details</th></tr>`;
+  tbody.innerHTML = entries.map((e) => `
+    <tr>
+      <td>${escapeHtml(e.timestamp)}</td>
+      <td>${escapeHtml(e.staff_user)}</td>
+      <td>${escapeHtml(e.action)}</td>
+      <td>${escapeHtml(e.item || "")}</td>
+      <td>${escapeHtml(e.details || "")}</td>
+    </tr>
+  `).join("");
+}
+
 // ---------------------------------------------------------------------
 // Staff portal core (login, feature toggles, reports, map, outages, tips)
 // ---------------------------------------------------------------------
@@ -2134,25 +2419,38 @@ function setupStaffPortal() {
   setupStaffSidebar();
   setupLiveChatMonitor();
   setupStaffNotifySetting();
+  setupStaffAccountsUI();
 
   $("#staffLoginBtn").addEventListener("click", async () => {
-    const passcode = $("#staffPasscodeInput").value;
+    const username = $("#staffUsernameInput").value.trim();
+    const password = $("#staffPasswordInputField").value;
+    $("#staffLoginError").style.display = "none";
+    if (!username || !password) {
+      $("#staffLoginError").textContent = "Enter a username and password.";
+      $("#staffLoginError").style.display = "block";
+      return;
+    }
     const res = await fetch(`${API}/api/staff/login`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ passcode }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }),
     });
     const data = await res.json();
     if (data.ok) {
-      state.staffPasscode = passcode;
-      state.staffRole = data.role;
-      sessionStorage.setItem("aqua_staff_passcode", passcode);
-      sessionStorage.setItem("aqua_staff_role", data.role);
+      state.staffToken = data.token;
+      state.staffAccount = data.account;
+      sessionStorage.setItem("aqua_staff_token", data.token);
+      sessionStorage.setItem("aqua_staff_account", JSON.stringify(data.account));
       staffLoginSuccess();
     } else {
+      $("#staffLoginError").textContent = data.error || "Login failed.";
       $("#staffLoginError").style.display = "block";
     }
   });
+  $("#staffPasswordInputField").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") $("#staffLoginBtn").click();
+  });
 
   $("#staffLogoutBtn").addEventListener("click", () => {
+    staffFetch("/api/staff/logout", { method: "POST" }).catch(() => {});
     staffLogout();
   });
 
@@ -2241,17 +2539,19 @@ function staffLoginSuccess() {
 }
 
 function staffLogout() {
-  state.staffPasscode = "";
-  state.staffRole = null;
+  state.staffToken = "";
+  state.staffAccount = null;
   state.currentLiveChatSession = null;
   if (liveChatTranscriptTimer) { clearInterval(liveChatTranscriptTimer); liveChatTranscriptTimer = null; }
   if (liveChatSessionsTimer) { clearInterval(liveChatSessionsTimer); liveChatSessionsTimer = null; }
   if (handoffsTimer) { clearInterval(handoffsTimer); handoffsTimer = null; }
   knownOpenHandoffIds = new Set();
-  sessionStorage.removeItem("aqua_staff_passcode");
-  sessionStorage.removeItem("aqua_staff_role");
+  sessionStorage.removeItem("aqua_staff_token");
+  sessionStorage.removeItem("aqua_staff_account");
   $("#staffLoginCard").style.display = "block";
   $("#staffDashboard").style.display = "none";
+  $("#staffUsernameInput").value = "";
+  $("#staffPasswordInputField").value = "";
 }
 
 async function loadTipsAdmin() {
@@ -2351,7 +2651,7 @@ function renderFeatureToggleList(flags) {
 }
 
 async function staffFetch(path, opts = {}) {
-  opts.headers = Object.assign({ "Content-Type": "application/json", "X-Staff-Passcode": state.staffPasscode }, opts.headers || {});
+  opts.headers = Object.assign({ "Content-Type": "application/json", "X-Staff-Token": state.staffToken }, opts.headers || {});
   return fetch(`${API}${path}`, opts);
 }
 
@@ -2390,7 +2690,7 @@ function renderReportsTable(reports) {
     const tr = document.createElement("tr");
     tr.innerHTML = cols.map((c) => {
       if (c === "attachment") return `<td>${buildAttachmentCell(r)}</td>`;
-      if (c === "delete") return `<td><button type="button" class="delete-report-btn" data-ref="${escapeHtml(r.reference)}" title="Delete this report">🗑️</button></td>`;
+      if (c === "delete") return `<td>${hasPerm("edit_reports") ? `<button type="button" class="delete-report-btn" data-ref="${escapeHtml(r.reference)}" title="Delete this report">🗑️</button>` : ""}</td>`;
       return `<td>${escapeHtml(String(r[c] ?? ""))}</td>`;
     }).join("");
     tbody.appendChild(tr);
