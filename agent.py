@@ -1,43 +1,7 @@
 """
 AquaAssist agent layer — LangGraph orchestration + Pinecone-backed RAG.
-
-This module replaces the previous direct-`google-genai` chat orchestration
-(a single `genai.Client` plus a hand-rolled `SESSIONS` dict in app.py) with:
-
-- LANGCHAIN / LANGGRAPH: the agent loop is built with
-  `langchain.agents.create_agent`, LangChain's current (non-deprecated)
-  entry point for a standard ReAct-style tool-calling agent — the model
-  decides whether to call a tool, the tool runs, its result goes back to
-  the model, and this repeats until the model produces a final answer.
-  (Older examples online use `langgraph.prebuilt.create_react_agent` —
-  that's deprecated as of LangGraph v1.0 in favor of this.) Conversation
-  memory persists via a LangGraph checkpointer (`InMemorySaver`), keyed
-  by a `thread_id` — see `get_or_create_agent()` below.
-
-- PINECONE / RAG: NAWASA's FAQ knowledge base is embedded once at startup
-  (`seed_knowledge_base()`) using Gemini's `gemini-embedding-001` model
-  via `langchain_google_genai.GoogleGenerativeAIEmbeddings`, and upserted
-  into a Pinecone serverless index. At query time, the agent has a
-  `search_knowledge_base` tool (`make_search_knowledge_base_tool()`) that
-  embeds the customer's actual question and retrieves the top-K most
-  relevant FAQ entries from Pinecone. This is real retrieval-at-query-time
-  RAG — a deliberate change from the previous approach (the entire FAQ
-  list concatenated into every system prompt regardless of what was
-  asked), which doesn't scale and isn't what "RAG" means.
-
-REQUIRED environment variables for this to be fully active:
-    GEMINI_API_KEY      (also used elsewhere in app.py)
-    PINECONE_API_KEY
-Optional (all have defaults):
-    PINECONE_INDEX_NAME  (default: "aquaassist-knowledge-base")
-    PINECONE_CLOUD       (default: "aws")
-    PINECONE_REGION      (default: "us-east-1")
-
-If PINECONE_API_KEY isn't set, `search_knowledge_base` falls back to
-returning the full static FAQ text instead of a live retrieval, so local
-development is still possible without a Pinecone account — but this is a
-fallback, not the real feature. Real RAG retrieval requires Pinecone to
-actually be configured.
+Unchanged from the existing project — carried forward as-is. See the
+project README for details on the LangChain agent + Pinecone RAG wiring.
 """
 
 import logging
@@ -59,15 +23,11 @@ PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "aquaassist-knowledg
 PINECONE_CLOUD = os.environ.get("PINECONE_CLOUD", "aws")
 PINECONE_REGION = os.environ.get("PINECONE_REGION", "us-east-1")
 
-# One shared checkpointer for every agent graph — it's just a storage
-# backend keyed by thread_id, so multiple compiled graphs (one gets
-# (re)built per session, since tools below are session-scoped closures)
-# can safely share a single instance.
 _checkpointer = InMemorySaver()
 
 _embeddings = None
 _pinecone_index = None
-_static_faq_fallback_text = ""  # set by seed_knowledge_base()
+_static_faq_fallback_text = ""
 
 
 def _get_embeddings():
@@ -78,9 +38,6 @@ def _get_embeddings():
 
 
 def _get_pinecone_index():
-    """Lazily connects to (and creates, if missing) the Pinecone index.
-    Returns None if PINECONE_API_KEY isn't configured — callers must
-    handle that by falling back to the static FAQ text."""
     global _pinecone_index
     if not PINECONE_API_KEY:
         return None
@@ -114,18 +71,6 @@ def _format_faqs_as_text(faqs):
 
 
 def seed_knowledge_base(faqs, force=False):
-    """Embeds and upserts the FAQ list into Pinecone. Call once at startup,
-    and again (with force=True) whenever staff add/edit/disable an FAQ via
-    the Knowledge Base admin panel, so Pinecone stays in sync with what's
-    actually being served to customers.
-
-    Idempotent by default — if the index already has at least as many
-    vectors as there are FAQ entries, this is a no-op, so a server restart
-    doesn't re-embed (and re-bill) the same content every time. Pass
-    force=True to always re-upsert regardless of count (safe: Pinecone
-    upserts are by-id, so this just overwrites existing vectors rather than
-    duplicating them).
-    """
     global _static_faq_fallback_text
     _static_faq_fallback_text = _format_faqs_as_text(faqs)
 
@@ -162,10 +107,6 @@ def seed_knowledge_base(faqs, force=False):
 
 
 def make_search_knowledge_base_tool(on_no_match=None):
-    """on_no_match, if given, is called as on_no_match(query) whenever
-    neither Pinecone nor the static fallback finds a close match. This is
-    how "Questions AquaAssist Couldn't Answer" gets populated for staff
-    review, without changing search_knowledge_base's own retrieval logic."""
     @tool
     def search_knowledge_base(query: str) -> str:
         """Searches NAWASA's official knowledge base — FAQs on billing, new
@@ -211,9 +152,6 @@ def make_search_knowledge_base_tool(on_no_match=None):
 
 
 def build_agent(tools, system_prompt):
-    """Compiles a fresh LangGraph agent graph bound to the given session-
-    scoped tools and system prompt. The caller (app.py) is responsible for
-    caching this per session/territory, same as the old chat-session dict."""
     model = ChatGoogleGenerativeAI(model=MODEL_NAME, temperature=0.7, google_api_key=GEMINI_API_KEY)
     return create_agent(
         model=model,
@@ -224,10 +162,6 @@ def build_agent(tools, system_prompt):
 
 
 def _extract_reply_text(content):
-    """LangChain's AIMessage.content is typed as str | list[str | dict], and
-    for Gemini 3+ models specifically it's the list form. Every caller of
-    invoke_agent() expects a plain string, so this normalizes either shape.
-    """
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -242,9 +176,6 @@ def _extract_reply_text(content):
 
 
 def invoke_agent(graph, thread_id, content_blocks):
-    """Runs one turn of the agent. content_blocks is a list of LangChain
-    multimodal content blocks (text / image_url / file), already built by
-    the caller. Returns the final reply text."""
     result = graph.invoke(
         {"messages": [{"role": "user", "content": content_blocks}]},
         {"configurable": {"thread_id": thread_id}},
