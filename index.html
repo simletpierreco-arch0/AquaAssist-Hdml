@@ -183,7 +183,7 @@
           <span style="display:none;">💧</span>
         </div>
         <div>
-          <div class="widget-header-title">AquaAssist</div>
+          <div class="widget-header-title" id="chatbotNameWidgetHeader">AquaAssist</div>
           <div class="widget-header-subtitle"><span class="widget-header-dot"></span>NAWASA Customer Support</div>
         </div>
       </div>
@@ -208,7 +208,7 @@
             <img src="nawasa_logo.png.png" alt="NAWASA" class="brand-logo-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
             <div class="nawasa-logo-fallback" style="display:none;">NAWASA</div>
           </div>
-          <div class="login-title">AquaAssist</div>
+          <div class="login-title" id="chatbotNameLoginTitle">AquaAssist</div>
           <div class="login-subtitle">Your smart water support assistant</div>
         </div>
         <div class="card login-card">
@@ -227,7 +227,7 @@
             <div class="hero-brand">
               <div class="avatar-ring"><div class="avatar-circle"><img src="aquaassist_avatar.png.png" alt="AquaAssist" class="avatar-img" onerror="this.style.display='none';this.nextElementSibling.style.display='block';" /><span style="display:none;">💧</span></div></div>
               <div>
-                <div class="hero-title">AquaAssist</div>
+                <div class="hero-title" id="chatbotNameHeroTitle">AquaAssist</div>
                 <div class="hero-subtitle">NAWASA Official Virtual Assistant</div>
                 <div class="hero-online"><span class="online-dot"></span>AquaAssist Online</div>
                 <div id="hoursPill" class="hours-pill"></div>
@@ -469,11 +469,12 @@
           <div class="staff-nav-group">📍 Reports &amp; Operations</div>
           <button class="staff-nav-btn" data-staff-section="reports-map">Reporting Map</button>
           <button class="staff-nav-btn" data-staff-section="reports-table">All Reports</button>
-          <button class="staff-nav-btn" data-staff-section="reports-notify">Notify Subscribers</button>
+          <button class="staff-nav-btn" data-staff-section="reports-notify">Subscribers</button>
 
           <div class="staff-nav-group">👑 Administration</div>
           <button class="staff-nav-btn" data-staff-section="staff-accounts">Staff Accounts</button>
           <button class="staff-nav-btn" data-staff-section="audit-log">Audit Log</button>
+          <button class="staff-nav-btn" data-staff-section="chatbot-name">Chatbot Settings</button>
         </aside>
 
         <main class="staff-main">
@@ -655,9 +656,10 @@
             </div>
           </section>
 
-          <!-- ===== REPORTS & OPERATIONS > Notify Subscribers ===== -->
+          <!-- ===== REPORTS & OPERATIONS > Subscribers ===== -->
           <section id="staffSection-reports-notify" class="staff-section">
-            <div class="section-label" style="margin-top:0;">🔔 Notification Subscribers</div>
+            <div class="section-label" style="margin-top:0;">🔔 Subscribers</div>
+            <p class="hint-text"><span id="subscriberCount">0 subscribers</span> — people who signed up for outage/service notifications on the public site.</p>
             <div class="card table-wrap">
               <table id="notifyTable" class="reports-table"><thead></thead><tbody></tbody></table>
             </div>
@@ -689,7 +691,7 @@
                   </div>
                   <div>
                     <label class="field-label">Avatar (emoji)</label>
-                    <input id="accountAvatar" type="text" maxlength="4" placeholder="🙂" />
+                    <input id="accountAvatar" type="text" maxlength="4" placeholder="💧" />
                   </div>
                 </div>
                 <div id="accountFormPermissions"></div>
@@ -725,6 +727,21 @@
             <p class="hint-text">Every account change, permission change, password reset, and content change (alerts, tips, FAQs, report status) is recorded here for accountability.</p>
             <div class="card table-wrap">
               <table id="auditLogTable" class="reports-table"><thead></thead><tbody></tbody></table>
+            </div>
+          </section>
+
+          <!-- ===== ADMINISTRATION > Chatbot Settings (AquaVission only) ===== -->
+          <section id="staffSection-chatbot-name" class="staff-section">
+            <div class="section-label" style="margin-top:0;">🤖 Chatbot Settings</div>
+            <p class="hint-text">Only the AquaVission Super Administrator account can rename the chatbot. The new name appears everywhere it's shown to customers and staff — no page refresh needed elsewhere, it updates on the next automatic sync (within about a minute).</p>
+            <div class="card" style="max-width:420px;">
+              <form id="chatbotNameForm">
+                <label class="field-label">Chatbot name</label>
+                <input id="chatbotNameInput" type="text" maxlength="40" required />
+                <button type="submit" class="btn-primary" style="margin-top:0.6rem;">Save name</button>
+              </form>
+              <p id="chatbotNameError" class="error-text" style="display:none;"></p>
+              <p id="chatbotNameSuccess" class="hint-text" style="display:none;color:#2E9E5B;">✓ Saved.</p>
             </div>
           </section>
 
