@@ -872,3 +872,35 @@ body.dark .livechat-msg-staff { background: #3A2E12; border-color: #6B5522; }
   .livechat-shell { flex-direction: column; height: auto; max-height: none; }
   .livechat-sidebar { flex: none; max-height: 220px; }
 }
+
+/* =========================================================================
+   NEW: Staff Accounts / Permissions / Audit Log / topbar
+   ========================================================================= */
+.staff-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 1rem; gap: .6rem; flex-wrap: wrap;
+}
+.staff-account-label {
+  font-weight: 700; font-size: .88rem; color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 20%, transparent);
+  border-radius: 999px; padding: .4rem .9rem;
+}
+
+.perm-category-label {
+  font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--primary); margin: .8rem 0 .3rem;
+}
+.perm-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: .3rem .8rem; margin-bottom: .4rem;
+}
+.perm-check {
+  display: flex; align-items: center; gap: .4rem; font-size: .8rem; font-weight: 500;
+}
+@media (max-width: 480px) {
+  .perm-grid { grid-template-columns: 1fr; }
+}
+
+#accountFormCard, #permissionsEditorCard {
+  border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
+}
