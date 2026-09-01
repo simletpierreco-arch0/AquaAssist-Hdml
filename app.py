@@ -920,16 +920,22 @@ def api_staff_me():
 @app.route("/api/staff/change-password", methods=["POST"])
 @require_login
 def api_staff_change_password():
-    """Self-service password change for the logged-in account — including
-    the Super Administrator, per the spec's "Super Administrator should
-    also be able to change the password" requirement."""
+    """Password changes are restricted to the AquaVission Super
+    Administrator account only — no other account, regardless of its
+    permissions, can change any password (its own included) through this
+    endpoint or through /api/staff/accounts/<id>/reset-password below.
+    Only AquaVission may change its own password here."""
+    account = request.staff_account
+    if not account.get("is_super_admin"):
+        return jsonify({"error": "Only the AquaVission Super Administrator account can change a password. "
+                                  "Ask a Super Administrator for help."}), 403
+
     body = request.get_json(force=True) or {}
     current_password = body.get("current_password") or ""
     new_password = body.get("new_password") or ""
     if not new_password or len(new_password) < 6:
         return jsonify({"error": "New password must be at least 6 characters."}), 400
 
-    account = request.staff_account
     full = db.get_account_by_id(account["id"])
     from werkzeug.security import check_password_hash
     if not check_password_hash(full["password_hash"], current_password):
@@ -1044,8 +1050,15 @@ def api_staff_accounts_status(account_id):
 
 
 @app.route("/api/staff/accounts/<account_id>/reset-password", methods=["POST"])
-@require_permission("edit_accounts")
+@require_login
 def api_staff_accounts_reset_password(account_id):
+    """Resetting ANY account's password — including your own — is
+    restricted to the AquaVission Super Administrator account only.
+    Holding "edit_accounts" is not enough by itself; only AquaVission can
+    reset passwords, no exceptions."""
+    if not request.staff_account.get("is_super_admin"):
+        return jsonify({"error": "Only the AquaVission Super Administrator account can reset a password."}), 403
+
     target = db.get_account_by_id(account_id)
     if target is None:
         return jsonify({"error": "Account not found."}), 404
