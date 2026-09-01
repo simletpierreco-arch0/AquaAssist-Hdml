@@ -1,33 +1,43 @@
 """
 db.py — persistent storage for AquaAssist.
 
-Backed by SQLite by default or Postgres if DATABASE_URL is set. See the
-original project docstring history for the ephemeral-disk rationale.
+Backed by SQLite by default or Postgres if DATABASE_URL is set.
 
-THIS VERSION adds (on top of the original reports/notifications/outages/
-tips/features tables):
-  - `faqs`               — staff-editable knowledge base entries, replacing
-                            the hardcoded FAQS list in app.py.
-  - `unanswered_questions`— questions AquaAssist couldn't find a knowledge-
-                            base match for, logged for staff review.
-  - `chat_events`         — one row per successful/failed /api/chat turn,
-                            used for the staff Overview "conversations
-                            today" counters.
-  - `handoff_requests`    — conversations the bot has flagged for a live
-                            staff member to join (see request_human_handoff
-                            tool in app.py), used to drive the Live Chat
-                            monitor's notification badge.
+THIS VERSION adds (on top of the previous reports/notifications/outages/
+tips/features/faqs/unanswered_questions/chat_events/chat_messages/
+handoff_requests/paused_sessions tables):
+
+  - `staff_accounts`   — individual named staff accounts with a hashed
+                          password, a free-text role label, a JSON list of
+                          granular permission keys, an avatar, and a status
+                          (Active/Disabled). Replaces the old shared
+                          STAFF_PASSCODE model entirely.
+  - `staff_sessions`   — bearer tokens issued on login (X-Staff-Token
+                          header), so "passcode in every request" becomes
+                          "log in once, use a token".
+  - `audit_log`        — one row per administrative action (account
+                          created/disabled/deleted, permission changed,
+                          password reset, content published, report status
+                          changed, etc.) for accountability.
+  - `report_notes`     — internal, staff-only notes attached to a report
+                          (separate from the customer-facing description),
+                          backing the "Add Internal Notes" permission.
+
+See app.py for the permission-checking decorators and route wiring.
 """
 
 import csv
 import json
 import logging
 import os
+import secrets
 import threading
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from werkzeug.security import generate_password_hash, check_password_hash
 
 BASE_DIR = Path(__file__).parent
 DATA_DIR = Path(os.environ.get("DATA_DIR", str(BASE_DIR / "data")))
@@ -71,6 +81,60 @@ DEFAULT_TIPS = [
     "Spot a leak on the street, a burst main, or a damaged hydrant? Report it to NAWASA right away via AquaAssist or call (473) 440-2155.",
     "Regularly check your faucets and toilets for silent leaks — a toilet that keeps running after flushing can waste hundreds of gallons a month.",
 ]
+
+# =======================================================================
+# NEW: Granular staff permissions — the single source of truth for what
+# permission keys exist, their display labels, and which category they
+# render under in the Staff Accounts permissions panel. app.py imports
+# PERMISSION_DEFS / ALL_PERMISSION_KEYS from here so the backend decorator
+# checks and the /api/staff/permission-defs response (used by the frontend
+# to render checkboxes) never drift apart.
+# =======================================================================
+PERMISSION_DEFS = [
+    # key, category, label
+    ("view_website_management", "Website", "View Website Management"),
+    ("edit_website_content", "Website", "Edit Website Content"),
+    ("create_edit_news", "Website", "Create/Edit News"),
+    ("manage_service_alerts", "Website", "Manage Service Alerts"),
+    ("manage_water_tips", "Website", "Manage Water Service Tips"),
+    ("manage_events", "Website", "Manage Events"),
+    ("publish_content", "Website", "Publish Content"),
+    ("view_website_analytics", "Website", "View Website Analytics"),
+
+    ("view_aquaassist_dashboard", "AquaAssist", "View AquaAssist Dashboard"),
+    ("manage_faqs", "AquaAssist", "Manage FAQs"),
+    ("manage_knowledge_base", "AquaAssist", "Manage Knowledge Base"),
+    ("review_unanswered_questions", "AquaAssist", "Review Unanswered Questions"),
+    ("manage_aquaassist_announcements", "AquaAssist", "Manage AquaAssist Announcements"),
+    ("manage_quick_actions", "AquaAssist", "Manage Quick Actions"),
+    ("manage_chatbot_settings", "AquaAssist", "Manage Chatbot Settings"),
+    ("view_chat_analytics", "AquaAssist", "View Chat Analytics"),
+    ("manage_voice_settings", "AquaAssist", "Manage Voice Settings"),
+
+    ("view_reports", "Reports & Operations", "View Reports"),
+    ("view_reporting_map", "Reports & Operations", "View Reporting Map"),
+    ("create_reports", "Reports & Operations", "Create Reports"),
+    ("edit_reports", "Reports & Operations", "Edit Reports"),
+    ("assign_reports", "Reports & Operations", "Assign Reports"),
+    ("change_report_status", "Reports & Operations", "Change Report Status"),
+    ("add_internal_notes", "Reports & Operations", "Add Internal Notes"),
+    ("view_report_photos", "Reports & Operations", "View Report Photos"),
+    ("view_report_statistics", "Reports & Operations", "View Report Statistics"),
+
+    ("manage_staff_accounts", "Administration", "Manage Staff Accounts"),
+    ("create_accounts", "Administration", "Create Accounts"),
+    ("edit_accounts", "Administration", "Edit Accounts"),
+    ("disable_accounts", "Administration", "Disable Accounts"),
+    ("delete_accounts", "Administration", "Delete Accounts"),
+    ("manage_permissions", "Administration", "Manage Permissions"),
+    ("system_settings", "Administration", "System Settings"),
+    ("api_integration_settings", "Administration", "API/Integration Settings"),
+]
+ALL_PERMISSION_KEYS = [p[0] for p in PERMISSION_DEFS]
+_VALID_PERMISSION_SET = set(ALL_PERMISSION_KEYS)
+
+SUPER_ADMIN_USERNAME = "AquaVission"
+DEFAULT_SUPER_ADMIN_PASSWORD = os.environ.get("AQUAVISSION_PASSWORD", "Admin123")
 
 
 # ---------------------------------------------------------------------
@@ -160,9 +224,8 @@ def _rows(cur_rows):
 def init_db():
     """Creates all tables if they don't exist yet, migrates any legacy CSV
     data in, and seeds default tips/features on first run. Safe to call
-    every time the app starts. FAQ seeding is a separate call
-    (_seed_faqs_if_empty) made from app.py, since app.py owns the default
-    FAQ list."""
+    every time the app starts. FAQ seeding and the Super Administrator
+    seed are separate calls made from app.py."""
     with _cursor(commit=True) as cur:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS reports (
@@ -204,7 +267,6 @@ def init_db():
                 id INTEGER PRIMARY KEY, data TEXT
             )
         """)
-        # --- NEW TABLES ---
         cur.execute("""
             CREATE TABLE IF NOT EXISTS faqs (
                 id TEXT PRIMARY KEY,
@@ -226,13 +288,6 @@ def init_db():
                 had_error TEXT
             )
         """)
-        # `chat_messages` holds the full per-session transcript (customer,
-        # bot, AND staff turns) so the Staff Portal's Live Chat monitor can
-        # show a real conversation feed and staff can drop a message into
-        # an in-progress chat. `id` is an autoincrementing integer (not a
-        # uuid, unlike the other tables) specifically so the widget can poll
-        # "give me every staff message with id greater than the last one I
-        # saw" cheaply.
         if USE_POSTGRES:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS chat_messages (
@@ -249,10 +304,6 @@ def init_db():
                     content TEXT, timestamp TEXT
                 )
             """)
-        # `handoff_requests` — one open row per session currently flagged
-        # for a live staff member to take over. Created by the bot's
-        # request_human_handoff tool (app.py), cleared automatically the
-        # moment a staff member sends a message into that session.
         cur.execute("""
             CREATE TABLE IF NOT EXISTS handoff_requests (
                 id TEXT PRIMARY KEY,
@@ -260,17 +311,59 @@ def init_db():
                 timestamp TEXT, resolved TEXT
             )
         """)
-        # `paused_sessions` — presence of a row means the bot must NOT
-        # respond in that session; a staff member is handling it directly
-        # in the Live Chat monitor. Toggled by the pause/resume buttons
-        # there (see api_session_pause/api_session_resume in app.py) and
-        # checked on every /api/chat request before the agent is invoked.
         cur.execute("""
             CREATE TABLE IF NOT EXISTS paused_sessions (
                 session_id TEXT PRIMARY KEY,
                 paused_at TEXT
             )
         """)
+
+        # --- NEW TABLES: accounts, sessions, audit log, report notes ---
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS staff_accounts (
+                id TEXT PRIMARY KEY,
+                full_name TEXT, username TEXT, username_lower TEXT,
+                password_hash TEXT, role TEXT, permissions TEXT,
+                avatar TEXT, status TEXT, is_super_admin TEXT,
+                created_at TEXT, updated_at TEXT, created_by TEXT
+            )
+        """)
+        if USE_POSTGRES:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id SERIAL PRIMARY KEY,
+                    timestamp TEXT, staff_user TEXT, action TEXT,
+                    item TEXT, details TEXT
+                )
+            """)
+        else:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT, staff_user TEXT, action TEXT,
+                    item TEXT, details TEXT
+                )
+            """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS staff_sessions (
+                token TEXT PRIMARY KEY,
+                account_id TEXT, created_at TEXT, last_seen_at TEXT
+            )
+        """)
+        if USE_POSTGRES:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS report_notes (
+                    id SERIAL PRIMARY KEY,
+                    reference TEXT, author TEXT, note TEXT, timestamp TEXT
+                )
+            """)
+        else:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS report_notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    reference TEXT, author TEXT, note TEXT, timestamp TEXT
+                )
+            """)
 
     migrate_legacy_storage()
     _seed_tips_if_empty()
@@ -426,6 +519,28 @@ def delete_report(reference):
     return deleted
 
 
+# =======================================================================
+# NEW: Report notes (internal, staff-only — backs "Add Internal Notes")
+# =======================================================================
+def add_report_note(reference, author, note):
+    ph = _ph()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"INSERT INTO report_notes (reference, author, note, timestamp) VALUES ({ph},{ph},{ph},{ph})",
+            (reference, author, note, now),
+        )
+    return {"reference": reference, "author": author, "note": note, "timestamp": now}
+
+
+def load_report_notes(reference):
+    ph = _ph()
+    with _cursor() as cur:
+        cur.execute(f"SELECT * FROM report_notes WHERE reference = {ph} ORDER BY id ASC", (reference,))
+        rows = _rows(cur.fetchall())
+    return rows
+
+
 # ---------------------------------------------------------------------
 # Notifications
 # ---------------------------------------------------------------------
@@ -473,12 +588,6 @@ def delete_outage(outage_id):
 
 
 def get_active_outages_for_parish(parish, today=None):
-    """Case/whitespace-insensitive on purpose: the bot may pass a parish
-    string built from natural-language conversation rather than picked
-    from the exact staff dropdown, so an exact `=` match here was silently
-    dropping real, active alerts. app.py's check_active_outages tool also
-    normalizes common spellings before calling this, but this comparison
-    is the real safety net."""
     if today is None:
         today = datetime.now(GRENADA_TZ).strftime("%Y-%m-%d")
     ph = _ph()
@@ -607,7 +716,7 @@ def save_features(updates):
 
 
 # =======================================================================
-# NEW: Knowledge base (FAQs)
+# Knowledge base (FAQs)
 # =======================================================================
 def _faq_out(row):
     return {
@@ -618,9 +727,6 @@ def _faq_out(row):
 
 
 def _seed_faqs_if_empty(default_faqs):
-    """default_faqs: list of {"category","q","a"} dicts — app.py passes its
-    existing FAQS constant in here once, at startup. No-ops after the first
-    successful run (staff edits from then on live in the table)."""
     with _cursor() as cur:
         cur.execute("SELECT COUNT(*) AS c FROM faqs")
         count = cur.fetchone()["c"]
@@ -694,7 +800,7 @@ def delete_faq(faq_id):
 
 
 # =======================================================================
-# NEW: Unanswered questions
+# Unanswered questions
 # =======================================================================
 def _unanswered_out(row):
     return {
@@ -750,7 +856,7 @@ def delete_unanswered_question(q_id):
 
 
 # =======================================================================
-# NEW: Chat events (conversation stats for the staff Overview panel)
+# Chat events (conversation stats for the staff Overview panel)
 # =======================================================================
 def log_chat_event(session_id, territory, had_error=False):
     ph = _ph()
@@ -764,13 +870,9 @@ def log_chat_event(session_id, territory, had_error=False):
 
 
 # =======================================================================
-# NEW: Chat transcripts (Live Chat monitor in the Staff Portal)
+# Chat transcripts (Live Chat monitor in the Staff Portal)
 # =======================================================================
 def log_chat_message(session_id, territory, role, content):
-    """role is 'user', 'assistant', or 'staff'. Called on every customer
-    message, every bot reply, and every message a staff member sends into
-    a live conversation, so the Staff Portal has a complete transcript to
-    display and app.js's widget-side poller has staff turns to pick up."""
     ph = _ph()
     with _cursor(commit=True) as cur:
         cur.execute(
@@ -781,9 +883,6 @@ def log_chat_message(session_id, territory, role, content):
 
 
 def load_recent_sessions(limit=50):
-    """One row per session_id, most-recently-active first, for the Staff
-    Portal's Live Chat session list. Cheap-ish aggregate query; fine at the
-    scale this app runs at."""
     with _cursor() as cur:
         cur.execute("SELECT * FROM chat_messages ORDER BY id DESC LIMIT 2000")
         rows = _rows(cur.fetchall())
@@ -815,11 +914,6 @@ def load_session_messages(session_id):
 
 
 def load_new_staff_messages(session_id, after_id=0):
-    """Used by the customer-facing widget to poll for staff messages that
-    were dropped into their conversation out-of-band. Only returns 'staff'
-    role rows — the widget already has its own user/assistant turns from
-    the normal /api/chat request/response cycle, so re-sending those would
-    just duplicate bubbles."""
     ph = _ph()
     with _cursor() as cur:
         cur.execute(
@@ -848,14 +942,7 @@ def get_chat_stats_today():
 
 
 # =======================================================================
-# NEW: Live-agent handoff requests
-#
-# The bot calls request_human_handoff (app.py) whenever a customer asks
-# for a person, or the bot can't help them. That creates a row here; it's
-# what powers the Live Chat monitor's notification badge and the
-# Dashboard's "Needs a human" metric. A session can only have one *open*
-# handoff row at a time (create_handoff_request is idempotent), and it's
-# cleared the moment a staff member replies into that session.
+# Live-agent handoff requests
 # =======================================================================
 def _handoff_out(row):
     return {
@@ -872,7 +959,7 @@ def create_handoff_request(session_id, territory, reason):
                     (session_id, "0"))
         existing = cur.fetchone()
     if existing:
-        return None  # already flagged and still open — don't duplicate
+        return None
     row = {
         "id": uuid.uuid4().hex[:8], "session_id": session_id, "territory": territory or "",
         "reason": (reason or "").strip() or "Customer needs a live representative.",
@@ -896,8 +983,6 @@ def load_open_handoffs():
 
 
 def resolve_handoff_for_session(session_id):
-    """Called whenever a staff member sends a message into a session —
-    clears any open handoff flag for it, since a human has now stepped in."""
     ph = _ph()
     with _cursor(commit=True) as cur:
         cur.execute(
@@ -908,10 +993,7 @@ def resolve_handoff_for_session(session_id):
 
 
 # =======================================================================
-# NEW: Pause/resume — staff can stop the bot from replying in a session
-# while they handle it live, then hand it back. Presence of a row in
-# paused_sessions means "the bot must not respond here right now"; checked
-# on every /api/chat request before the agent is invoked.
+# Pause/resume
 # =======================================================================
 def pause_session(session_id):
     ph = _ph()
@@ -950,11 +1032,7 @@ def load_paused_session_ids():
 
 
 # =======================================================================
-# NEW: Deleting conversations — staff Live Chat cleanup. Removes the
-# transcript plus any related handoff/pause/stats rows for that session so
-# nothing orphaned is left behind (the session_id itself may still exist
-# in the in-memory LangGraph checkpointer in app.py — that's cleared
-# separately, on the same request, since it isn't part of this DB layer).
+# Deleting conversations
 # =======================================================================
 def delete_session_messages(session_id):
     ph = _ph()
@@ -968,10 +1046,289 @@ def delete_session_messages(session_id):
 
 
 def delete_all_sessions():
-    """Wipes every conversation transcript, handoff flag, pause flag, and
-    chat-stats event. Used by the Live Chat monitor's "Clear all" action."""
     with _cursor(commit=True) as cur:
         cur.execute("DELETE FROM chat_messages")
         cur.execute("DELETE FROM handoff_requests")
         cur.execute("DELETE FROM paused_sessions")
         cur.execute("DELETE FROM chat_events")
+
+
+# =======================================================================
+# NEW: Staff accounts, sessions (tokens), permissions, audit log
+# =======================================================================
+def _clean_permissions(permissions):
+    """Keeps only known permission keys, de-duplicated, in canonical order."""
+    if not permissions:
+        return []
+    given = set(permissions) & _VALID_PERMISSION_SET
+    return [k for k in ALL_PERMISSION_KEYS if k in given]
+
+
+def _account_out(row, include_hash=False):
+    try:
+        perms = json.loads(row.get("permissions") or "[]")
+    except Exception:
+        perms = []
+    out = {
+        "id": row["id"], "full_name": row["full_name"], "username": row["username"],
+        "role": row.get("role") or "", "permissions": perms,
+        "avatar": row.get("avatar") or "", "status": row.get("status") or "Active",
+        "is_super_admin": row.get("is_super_admin") == "1",
+        "created_at": row.get("created_at", ""), "updated_at": row.get("updated_at", ""),
+        "created_by": row.get("created_by") or "",
+    }
+    if include_hash:
+        out["password_hash"] = row.get("password_hash")
+    return out
+
+
+def account_has_permission(account, key):
+    """account is the dict shape returned by _account_out(). Super Admins
+    always have every permission, regardless of what's stored — this is
+    what makes "Super Administrator must always have full access" true
+    even if a permission is added to PERMISSION_DEFS later."""
+    if account.get("is_super_admin"):
+        return True
+    return key in (account.get("permissions") or [])
+
+
+def _seed_super_admin_if_missing():
+    """Creates the AquaVission Super Administrator account on first run,
+    with full access to every current and future permission key. No-op if
+    an account with this username already exists (so this is safe to call
+    on every startup)."""
+    ph = _ph()
+    with _cursor() as cur:
+        cur.execute(f"SELECT id FROM staff_accounts WHERE username_lower = {ph}",
+                    (SUPER_ADMIN_USERNAME.lower(),))
+        existing = cur.fetchone()
+    if existing:
+        return
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    row = {
+        "id": uuid.uuid4().hex[:10],
+        "full_name": "AquaVission", "username": SUPER_ADMIN_USERNAME,
+        "username_lower": SUPER_ADMIN_USERNAME.lower(),
+        "password_hash": generate_password_hash(DEFAULT_SUPER_ADMIN_PASSWORD),
+        "role": "Super Administrator",
+        "permissions": json.dumps(ALL_PERMISSION_KEYS),
+        "avatar": "👑", "status": "Active", "is_super_admin": "1",
+        "created_at": now, "updated_at": now, "created_by": "system",
+    }
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"INSERT INTO staff_accounts (id, full_name, username, username_lower, password_hash, role, "
+            f"permissions, avatar, status, is_super_admin, created_at, updated_at, created_by) "
+            f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (row["id"], row["full_name"], row["username"], row["username_lower"], row["password_hash"],
+             row["role"], row["permissions"], row["avatar"], row["status"], row["is_super_admin"],
+             row["created_at"], row["updated_at"], row["created_by"]),
+        )
+    logger.warning(
+        "Seeded the AquaVission Super Administrator account with the configured default "
+        "password. Log in and change it immediately via Staff Accounts \u2192 Change Password "
+        "(or set AQUAVISSION_PASSWORD before first startup)."
+    )
+
+
+def get_account_by_username(username):
+    ph = _ph()
+    with _cursor() as cur:
+        cur.execute(f"SELECT * FROM staff_accounts WHERE username_lower = {ph}", ((username or "").lower(),))
+        row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def get_account_by_id(account_id):
+    ph = _ph()
+    with _cursor() as cur:
+        cur.execute(f"SELECT * FROM staff_accounts WHERE id = {ph}", (account_id,))
+        row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def load_staff_accounts():
+    with _cursor() as cur:
+        cur.execute("SELECT * FROM staff_accounts ORDER BY (is_super_admin = '1') DESC, created_at ASC")
+        rows = _rows(cur.fetchall())
+    return [_account_out(r) for r in rows]
+
+
+def create_staff_account(full_name, username, password, role, permissions, avatar="", created_by=""):
+    if get_account_by_username(username) is not None:
+        return None, "That username is already taken."
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    row = {
+        "id": uuid.uuid4().hex[:10], "full_name": full_name, "username": username,
+        "username_lower": username.lower(), "password_hash": generate_password_hash(password),
+        "role": role or "Staff", "permissions": json.dumps(_clean_permissions(permissions)),
+        "avatar": avatar or "🙂", "status": "Active", "is_super_admin": "0",
+        "created_at": now, "updated_at": now, "created_by": created_by,
+    }
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"INSERT INTO staff_accounts (id, full_name, username, username_lower, password_hash, role, "
+            f"permissions, avatar, status, is_super_admin, created_at, updated_at, created_by) "
+            f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (row["id"], row["full_name"], row["username"], row["username_lower"], row["password_hash"],
+             row["role"], row["permissions"], row["avatar"], row["status"], row["is_super_admin"],
+             row["created_at"], row["updated_at"], row["created_by"]),
+        )
+    return _account_out(row), None
+
+
+def update_staff_account(account_id, full_name=None, username=None, role=None, avatar=None):
+    """Edits identity fields only — not permissions or status, which have
+    their own dedicated (and separately permissioned) update functions
+    below so each can be audit-logged with its own action label."""
+    existing = get_account_by_id(account_id)
+    if existing is None:
+        return None, "Account not found."
+    if username and username.lower() != existing["username_lower"]:
+        clash = get_account_by_username(username)
+        if clash is not None and clash["id"] != account_id:
+            return None, "That username is already taken."
+    new_vals = {
+        "full_name": full_name if full_name is not None else existing["full_name"],
+        "username": username if username is not None else existing["username"],
+        "role": role if role is not None else existing["role"],
+        "avatar": avatar if avatar is not None else existing["avatar"],
+    }
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"UPDATE staff_accounts SET full_name={ph}, username={ph}, username_lower={ph}, role={ph}, "
+            f"avatar={ph}, updated_at={ph} WHERE id={ph}",
+            (new_vals["full_name"], new_vals["username"], new_vals["username"].lower(),
+             new_vals["role"], new_vals["avatar"], now, account_id),
+        )
+    return get_account_by_id(account_id) and _account_out(get_account_by_id(account_id)), None
+
+
+def update_staff_permissions(account_id, permissions):
+    ph = _ph()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"UPDATE staff_accounts SET permissions={ph}, updated_at={ph} WHERE id={ph}",
+            (json.dumps(_clean_permissions(permissions)), now, account_id),
+        )
+        return cur.rowcount > 0
+
+
+def set_staff_status(account_id, status):
+    """status is 'Active' or 'Disabled'. A disabled account's historical
+    actions/reports are untouched — only future login/session validity is
+    affected (see get_account_for_token, which rejects disabled accounts)."""
+    ph = _ph()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"UPDATE staff_accounts SET status={ph}, updated_at={ph} WHERE id={ph}",
+            (status, now, account_id),
+        )
+        return cur.rowcount > 0
+
+
+def set_staff_password(account_id, new_password):
+    ph = _ph()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"UPDATE staff_accounts SET password_hash={ph}, updated_at={ph} WHERE id={ph}",
+            (generate_password_hash(new_password), now, account_id),
+        )
+        return cur.rowcount > 0
+
+
+def delete_staff_account(account_id):
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"DELETE FROM staff_accounts WHERE id = {ph}", (account_id,))
+        deleted = cur.rowcount > 0
+        cur.execute(f"DELETE FROM staff_sessions WHERE account_id = {ph}", (account_id,))
+    return deleted
+
+
+def verify_login(username, password):
+    """Returns the account dict (with password_hash) on success, or None
+    on a bad username/password/disabled account. Callers must check
+    status themselves if they need a specific error message."""
+    row = get_account_by_username(username)
+    if row is None:
+        return None
+    if not check_password_hash(row["password_hash"], password):
+        return None
+    return row
+
+
+# ---------------------------------------------------------------------
+# Sessions (bearer tokens issued on login)
+# ---------------------------------------------------------------------
+def create_session(account_id):
+    token = secrets.token_urlsafe(32)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"INSERT INTO staff_sessions (token, account_id, created_at, last_seen_at) VALUES ({ph},{ph},{ph},{ph})",
+            (token, account_id, now, now),
+        )
+    return token
+
+
+def get_account_for_token(token):
+    """Returns the account dict (public shape, no password_hash) for a
+    valid session token belonging to an Active account, or None. Also
+    touches last_seen_at, best-effort."""
+    if not token:
+        return None
+    ph = _ph()
+    with _cursor() as cur:
+        cur.execute(f"SELECT account_id FROM staff_sessions WHERE token = {ph}", (token,))
+        srow = cur.fetchone()
+    if srow is None:
+        return None
+    account = get_account_by_id(srow["account_id"])
+    if account is None or account.get("status") != "Active":
+        return None
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _cursor(commit=True) as cur:
+        cur.execute(f"UPDATE staff_sessions SET last_seen_at = {ph} WHERE token = {ph}", (now, token))
+    return _account_out(account)
+
+
+def delete_session(token):
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"DELETE FROM staff_sessions WHERE token = {ph}", (token,))
+
+
+def delete_sessions_for_account(account_id):
+    """Called when an account is disabled or deleted, so any tokens it
+    already issued stop working immediately rather than staying valid
+    until they happen to be checked against a disabled account."""
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"DELETE FROM staff_sessions WHERE account_id = {ph}", (account_id,))
+
+
+# ---------------------------------------------------------------------
+# Audit log
+# ---------------------------------------------------------------------
+def log_audit(staff_user, action, item="", details=""):
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"INSERT INTO audit_log (timestamp, staff_user, action, item, details) VALUES ({ph},{ph},{ph},{ph},{ph})",
+            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), staff_user, action, item, details),
+        )
+
+
+def load_audit_log(limit=300):
+    with _cursor() as cur:
+        cur.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT %d" % int(limit))
+        rows = _rows(cur.fetchall())
+    return rows
