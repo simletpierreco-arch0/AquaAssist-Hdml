@@ -484,6 +484,7 @@
             <div id="overviewCards" class="metrics-row"></div>
             <div id="overviewCardsAqua" class="metrics-row"></div>
 
+            <div id="changePasswordSection" style="display:none;">
             <div class="section-label">🔑 My Account</div>
             <div class="card" style="max-width:420px;">
               <form id="changePasswordForm">
@@ -495,6 +496,7 @@
               </form>
               <p id="changePasswordError" class="error-text" style="display:none;"></p>
               <p id="changePasswordSuccess" class="hint-text" style="display:none;color:#2E9E5B;">✓ Password changed.</p>
+            </div>
             </div>
           </section>
 
@@ -675,8 +677,11 @@
                 <input id="accountFullName" type="text" required />
                 <label class="field-label">Username</label>
                 <input id="accountUsername" type="text" required />
-                <label class="field-label">Password</label>
-                <input id="accountPassword" type="password" minlength="6" />
+                <div id="accountPasswordWrap">
+                  <label class="field-label">Password</label>
+                  <input id="accountPassword" type="password" minlength="6" />
+                  <p class="hint-text" id="accountPasswordHint" style="display:none;">Only the AquaVission Super Administrator account can set or reset a password — ask AquaVission to do this from the accounts table.</p>
+                </div>
                 <div class="form-row-2">
                   <div>
                     <label class="field-label">Role (display label)</label>
