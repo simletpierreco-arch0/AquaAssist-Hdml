@@ -25,7 +25,53 @@ PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "aquaassist-knowledg
 PINECONE_CLOUD = os.environ.get("PINECONE_CLOUD", "aws")
 PINECONE_REGION = os.environ.get("PINECONE_REGION", "us-east-1")
 
-_checkpointer = InMemorySaver()
+GRENADA_DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+
+
+def _build_checkpointer():
+    """LangGraph's checkpointer is what actually gives the chatbot memory
+    of a conversation — separate from db.py's `chat_messages` transcript
+    table (which is just what staff see in the Live Chat monitor). If
+    DATABASE_URL isn't set, this falls back to plain in-memory storage,
+    which is fine for local dev but means the bot forgets every
+    in-progress conversation on every restart/redeploy in production.
+    When DATABASE_URL IS set (e.g. Neon), checkpoints are persisted to the
+    same Postgres database everything else already uses, so conversation
+    memory survives restarts too. Never raises — a checkpointer setup
+    failure falls back to in-memory with a logged error rather than
+    crashing the whole app."""
+    if not GRENADA_DATABASE_URL:
+        logger.warning(
+            "DATABASE_URL is not set — LangGraph conversation memory will live only "
+            "in this process's RAM and is lost on every restart/redeploy. Reports, "
+            "FAQs, staff accounts, etc. in db.py are unaffected by this; this is "
+            "specifically the chatbot's own turn-by-turn memory. Set DATABASE_URL "
+            "to persist it too."
+        )
+        return InMemorySaver()
+    try:
+        from psycopg_pool import ConnectionPool
+        from langgraph.checkpoint.postgres import PostgresSaver
+
+        pool_kwargs = {"autocommit": True, "prepare_threshold": 0}
+        if "sslmode=" not in GRENADA_DATABASE_URL:
+            pool_kwargs["sslmode"] = "require"
+        pool = ConnectionPool(conninfo=GRENADA_DATABASE_URL, max_size=10, kwargs=pool_kwargs)
+        checkpointer = PostgresSaver(pool)
+        checkpointer.setup()  # idempotent — creates the checkpoint tables on first run only
+        logger.info("LangGraph checkpoints are persisted to Postgres — conversation memory now survives restarts.")
+        return checkpointer
+    except Exception as e:
+        logger.error(
+            "Failed to set up a Postgres-backed LangGraph checkpointer (%s) — "
+            "falling back to in-memory (conversation memory will be lost on "
+            "restart). Check DATABASE_URL and that psycopg/"
+            "langgraph-checkpoint-postgres are installed.", e,
+        )
+        return InMemorySaver()
+
+
+_checkpointer = _build_checkpointer()
 
 _embeddings = None
 _pinecone_index = None
