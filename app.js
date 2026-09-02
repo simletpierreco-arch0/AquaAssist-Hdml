@@ -1696,7 +1696,7 @@ const SECTION_PERMISSIONS = {
   "website-tips": ["manage_water_tips", "view_website_management"],
   "website-preview": ["view_website_management"],
   "aqua-livechat": ["access_live_chat", "view_aquaassist_dashboard"],
-  "aqua-kb": ["manage_faqs", "manage_knowledge_base"],
+  "aqua-kb": ["manage_faqs", "manage_knowledge_base", "sync_website_content"],
   "aqua-unanswered": ["review_unanswered_questions"],
   "aqua-settings": ["manage_chatbot_settings"],
   "reports-map": ["view_reporting_map"],
@@ -1742,6 +1742,7 @@ function setupStaffSidebar() {
       if (btn.dataset.staffSection === "staff-accounts") loadStaffAccountsAdmin();
       if (btn.dataset.staffSection === "audit-log") loadAuditLog();
       if (btn.dataset.staffSection === "chatbot-name") $("#chatbotNameInput").value = state.chatbotName;
+      if (btn.dataset.staffSection === "aqua-kb") loadWebsiteContentAdmin();
     });
   });
 }
@@ -2497,6 +2498,66 @@ async function loadAuditLog() {
 }
 
 // ---------------------------------------------------------------------
+// NEW: nawasa.gd website content sync (Knowledge Base admin panel)
+// ---------------------------------------------------------------------
+async function loadWebsiteContentAdmin() {
+  const res = await staffFetch("/api/website-content");
+  if (res.status === 401) { staffLogout(); return; }
+  if (res.status === 403) { $("#websiteSyncSummary").textContent = ""; return; }
+  const pages = await res.json();
+  renderWebsiteContentList(pages);
+}
+
+function renderWebsiteContentList(pages) {
+  const summaryEl = $("#websiteSyncSummary");
+  const wrap = $("#websiteContentList");
+  if (!pages.length) {
+    if (summaryEl) summaryEl.textContent = "Not synced yet.";
+    if (wrap) wrap.innerHTML = `<p class="hint-text">No pages synced yet — click "Sync now" below.</p>`;
+    return;
+  }
+  const okCount = pages.filter((p) => p.status === "ok").length;
+  const latest = pages.reduce((a, b) => (a.fetched_at > b.fetched_at ? a : b), pages[0]);
+  if (summaryEl) summaryEl.textContent = `${okCount}/${pages.length} pages synced — last attempt ${latest.fetched_at}.`;
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  pages.forEach((p) => {
+    const row = document.createElement("div");
+    row.className = "tip-manage-row";
+    const statusBadge = p.status === "ok" ? `<span style="color:#2E9E5B;">✓ ${p.chars} chars</span>` : `<span style="color:#D64545;">✗ ${escapeHtml(p.error || "failed")}</span>`;
+    row.innerHTML = `
+      <span class="tip-manage-text">
+        <b>${escapeHtml(p.title)}</b> — ${statusBadge}<br>
+        <span class="hint-text">${escapeHtml(p.url)} · last attempt ${escapeHtml(p.fetched_at)}</span>
+      </span>
+    `;
+    wrap.appendChild(row);
+  });
+}
+
+function setupWebsiteSync() {
+  const btn = $("#websiteSyncBtn");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = "🔄 Syncing...";
+    try {
+      const res = await staffFetch("/api/website-content/sync", { method: "POST" });
+      const data = await res.json();
+      if (data.error) {
+        alert(`Sync failed: ${data.error}`);
+      }
+      await loadWebsiteContentAdmin();
+      await loadFaqsAdmin(); // knowledge base entries changed too
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  });
+}
+
+// ---------------------------------------------------------------------
 // Staff portal core (login, feature toggles, reports, map, outages, tips)
 // ---------------------------------------------------------------------
 function setupStaffPortal() {
@@ -2505,6 +2566,7 @@ function setupStaffPortal() {
   setupLiveChatMonitor();
   setupStaffNotifySetting();
   setupStaffAccountsUI();
+  setupWebsiteSync();
 
   $("#staffLoginBtn").addEventListener("click", async () => {
     const username = $("#staffUsernameInput").value.trim();
@@ -2611,6 +2673,7 @@ function staffLoginSuccess() {
   loadTipsAdmin();
   loadFeaturesAdmin();
   loadFaqsAdmin();
+  loadWebsiteContentAdmin();
   loadUnansweredAdmin();
   refreshOverview();
   loadOverviewAquaStats();
