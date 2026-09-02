@@ -2015,6 +2015,8 @@ function closeLiveChatSession() {
   if (liveChatTranscriptTimer) { clearInterval(liveChatTranscriptTimer); liveChatTranscriptTimer = null; }
   $("#liveChatActive").style.display = "none";
   $("#liveChatEmptyState").style.display = "block";
+  const suggWrap = $("#liveChatSuggestions");
+  if (suggWrap) suggWrap.innerHTML = "";
 }
 
 async function refreshLiveChatPauseButton() {
@@ -2035,6 +2037,7 @@ function openLiveChatSession(sessionId) {
   $("#liveChatSessionLabel").textContent = sessionId;
   loadLiveChatTranscript();
   refreshLiveChatPauseButton();
+  loadLiveChatSuggestions();
   if (liveChatTranscriptTimer) clearInterval(liveChatTranscriptTimer);
   liveChatTranscriptTimer = setInterval(loadLiveChatTranscript, 5000);
   $$(".livechat-session-row").forEach((r) => r.classList.remove("active"));
@@ -2061,6 +2064,52 @@ function renderLiveChatTranscript(messages) {
     wrap.appendChild(row);
   });
   if (wasAtBottom || messages.length <= 2) wrap.scrollTop = wrap.scrollHeight;
+}
+
+// ---------------------------------------------------------------------
+// NEW: Staff reply suggestions ("💡" button + auto-load on open). Clicking
+// a suggestion only fills the reply box — it never sends on its own, so
+// staff always review/edit before anything reaches the customer.
+// ---------------------------------------------------------------------
+async function loadLiveChatSuggestions() {
+  const sessionId = state.currentLiveChatSession;
+  if (!sessionId) return;
+  const wrap = $("#liveChatSuggestions");
+  if (!wrap) return;
+  wrap.innerHTML = `<span class="hint-text livechat-suggestions-loading">💡 Thinking of reply ideas...</span>`;
+  try {
+    const res = await staffFetch(`/api/sessions/${encodeURIComponent(sessionId)}/suggestions`);
+    if (sessionId !== state.currentLiveChatSession) return; // switched conversations while this was in flight
+    if (!res.ok) { wrap.innerHTML = ""; return; }
+    const data = await res.json();
+    renderLiveChatSuggestions(data.suggestions || []);
+  } catch (err) {
+    if (sessionId === state.currentLiveChatSession) wrap.innerHTML = "";
+  }
+}
+
+function renderLiveChatSuggestions(suggestions) {
+  const wrap = $("#liveChatSuggestions");
+  if (!wrap) return;
+  if (!suggestions.length) {
+    wrap.innerHTML = `<span class="hint-text">No suggestions right now — write your own reply below.</span>`;
+    return;
+  }
+  wrap.innerHTML = "";
+  suggestions.forEach((text) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "livechat-suggestion-chip";
+    chip.textContent = text;
+    chip.title = "Click to use this as a starting point — edit before sending";
+    chip.addEventListener("click", () => {
+      const input = $("#liveChatReplyText");
+      input.value = text;
+      input.focus();
+      input.setSelectionRange(text.length, text.length);
+    });
+    wrap.appendChild(chip);
+  });
 }
 
 function setupLiveChatMonitor() {
@@ -2092,7 +2141,11 @@ function setupLiveChatMonitor() {
     loadLiveChatTranscript();
     loadLiveChatSessions();
     loadHandoffs();
+    loadLiveChatSuggestions(); // context changed — refresh the reply ideas
   });
+
+  const suggestBtn = $("#liveChatSuggestBtn");
+  if (suggestBtn) suggestBtn.addEventListener("click", () => loadLiveChatSuggestions());
 
   $("#liveChatRefreshBtn").addEventListener("click", () => {
     loadLiveChatSessions();
