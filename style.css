@@ -1011,3 +1011,24 @@ img, svg, video, canvas { max-width: 100%; height: auto; }
 @media (min-width: 781px) and (max-width: 1024px) {
   .staff-sidebar { flex-basis: 180px; }
 }
+
+/* =========================================================================
+   NEW: Live Chat staff reply suggestions
+   ========================================================================= */
+.livechat-suggestions {
+  display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 .5rem;
+  min-height: 0;
+}
+.livechat-suggestions:empty { margin: 0; }
+.livechat-suggestions-loading { font-style: italic; }
+.livechat-suggestion-chip {
+  text-align: left; max-width: 100%;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--text); border-radius: 12px; padding: .45rem .7rem;
+  font-size: .8rem; line-height: 1.35;
+}
+.livechat-suggestion-chip:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+#liveChatSuggestBtn { flex-shrink: 0; padding: .5rem .7rem; font-size: 1rem; }
