@@ -112,6 +112,7 @@ PERMISSION_DEFS = [
     ("manage_chatbot_settings", "AquaAssist", "Manage Chatbot Settings"),
     ("view_chat_analytics", "AquaAssist", "View Chat Analytics"),
     ("manage_voice_settings", "AquaAssist", "Manage Voice Settings"),
+    ("sync_website_content", "AquaAssist", "Sync Website Content (nawasa.gd)"),
 
     ("view_reports", "Reports & Operations", "View Reports"),
     ("view_reporting_map", "Reports & Operations", "View Reporting Map"),
@@ -367,6 +368,18 @@ def init_db():
                     reference TEXT, author TEXT, note TEXT, timestamp TEXT
                 )
             """)
+        # `website_pages` holds imported content from nawasa.gd — one row
+        # per source page, refreshed by a periodic/on-demand sync (see
+        # website_sync.py) rather than fetched live during a customer
+        # conversation. This gets merged into the same knowledge base the
+        # chatbot already searches (see app.py's _build_kb_entries()), so
+        # the bot never depends on nawasa.gd being reachable at chat time.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS website_pages (
+                url TEXT PRIMARY KEY,
+                title TEXT, content TEXT, fetched_at TEXT, status TEXT, error TEXT
+            )
+        """)
 
     migrate_legacy_storage()
     _seed_tips_if_empty()
@@ -831,6 +844,49 @@ def delete_faq(faq_id):
     with _cursor(commit=True) as cur:
         cur.execute(f"DELETE FROM faqs WHERE id = {ph}", (faq_id,))
         return cur.rowcount > 0
+
+
+# =======================================================================
+# NEW: Imported nawasa.gd website content
+#
+# One row per source URL. `status` is "ok" or "error" (a page that failed
+# to fetch keeps its last-known-good `content` rather than being wiped —
+# a transient site outage during a sync shouldn't erase what the bot
+# already knew). See website_sync.py for the fetch/parse logic.
+# =======================================================================
+def save_website_page(url, title, content, status="ok", error=""):
+    ph = _ph()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _cursor() as cur:
+        cur.execute(f"SELECT url FROM website_pages WHERE url = {ph}", (url,))
+        existing = cur.fetchone()
+    with _cursor(commit=True) as cur:
+        if existing:
+            if status == "ok":
+                cur.execute(
+                    f"UPDATE website_pages SET title={ph}, content={ph}, fetched_at={ph}, status={ph}, error={ph} WHERE url={ph}",
+                    (title, content, now, status, error, url),
+                )
+            else:
+                # Fetch failed — keep the last-good title/content, just
+                # record that this attempt failed and when.
+                cur.execute(
+                    f"UPDATE website_pages SET fetched_at={ph}, status={ph}, error={ph} WHERE url={ph}",
+                    (now, status, error, url),
+                )
+        else:
+            cur.execute(
+                f"INSERT INTO website_pages (url, title, content, fetched_at, status, error) "
+                f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph})",
+                (url, title, content, now, status, error),
+            )
+
+
+def load_website_pages():
+    with _cursor() as cur:
+        cur.execute("SELECT * FROM website_pages ORDER BY url ASC")
+        rows = _rows(cur.fetchall())
+    return rows
 
 
 # =======================================================================
