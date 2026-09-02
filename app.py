@@ -1347,6 +1347,19 @@ def api_session_messages(session_id):
     return jsonify(db.load_session_messages(session_id))
 
 
+@app.route("/api/sessions/<session_id>/suggestions")
+@require_any_permission("access_live_chat", "view_aquaassist_dashboard")
+def api_session_suggestions(session_id):
+    """Best-effort staff reply drafts for the Live Chat monitor — see
+    agent.suggest_staff_replies for why this is a separate, non-agentic
+    call. Always returns 200 with a (possibly empty) list rather than
+    erroring, since the monitor should degrade gracefully with no
+    suggestions rather than show a broken state."""
+    messages = db.load_session_messages(session_id)
+    suggestions = agent.suggest_staff_replies(messages)
+    return jsonify({"suggestions": suggestions})
+
+
 @app.route("/api/sessions/<session_id>/staff-message", methods=["POST"])
 @require_any_permission("access_live_chat", "manage_chatbot_settings")
 def api_session_staff_message(session_id):
