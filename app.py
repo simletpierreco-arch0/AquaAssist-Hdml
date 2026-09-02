@@ -44,6 +44,7 @@ from langchain_core.tools import tool
 
 import agent
 import db
+import website_sync
 from db import (
     save_report, load_reports, update_report_status, track_report, delete_report,
     save_notification_signup, load_notifications,
@@ -323,7 +324,7 @@ WHAT YOU DO NOT HAVE ACCESS TO:
 AquaAssist is not connected to NAWASA's billing or account systems. You do not have access to any individual customer's actual account balance, consumption figures, or meter readings, and you must never state or estimate a number for these. If a customer asks for their specific balance or reading, say plainly that you can't pull up their account directly, and explain how they can check it instead (their NAWASA bill, the office, or by phone).
 
 KNOWLEDGE BASE — use the search_knowledge_base tool, don't guess:
-NAWASA's official FAQ knowledge base (new connections, billing, disconnections, water usage & leaks, general info) is NOT pre-loaded into this prompt — it lives in a searchable knowledge base. Whenever a customer asks something that sounds like a policy, cost, process, or general-information question, call the search_knowledge_base tool with their question (or a short paraphrase of it) and answer using what it returns. Treat what it returns as authoritative — prefer it over general knowledge, and never contradict it. Paraphrase naturally in your own words rather than reciting it verbatim. If it returns no close match, say so plainly rather than guessing.
+NAWASA's official FAQ knowledge base (new connections, billing, disconnections, water usage & leaks, general info) is NOT pre-loaded into this prompt — it lives in a searchable knowledge base that also includes content periodically imported from NAWASA's official website, nawasa.gd. Whenever a customer asks something that sounds like a policy, cost, process, or general-information question, call the search_knowledge_base tool with their question (or a short paraphrase of it) and answer using what it returns. Treat what it returns as authoritative — prefer it over general knowledge, and never contradict it. Paraphrase naturally in your own words rather than reciting it verbatim. If it returns no close match, say so plainly rather than guessing. If a customer wants more detail than what's in the knowledge base, you may point them to nawasa.gd for the full page.
 
 LIVE STAFF HANDOFF — use the request_human_handoff tool when you can't help:
 Use the request_human_handoff tool whenever a customer explicitly asks to speak with a person, representative, or agent, or whenever you genuinely cannot resolve what they need (e.g. the knowledge base has no matching entry and the customer is still stuck after you've said so, a billing dispute needs a manual account review, or the situation calls for judgment you don't have). Calling this tool alerts NAWASA staff in the Live Chat monitor and flags the conversation so a person can step in and reply directly in this same chat — you do not need to end the conversation or stop responding, staff will simply join in. After calling it, tell the customer plainly (in your own words, matching the current business-hours status) that a NAWASA representative has been notified and will follow up here, or call/WhatsApp them directly if that's more urgent. Don't call this tool for questions you can actually answer yourself — it's for genuine dead ends or explicit requests for a human, not a substitute for trying the knowledge base first.
@@ -356,11 +357,53 @@ db._seed_faqs_if_empty(FAQS)
 db._seed_super_admin_if_missing()
 
 
+def _build_kb_entries():
+    """Everything the chatbot's knowledge-base search draws on: staff-
+    authored FAQs plus the last-synced content from nawasa.gd, in the same
+    {category, q, a} shape agent.seed_knowledge_base() already expects.
+    A page that has never successfully synced (status != "ok", empty
+    content) is skipped rather than feeding empty/error text into the
+    embedding index."""
+    entries = list(db.load_faqs(include_disabled=False))
+    for page in db.load_website_pages():
+        if page.get("status") == "ok" and (page.get("content") or "").strip():
+            entries.append({"category": "NAWASA Website", "q": page["title"], "a": page["content"]})
+    return entries
+
+
 def _reseed_knowledge_base():
-    agent.seed_knowledge_base(db.load_faqs(include_disabled=False), force=True)
+    agent.seed_knowledge_base(_build_kb_entries(), force=True)
 
 
-agent.seed_knowledge_base(db.load_faqs(include_disabled=False))
+def _sync_website_and_reseed():
+    """Runs the nawasa.gd fetch, then rebuilds the Pinecone index so the
+    chatbot picks up whatever changed. Safe to call from a background
+    thread or a request handler — website_sync.sync_all never raises."""
+    try:
+        summary = website_sync.sync_all(db)
+        _reseed_knowledge_base()
+        return summary
+    except Exception as e:
+        logger.error("Website content sync failed: %s", e)
+        return {"ok": 0, "failed": 0, "total": 0, "error": str(e)}
+
+
+WEBSITE_SYNC_INTERVAL_SECONDS = int(os.environ.get("WEBSITE_SYNC_INTERVAL_SECONDS", str(12 * 60 * 60)))
+
+
+def _website_sync_loop():
+    # Run once shortly after startup (not blocking app boot — this runs in
+    # its own thread), then again on a fixed interval. A slow or
+    # unreachable nawasa.gd on any given run just means stale-but-present
+    # content until the next attempt — never a crash, never a blocked
+    # request path.
+    while True:
+        _sync_website_and_reseed()
+        time.sleep(WEBSITE_SYNC_INTERVAL_SECONDS)
+
+
+agent.seed_knowledge_base(_build_kb_entries())
+threading.Thread(target=_website_sync_loop, daemon=True).start()
 
 SESSIONS = {}  # session_id -> {"graph": compiled LangGraph agent, "territory": str}
 LAST_REPORT = {}
@@ -1213,6 +1256,38 @@ def api_faqs_delete(faq_id):
     _reseed_knowledge_base()
     db.log_audit(_actor_label(), "AquaAssist FAQ deleted", item=faq_id)
     return jsonify({"deleted": faq_id})
+
+
+# =======================================================================
+# NEW: nawasa.gd website content sync — lets the chatbot's knowledge base
+# include official site content without ever fetching it live during a
+# customer conversation (see website_sync.py for the reliability
+# rationale).
+# =======================================================================
+@app.route("/api/website-content", methods=["GET"])
+@require_any_permission("sync_website_content", "manage_faqs", "manage_knowledge_base")
+def api_website_content_list():
+    pages = db.load_website_pages()
+    # Trim the full page text for the admin list view — staff need to see
+    # what's synced and when, not re-read the whole page here.
+    return jsonify([
+        {
+            "url": p["url"], "title": p["title"], "status": p["status"],
+            "fetched_at": p["fetched_at"], "error": p.get("error") or "",
+            "preview": (p.get("content") or "")[:220],
+            "chars": len(p.get("content") or ""),
+        }
+        for p in pages
+    ])
+
+
+@app.route("/api/website-content/sync", methods=["POST"])
+@require_permission("sync_website_content")
+def api_website_content_sync():
+    summary = _sync_website_and_reseed()
+    db.log_audit(_actor_label(), "Website content synced",
+                 details=f"{summary.get('ok', 0)} ok, {summary.get('failed', 0)} failed")
+    return jsonify(summary)
 
 
 # =======================================================================
