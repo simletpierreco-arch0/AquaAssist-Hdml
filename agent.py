@@ -4,8 +4,10 @@ Unchanged from the existing project — carried forward as-is. See the
 project README for details on the LangChain agent + Pinecone RAG wiring.
 """
 
+import json
 import logging
 import os
+import re
 
 from langchain.agents import create_agent
 from langchain_core.tools import tool
@@ -182,3 +184,58 @@ def invoke_agent(graph, thread_id, content_blocks):
     )
     final_message = result["messages"][-1]
     return _extract_reply_text(final_message.content)
+
+
+# =======================================================================
+# NEW: Staff reply suggestions for the Live Chat monitor.
+#
+# Deliberately a single, non-agentic completion call — no tools, no
+# checkpointer, no shared state with the customer-facing conversation
+# graph. Kept fully separate on purpose: a slow or failed suggestion
+# call must never affect the actual chatbot, and this never writes
+# anything or sends anything on its own — it only proposes drafts for a
+# human to review, edit, and choose to send (or not).
+# =======================================================================
+def suggest_staff_replies(transcript_messages, max_suggestions=3):
+    """transcript_messages: list of {"role","content",...} dicts from
+    db.load_session_messages() (role is "user"/"assistant"/"staff").
+    Returns up to max_suggestions short reply drafts, or [] — never
+    raises — if GEMINI_API_KEY isn't configured or the call fails for any
+    reason. Suggestions are a convenience; the Live Chat monitor must
+    keep working perfectly well without them."""
+    if not GEMINI_API_KEY:
+        return []
+    if not transcript_messages:
+        return []
+    try:
+        model = ChatGoogleGenerativeAI(model=MODEL_NAME, temperature=0.4, google_api_key=GEMINI_API_KEY)
+        role_labels = {"user": "Customer", "assistant": "AquaAssist (bot)", "staff": "Staff"}
+        convo_lines = [
+            f"{role_labels.get(m.get('role'), m.get('role'))}: {m.get('content', '')}"
+            for m in transcript_messages[-12:]  # recent context is what matters; keeps the prompt small and fast
+        ]
+        convo_text = "\n".join(convo_lines)
+
+        prompt = (
+            "You are helping a NAWASA (National Water and Sewerage Authority, Grenada) customer "
+            "service representative reply to a customer in a live chat. Here is the conversation "
+            "so far, oldest first:\n\n"
+            f"{convo_text}\n\n"
+            f"Suggest {max_suggestions} short, genuinely different reply drafts the staff member "
+            "could send next, in a warm, professional customer-service tone. Each must be a complete, "
+            "ready-to-send reply on its own (not a fragment), under 40 words, and take a distinct "
+            "angle where the situation allows it (e.g. one apologetic/reassuring, one action-oriented "
+            "with concrete next steps, one asking a clarifying question) — never near-duplicates of "
+            "each other. Reply with ONLY a JSON array of strings — no markdown fences, no numbering, "
+            "no explanation before or after it."
+        )
+        result = model.invoke(prompt)
+        text = result.content if isinstance(result.content, str) else _extract_reply_text(result.content)
+        text = re.sub(r"^```(?:json)?\s*|\s*```\s*$", "", text.strip())
+        suggestions = json.loads(text)
+        if not isinstance(suggestions, list):
+            return []
+        return [str(s).strip() for s in suggestions if str(s).strip()][:max_suggestions]
+    except Exception as e:
+        logger.warning("suggest_staff_replies failed (non-fatal — Live Chat still works without it): %s", e)
+        return []
