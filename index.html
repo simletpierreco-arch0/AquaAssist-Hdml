@@ -581,6 +581,14 @@
           <!-- ===== AQUAASSIST > Knowledge Base ===== -->
           <section id="staffSection-aqua-kb" class="staff-section">
             <div class="section-label" style="margin-top:0;">📚 Knowledge Base / FAQs</div>
+
+            <div class="card">
+              <div class="section-label" style="margin-top:0;">🌐 nawasa.gd Website Content</div>
+              <p class="hint-text">AquaAssist's knowledge base also includes content periodically imported from the official NAWASA website, so the bot can draw on it without depending on nawasa.gd being reachable mid-conversation. <span id="websiteSyncSummary">Not synced yet.</span></p>
+              <button type="button" id="websiteSyncBtn" class="btn-secondary">🔄 Sync now</button>
+              <div id="websiteContentList" class="tip-manage-list" style="margin-top:.8rem;"></div>
+            </div>
+
             <div class="card">
               <form id="faqForm">
                 <label class="field-label">Category</label>
