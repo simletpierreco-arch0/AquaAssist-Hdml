@@ -799,6 +799,21 @@
   </div>
 </div>
 
+<!-- ===================== REPORT NOTES MODAL (internal, staff-only) ===================== -->
+<div id="reportNotesModal" class="camera-modal" style="display:none;">
+  <div class="camera-modal-inner attachment-viewer-inner">
+    <div class="camera-modal-head">
+      <span id="reportNotesTitle">Internal notes</span>
+      <button type="button" id="reportNotesCloseBtn" class="camera-close-btn">✕</button>
+    </div>
+    <div id="reportNotesList" class="tip-manage-list" style="margin-bottom:.8rem;"></div>
+    <form id="reportNotesForm">
+      <textarea id="reportNotesInput" rows="2" placeholder="Add an internal note — customers never see this..."></textarea>
+      <button type="submit" class="btn-primary" style="width:100%;">Add note</button>
+    </form>
+  </div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="app.js"></script>
 </body>
