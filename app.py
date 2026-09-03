@@ -377,15 +377,30 @@ def _reseed_knowledge_base():
 
 def _sync_website_and_reseed():
     """Runs the nawasa.gd fetch, then rebuilds the Pinecone index so the
-    chatbot picks up whatever changed. Safe to call from a background
-    thread or a request handler — website_sync.sync_all never raises."""
+    chatbot picks up whatever changed.
+
+    BUG FIX: this used to wrap BOTH steps in one try/except, so if the
+    knowledge-base reseed step failed for any reason (Pinecone hiccup,
+    auth issue) — even after the website fetch itself had already
+    succeeded and saved pages to the database — the whole function
+    returned {"ok": 0, "failed": 0, "total": 0}, making it look to staff
+    like nothing was synced at all, when the pages were in fact fetched
+    and saved fine. The two steps are now reported independently."""
     try:
         summary = website_sync.sync_all(db)
-        _reseed_knowledge_base()
-        return summary
     except Exception as e:
-        logger.error("Website content sync failed: %s", e)
-        return {"ok": 0, "failed": 0, "total": 0, "error": str(e)}
+        logger.error("Website content fetch failed: %s", e)
+        return {"ok": 0, "failed": 0, "total": 0, "kb_reseed_ok": False, "error": str(e)}
+
+    try:
+        _reseed_knowledge_base()
+        summary["kb_reseed_ok"] = True
+    except Exception as e:
+        logger.error("Website pages were fetched, but rebuilding the knowledge base failed: %s", e)
+        summary["kb_reseed_ok"] = False
+        summary["kb_reseed_error"] = str(e)
+
+    return summary
 
 
 WEBSITE_SYNC_INTERVAL_SECONDS = int(os.environ.get("WEBSITE_SYNC_INTERVAL_SECONDS", str(12 * 60 * 60)))
@@ -1285,8 +1300,10 @@ def api_website_content_list():
 @require_permission("sync_website_content")
 def api_website_content_sync():
     summary = _sync_website_and_reseed()
-    db.log_audit(_actor_label(), "Website content synced",
-                 details=f"{summary.get('ok', 0)} ok, {summary.get('failed', 0)} failed")
+    detail = f"{summary.get('ok', 0)}/{summary.get('total', 0)} pages fetched"
+    if summary.get("kb_reseed_ok") is False:
+        detail += " — but the knowledge base rebuild failed, so search may still show old content"
+    db.log_audit(_actor_label(), "Website content synced", details=detail)
     return jsonify(summary)
 
 
