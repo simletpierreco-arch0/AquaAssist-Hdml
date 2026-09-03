@@ -69,15 +69,35 @@ def fetch_page(url):
     try:
         resp = requests.get(
             url, timeout=REQUEST_TIMEOUT_SECONDS,
-            headers={"User-Agent": "AquaAssist-KnowledgeSync/1.0 (+https://nawasa.gd/)"},
+            headers={
+                # BUG FIX: a custom bot-style User-Agent made some pages
+                # come back as HTTP 202 (Accepted) instead of 200 — likely
+                # a WAF/CDN soft-flagging an unrecognized client. A
+                # standard browser UA is far less likely to be treated
+                # differently than a real visitor's request.
+                "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"),
+                "Accept-Language": "en-US,en;q=0.9",
+            },
         )
     except requests.RequestException as e:
         return None, f"request failed: {e}"
-    if resp.status_code != 200:
+    # BUG FIX: this used to require EXACTLY status 200, so a page that
+    # genuinely succeeded but returned 202 (Accepted) — as NAWASA's site
+    # apparently does — was wrongly marked as a failure even though real
+    # content came back. Any 2xx is a success; only fail outside that range.
+    if not (200 <= resp.status_code < 300):
         return None, f"HTTP {resp.status_code}"
     text = _html_to_text(resp.text)
     if len(text) < 40:
         return None, "page returned little or no readable text"
+    # A WAF/anti-bot challenge page (e.g. Cloudflare's "Just a moment...")
+    # can pass the length check above while still being useless content —
+    # catch the common phrasing so we don't silently store a challenge
+    # page as if it were the real article.
+    lowered = text[:400].lower()
+    if any(phrase in lowered for phrase in ("just a moment", "checking your browser", "enable javascript and cookies")):
+        return None, "response looked like a bot/security challenge page, not real content"
     return text[:MAX_CONTENT_CHARS], None
 
 
