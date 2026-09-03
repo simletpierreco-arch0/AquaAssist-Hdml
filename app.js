@@ -2600,6 +2600,8 @@ function setupWebsiteSync() {
       const data = await res.json();
       if (data.error) {
         alert(`Sync failed: ${data.error}`);
+      } else if (data.kb_reseed_ok === false) {
+        alert(`Fetched ${data.ok}/${data.total} pages from nawasa.gd successfully, but rebuilding the searchable knowledge base failed (${data.kb_reseed_error || "unknown error"}). The pages are saved — try syncing again in a moment to retry the knowledge-base rebuild.`);
       }
       await loadWebsiteContentAdmin();
       await loadFaqsAdmin(); // knowledge base entries changed too
