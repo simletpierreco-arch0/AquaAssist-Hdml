@@ -1958,6 +1958,7 @@ function renderUnansweredList(items) {
 let liveChatTranscriptTimer = null;
 let liveChatSessionsTimer = null;
 let handoffsTimer = null;
+let staffAccountRefreshTimer = null;
 let knownOpenHandoffIds = new Set();
 
 function formatChatRole(role) {
@@ -2621,6 +2622,7 @@ function setupWebsiteSync() {
 // ---------------------------------------------------------------------
 function setupStaffPortal() {
   setupReportsTableActions();
+  setupReportNotes();
   setupStaffSidebar();
   setupLiveChatMonitor();
   setupStaffNotifySetting();
@@ -2722,6 +2724,33 @@ function setupStaffPortal() {
   });
 }
 
+// ---------------------------------------------------------------------
+// NEW: Keep a logged-in staffer's own permissions in sync. Without this,
+// an account (or its permissions) changed by someone else would silently
+// keep the OLD access/sidebar until the affected person logged out and
+// back in — confusing for both "you were granted X but don't see it yet"
+// and, more importantly, "you were supposed to lose access to Y but
+// still see the button" (the backend already blocks the actual request
+// either way — this only fixes what the UI shows).
+// ---------------------------------------------------------------------
+async function refreshMyStaffAccount() {
+  try {
+    const res = await staffFetch("/api/staff/me");
+    if (res.status === 401 || res.status === 403) {
+      staffLogout();
+      return;
+    }
+    if (!res.ok) return;
+    const account = await res.json();
+    const changed = JSON.stringify(account) !== JSON.stringify(state.staffAccount);
+    if (changed) {
+      state.staffAccount = account;
+      sessionStorage.setItem("aqua_staff_account", JSON.stringify(account));
+      applyStaffRoleVisibility();
+    }
+  } catch (err) { /* best-effort background sync — a network hiccup here is not worth surfacing */ }
+}
+
 function staffLoginSuccess() {
   $("#staffLoginCard").style.display = "none";
   $("#staffDashboard").style.display = "block";
@@ -2743,6 +2772,8 @@ function staffLoginSuccess() {
   loadHandoffs(true);
   if (handoffsTimer) clearInterval(handoffsTimer);
   handoffsTimer = setInterval(() => loadHandoffs(false), 8000);
+  if (staffAccountRefreshTimer) clearInterval(staffAccountRefreshTimer);
+  staffAccountRefreshTimer = setInterval(refreshMyStaffAccount, 30000);
 }
 
 function staffLogout() {
@@ -2752,6 +2783,7 @@ function staffLogout() {
   if (liveChatTranscriptTimer) { clearInterval(liveChatTranscriptTimer); liveChatTranscriptTimer = null; }
   if (liveChatSessionsTimer) { clearInterval(liveChatSessionsTimer); liveChatSessionsTimer = null; }
   if (handoffsTimer) { clearInterval(handoffsTimer); handoffsTimer = null; }
+  if (staffAccountRefreshTimer) { clearInterval(staffAccountRefreshTimer); staffAccountRefreshTimer = null; }
   knownOpenHandoffIds = new Set();
   sessionStorage.removeItem("aqua_staff_token");
   sessionStorage.removeItem("aqua_staff_account");
@@ -2888,8 +2920,8 @@ function renderStatusMetrics(reports) {
 
 function renderReportsTable(reports) {
   const thead = $("#reportsTable thead"), tbody = $("#reportsTable tbody");
-  const cols = ["reference", "timestamp", "name", "phone", "location", "issue_type", "severity", "status", "attachment", "delete"];
-  thead.innerHTML = `<tr>${cols.map((c) => `<th>${c === "delete" ? "" : c}</th>`).join("")}</tr>`;
+  const cols = ["reference", "timestamp", "name", "phone", "location", "issue_type", "severity", "status", "attachment", "notes", "delete"];
+  thead.innerHTML = `<tr>${cols.map((c) => `<th>${c === "delete" || c === "notes" ? "" : c}</th>`).join("")}</tr>`;
   tbody.innerHTML = "";
   staffReportsCache = {};
   reports.slice().reverse().forEach((r) => {
@@ -2897,6 +2929,7 @@ function renderReportsTable(reports) {
     const tr = document.createElement("tr");
     tr.innerHTML = cols.map((c) => {
       if (c === "attachment") return `<td>${buildAttachmentCell(r)}</td>`;
+      if (c === "notes") return `<td><button type="button" class="report-notes-btn btn-secondary" data-ref="${escapeHtml(r.reference)}" title="Internal notes" style="padding:.3rem .5rem;font-size:.78rem;">📝</button></td>`;
       if (c === "delete") return `<td>${hasPerm("edit_reports") ? `<button type="button" class="delete-report-btn" data-ref="${escapeHtml(r.reference)}" title="Delete this report">🗑️</button>` : ""}</td>`;
       return `<td>${escapeHtml(String(r[c] ?? ""))}</td>`;
     }).join("");
@@ -2951,6 +2984,11 @@ function setupReportsTableActions() {
       openAttachmentViewer(report.attachment_mime, report.attachment_data, report.reference);
       return;
     }
+    const notesBtn = e.target.closest(".report-notes-btn");
+    if (notesBtn) {
+      openReportNotes(notesBtn.dataset.ref);
+      return;
+    }
     const deleteBtn = e.target.closest(".delete-report-btn");
     if (deleteBtn) {
       const ref = deleteBtn.dataset.ref;
@@ -2959,6 +2997,84 @@ function setupReportsTableActions() {
       await staffFetch(`/api/reports/${encodeURIComponent(ref)}`, { method: "DELETE" });
       loadReports();
       refreshOverview();
+    }
+  });
+}
+
+// ---------------------------------------------------------------------
+// NEW: Internal report notes — the backend and permission for this
+// already existed, but there was no way to actually reach it from the
+// Staff Portal. This wires it up.
+// ---------------------------------------------------------------------
+let reportNotesCurrentRef = null;
+
+async function openReportNotes(reference) {
+  reportNotesCurrentRef = reference;
+  $("#reportNotesTitle").textContent = `Internal notes — ${reference}`;
+  $("#reportNotesInput").value = "";
+  const form = $("#reportNotesForm");
+  form.style.display = hasPerm("add_internal_notes") ? "" : "none";
+  $("#reportNotesModal").style.display = "flex";
+  await loadReportNotes(reference);
+}
+
+async function loadReportNotes(reference) {
+  const listEl = $("#reportNotesList");
+  listEl.innerHTML = `<p class="hint-text">Loading...</p>`;
+  const res = await staffFetch(`/api/reports/${encodeURIComponent(reference)}/notes`);
+  if (!res.ok) {
+    listEl.innerHTML = `<p class="hint-text">Couldn't load notes.</p>`;
+    return;
+  }
+  const notes = await res.json();
+  renderReportNotesList(notes);
+}
+
+function renderReportNotesList(notes) {
+  const listEl = $("#reportNotesList");
+  if (!notes.length) {
+    listEl.innerHTML = `<p class="hint-text">No internal notes yet.</p>`;
+    return;
+  }
+  listEl.innerHTML = notes.map((n) => `
+    <div class="tip-manage-row" style="display:block;">
+      <div class="tip-manage-text">${escapeHtml(n.note)}</div>
+      <div class="hint-text" style="margin-top:.25rem;">— ${escapeHtml(n.author)} · ${escapeHtml(n.timestamp)}</div>
+    </div>
+  `).join("");
+}
+
+function closeReportNotes() {
+  $("#reportNotesModal").style.display = "none";
+  reportNotesCurrentRef = null;
+}
+
+function setupReportNotes() {
+  $("#reportNotesCloseBtn").addEventListener("click", closeReportNotes);
+  $("#reportNotesModal").addEventListener("click", (e) => {
+    if (e.target.id === "reportNotesModal") closeReportNotes();
+  });
+  $("#reportNotesForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!reportNotesCurrentRef) return;
+    const input = $("#reportNotesInput");
+    const note = input.value.trim();
+    if (!note) return;
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    try {
+      const res = await staffFetch(`/api/reports/${encodeURIComponent(reportNotesCurrentRef)}/notes`, {
+        method: "POST", body: JSON.stringify({ note }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || "Couldn't add note.");
+        return;
+      }
+      input.value = "";
+      await loadReportNotes(reportNotesCurrentRef);
+    } finally {
+      submitBtn.disabled = false;
     }
   });
 }
