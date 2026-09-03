@@ -1090,9 +1090,20 @@ def api_staff_accounts_update(account_id):
         return jsonify({"error": "The Super Administrator account can't be edited by other accounts."}), 403
 
     body = request.get_json(force=True) or {}
+
+    new_username = body.get("username")
+    if target.get("is_super_admin") == "1" and new_username is not None and new_username.strip().lower() != target["username_lower"]:
+        # The startup seed (db._seed_super_admin_if_missing) looks for the
+        # exact username "AquaVission" and creates a fresh one with the
+        # default password if it's missing — so renaming this account
+        # would silently spawn a second Super Administrator on next
+        # restart. Keep the username fixed; everything else about the
+        # account (full name, role label, avatar, password) can change.
+        return jsonify({"error": "The Super Administrator's username can't be changed."}), 400
+
     account, error = db.update_staff_account(
         account_id,
-        full_name=body.get("full_name"), username=body.get("username"),
+        full_name=body.get("full_name"), username=new_username,
         role=body.get("role"), avatar=body.get("avatar"),
     )
     if error:
