@@ -2378,7 +2378,15 @@ function openAccountEditor(account) {
   $("#accountFormTitle").textContent = account ? `Edit ${account.username}` : "Create staff account";
   $("#accountFullName").value = account ? account.full_name : "";
   $("#accountUsername").value = account ? account.username : "";
-  $("#accountUsername").disabled = !!account;
+  // BUG FIX: this used to always disable the username field on edit,
+  // AND submitAccountForm() never even sent it — so username could never
+  // actually be changed from the UI despite the backend fully supporting
+  // it. Now editable for everyone except the Super Administrator: renaming
+  // AquaVission away from that exact username would make the startup seed
+  // (see db._seed_super_admin_if_missing) create a brand-new second
+  // Super Administrator account with the default password on next
+  // restart, since it only checks for that literal username.
+  $("#accountUsername").disabled = !!(account && account.is_super_admin);
   $("#accountRole").value = account ? account.role : "";
   $("#accountAvatar").value = account ? account.avatar : "💧";
   $("#accountPassword").value = "";
@@ -2427,7 +2435,7 @@ async function submitAccountForm(e) {
 
   if (state.editingAccountId) {
     const res = await staffFetch(`/api/staff/accounts/${state.editingAccountId}`, {
-      method: "PATCH", body: JSON.stringify({ full_name, role, avatar }),
+      method: "PATCH", body: JSON.stringify({ full_name, username, role, avatar }),
     });
     const data = await res.json();
     if (data.error) { errEl.textContent = data.error; errEl.style.display = "block"; return; }
