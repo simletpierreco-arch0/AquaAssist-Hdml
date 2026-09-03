@@ -122,7 +122,20 @@ def seed_knowledge_base(faqs, force=False):
     global _static_faq_fallback_text
     _static_faq_fallback_text = _format_faqs_as_text(faqs)
 
-    index = _get_pinecone_index()
+    try:
+        index = _get_pinecone_index()
+    except Exception as e:
+        # BUG FIX: this call used to sit outside the try/except below, so
+        # any Pinecone connectivity/auth/index-creation failure raised
+        # straight up through seed_knowledge_base() uncaught. Since this
+        # function is called from app.py's _reseed_knowledge_base() inside
+        # a broader try/except, that meant a Pinecone hiccup could make
+        # the *entire* website-content sync look like it fetched nothing
+        # (see app.py's _sync_website_and_reseed fix) even when the
+        # website pages themselves were fetched and saved just fine.
+        logger.error("Could not reach Pinecone to seed the knowledge base (%s) — "
+                     "falling back to the static FAQ/website text dump for now.", e)
+        return
     if index is None:
         logger.warning(
             "PINECONE_API_KEY is not set — RAG knowledge base is INACTIVE. "
@@ -137,6 +150,22 @@ def seed_knowledge_base(faqs, force=False):
             if existing_count >= len(faqs):
                 logger.info("Pinecone index %r already seeded (%d vectors) — skipping.", PINECONE_INDEX_NAME, existing_count)
                 return
+        else:
+            # BUG FIX: vectors were previously upserted with purely
+            # positional ids (faq-0, faq-1, ...) and NEVER deleted. If the
+            # entry list later shrinks (an FAQ deleted, or a synced
+            # website page that fails to re-fetch and drops out), the old
+            # vectors at the now-unused higher ids were left behind
+            # forever and could keep surfacing in search results long
+            # after their source content was gone. A forced reseed is
+            # meant to be a full rebuild, so clear the index first.
+            try:
+                index.delete(delete_all=True)
+            except Exception as e:
+                # Some Pinecone setups error on delete_all against an
+                # already-empty index — that's fine, just means there was
+                # nothing stale to clear.
+                logger.info("Pinecone delete-all before reseed: %s (continuing)", e)
         embeddings = _get_embeddings()
         texts = [f"{f['q']} {f['a']}" for f in faqs]
         vectors_list = embeddings.embed_documents(texts)
@@ -149,7 +178,7 @@ def seed_knowledge_base(faqs, force=False):
             for i, (f, vec) in enumerate(zip(faqs, vectors_list))
         ]
         index.upsert(vectors=vectors)
-        logger.info("Seeded %d FAQ entries into Pinecone index %r.", len(vectors), PINECONE_INDEX_NAME)
+        logger.info("Seeded %d FAQ/website entries into Pinecone index %r.", len(vectors), PINECONE_INDEX_NAME)
     except Exception as e:
         logger.error("Failed to seed Pinecone knowledge base: %s", e)
 
@@ -171,7 +200,15 @@ def make_search_knowledge_base_tool(on_no_match=None):
             The most relevant knowledge base entries for this query, or a
             note that no close match was found.
         """
-        index = _get_pinecone_index()
+        try:
+            index = _get_pinecone_index()
+        except Exception as e:
+            # Same class of bug as seed_knowledge_base above — this used
+            # to be unguarded, so a Pinecone hiccup mid-conversation would
+            # raise out of this tool call entirely instead of gracefully
+            # falling back to the static text dump.
+            logger.error("Could not reach Pinecone for a knowledge-base search (%s) — using static fallback.", e)
+            return _static_faq_fallback_text
         if index is None:
             return _static_faq_fallback_text
         try:
