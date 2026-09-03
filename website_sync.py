@@ -90,7 +90,25 @@ def fetch_page(url):
         return None, f"HTTP {resp.status_code}"
     text = _html_to_text(resp.text)
     if len(text) < 40:
-        return None, "page returned little or no readable text"
+        # DIAGNOSTIC FIX: this used to return a generic "little or no
+        # readable text" with no way to tell WHY — three very different
+        # root causes all look identical from that message alone:
+        #   (a) the page is genuinely empty/broken
+        #   (b) the site renders its content client-side via JavaScript
+        #       (a plain HTTP fetch only ever sees the empty shell HTML,
+        #       since nothing here executes JS)
+        #   (c) the HTML-stripping regex is over-eager and is deleting
+        #       real content along with the markup
+        # A raw-HTML preview makes it possible to tell these apart at a
+        # glance instead of guessing blind.
+        raw_len = len(resp.text)
+        raw_preview = re.sub(r"\s+", " ", resp.text).strip()[:220]
+        looks_js_rendered = bool(re.search(r'id=["\'](root|app|__next|___gatsby)["\']', resp.text, re.IGNORECASE)) \
+            or "you need to enable javascript" in resp.text.lower()
+        hint = " — looks like a JavaScript-rendered page (a plain HTTP fetch can't run its JS)" if looks_js_rendered else ""
+        return None, (f"page returned little or no readable text after stripping HTML "
+                       f"(raw HTML was {raw_len} chars; stripped to {len(text)}){hint}. "
+                       f"Raw preview: {raw_preview!r}")
     # A WAF/anti-bot challenge page (e.g. Cloudflare's "Just a moment...")
     # can pass the length check above while still being useless content —
     # catch the common phrasing so we don't silently store a challenge
