@@ -2578,10 +2578,14 @@ function renderWebsiteContentList(pages) {
     const row = document.createElement("div");
     row.className = "tip-manage-row";
     const statusBadge = p.status === "ok" ? `<span style="color:#2E9E5B;">✓ ${p.chars} chars</span>` : `<span style="color:#D64545;">✗ ${escapeHtml(p.error || "failed")}</span>`;
+    const previewHtml = p.status === "ok" && p.preview
+      ? `<div class="hint-text" style="margin-top:.2rem;">"${escapeHtml(p.preview)}${p.chars > 220 ? "…" : ""}"</div>`
+      : "";
     row.innerHTML = `
       <span class="tip-manage-text">
         <b>${escapeHtml(p.title)}</b> — ${statusBadge}<br>
         <span class="hint-text">${escapeHtml(p.url)} · last attempt ${escapeHtml(p.fetched_at)}</span>
+        ${previewHtml}
       </span>
     `;
     wrap.appendChild(row);
