@@ -7,7 +7,7 @@ also be triggered on demand by staff.
 
 Deliberately crawls a curated, hand-picked list of pages (NAWASA_PAGES
 below) rather than following every link on the site. An open-ended crawl
-of an external site AquaVission doesn't control is a reliability and
+of an external site AquaVision doesn't control is a reliability and
 content-quality risk: it could pull in navigation cruft, unrelated press
 photos, or (if the site's structure changes) garbage text that pollutes
 the knowledge base and degrades answers. Add a URL below when a new page
@@ -88,6 +88,22 @@ def fetch_page(url):
     # content came back. Any 2xx is a success; only fail outside that range.
     if not (200 <= resp.status_code < 300):
         return None, f"HTTP {resp.status_code}"
+
+    # DIAGNOSIS (confirmed against real responses from nawasa.gd): the site
+    # sits behind an anti-bot/WAF layer that serves a tiny meta-refresh
+    # "challenge" page — redirecting to a /.well-known/<vendor>captcha/
+    # path — to any request it doesn't trust, instead of the real page.
+    # This is fundamentally NOT something a plain HTTP client can pass:
+    # requests.get() doesn't execute JS or follow meta-refresh redirects,
+    # and even a headless browser would likely still need to solve an
+    # actual challenge. Detecting this explicitly means the error tells
+    # staff exactly what's going on instead of a generic "empty page".
+    if re.search(r'\.well-known/[a-z0-9_-]*captcha', resp.text, re.IGNORECASE) or \
+       re.search(r'http-equiv=["\']refresh["\']', resp.text, re.IGNORECASE):
+        return None, ("nawasa.gd returned an anti-bot/CAPTCHA challenge page instead of real "
+                       "content — this can't be fetched automatically. It needs NAWASA's IT team "
+                       "to allowlist this server, or use the manual import option below instead.")
+
     text = _html_to_text(resp.text)
     if len(text) < 40:
         # DIAGNOSTIC FIX: this used to return a generic "little or no
