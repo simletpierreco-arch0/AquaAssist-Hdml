@@ -436,7 +436,7 @@
     <!-- ===== LOGIN: username + password (replaces the old shared passcode) ===== -->
     <div id="staffLoginCard" class="card" style="max-width: 380px;">
       <label class="field-label">Username</label>
-      <input id="staffUsernameInput" type="text" autocomplete="username" placeholder="e.g. AquaVission" />
+      <input id="staffUsernameInput" type="text" autocomplete="username" placeholder="e.g. AquaVision" />
       <label class="field-label">Password</label>
       <input id="staffPasswordInputField" type="password" autocomplete="current-password" />
       <button id="staffLoginBtn" class="btn-primary" style="margin-top:0.6rem;width:100%;">Log in</button>
@@ -587,7 +587,19 @@
             <div class="card">
               <div class="section-label" style="margin-top:0;">🌐 nawasa.gd Website Content</div>
               <p class="hint-text">AquaAssist's knowledge base also includes content periodically imported from the official NAWASA website, so the bot can draw on it without depending on nawasa.gd being reachable mid-conversation. <span id="websiteSyncSummary">Not synced yet.</span></p>
+              <p id="websiteCaptchaNote" class="hint-text" style="display:none;color:#C98A11;">⚠️ nawasa.gd is presenting an anti-bot/CAPTCHA challenge to automated requests, so pages can't be fetched automatically right now. Use "Add manually" below instead — open the real page in your own browser, copy the text, and paste it here.</p>
               <button type="button" id="websiteSyncBtn" class="btn-secondary">🔄 Sync now</button>
+              <button type="button" id="websiteManualToggleBtn" class="btn-secondary">✍️ Add manually</button>
+              <div id="websiteManualForm" style="display:none;margin-top:.8rem;">
+                <label class="field-label">Page URL</label>
+                <input id="websiteManualUrl" type="text" placeholder="https://www.nawasa.gd/..." />
+                <label class="field-label">Page title</label>
+                <input id="websiteManualTitle" type="text" placeholder="e.g. About NAWASA — Vision & Mission" />
+                <label class="field-label">Page content (paste the text from the real page)</label>
+                <textarea id="websiteManualContent" rows="6" placeholder="Open the page in your own browser, select the main text, and paste it here..."></textarea>
+                <button type="button" id="websiteManualSaveBtn" class="btn-primary" style="margin-top:.4rem;">Save</button>
+                <p id="websiteManualError" class="error-text" style="display:none;"></p>
+              </div>
               <div id="websiteContentList" class="tip-manage-list" style="margin-top:.8rem;"></div>
             </div>
 
@@ -678,7 +690,7 @@
           <!-- ===== ADMINISTRATION > Staff Accounts ===== -->
           <section id="staffSection-staff-accounts" class="staff-section">
             <div class="section-label" style="margin-top:0;">👑 Staff Accounts</div>
-            <p class="hint-text">AquaVission is the permanent Super Administrator and always has full access — it can't be edited, disabled, or deleted by any other account. Create additional accounts below and grant exactly the sections each person needs.</p>
+            <p class="hint-text">AquaVision is the permanent Super Administrator and always has full access — it can't be edited, disabled, or deleted by any other account. Create additional accounts below and grant exactly the sections each person needs.</p>
             <button type="button" id="createAccountBtn" class="btn-primary" style="margin-bottom:1rem;">＋ Create staff account</button>
 
             <!-- Create / edit form (hidden until needed) -->
@@ -692,7 +704,7 @@
                 <div id="accountPasswordWrap">
                   <label class="field-label">Password</label>
                   <input id="accountPassword" type="password" minlength="6" />
-                  <p class="hint-text" id="accountPasswordHint" style="display:none;">Only the AquaVission Super Administrator account can set or reset a password — ask AquaVission to do this from the accounts table.</p>
+                  <p class="hint-text" id="accountPasswordHint" style="display:none;">Only the AquaVision Super Administrator account can set or reset a password — ask AquaVision to do this from the accounts table.</p>
                 </div>
                 <div class="form-row-2">
                   <div>
@@ -740,10 +752,10 @@
             </div>
           </section>
 
-          <!-- ===== ADMINISTRATION > Chatbot Settings (AquaVission only) ===== -->
+          <!-- ===== ADMINISTRATION > Chatbot Settings (AquaVision only) ===== -->
           <section id="staffSection-chatbot-name" class="staff-section">
             <div class="section-label" style="margin-top:0;">🤖 Chatbot Settings</div>
-            <p class="hint-text">Only the AquaVission Super Administrator account can rename the chatbot. The new name appears everywhere it's shown to customers and staff — no page refresh needed elsewhere, it updates on the next automatic sync (within about a minute).</p>
+            <p class="hint-text">Only the AquaVision Super Administrator account can rename the chatbot. The new name appears everywhere it's shown to customers and staff — no page refresh needed elsewhere, it updates on the next automatic sync (within about a minute).</p>
             <div class="card" style="max-width:420px;">
               <form id="chatbotNameForm">
                 <label class="field-label">Chatbot name</label>
