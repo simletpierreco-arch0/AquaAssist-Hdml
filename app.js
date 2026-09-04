@@ -247,7 +247,7 @@ function startApp() {
     renderHero();
   }, 60000);
 
-  // Near-real-time sync: AquaVission-only changes (chatbot name) and
+  // Near-real-time sync: AquaVision-only changes (chatbot name) and
   // staff-controlled feature toggles/maintenance message propagate to
   // every open customer tab within ~20s, no manual refresh needed.
   setInterval(async () => {
@@ -1704,7 +1704,7 @@ const SECTION_PERMISSIONS = {
   "reports-notify": ["view_reports", "manage_subscribers"],
   "staff-accounts": ["manage_staff_accounts"],
   "audit-log": ["system_settings", "manage_staff_accounts"],
-  "chatbot-name": "SUPER_ADMIN_ONLY", // special-cased below — no permission unlocks this except AquaVission itself
+  "chatbot-name": "SUPER_ADMIN_ONLY", // special-cased below — no permission unlocks this except AquaVision itself
 };
 
 function hasPerm(key) {
@@ -1774,7 +1774,7 @@ function applyStaffRoleVisibility() {
     label.textContent = `${state.staffAccount.avatar || "🙂"} ${state.staffAccount.full_name} — ${state.staffAccount.role}`;
   }
 
-  // Only AquaVission can change a password — hide the self-service panel
+  // Only AquaVision can change a password — hide the self-service panel
   // (and everyone else's Reset Password button, handled elsewhere) for
   // every other account.
   const pwSection = $("#changePasswordSection");
@@ -2382,7 +2382,7 @@ function openAccountEditor(account) {
   // AND submitAccountForm() never even sent it — so username could never
   // actually be changed from the UI despite the backend fully supporting
   // it. Now editable for everyone except the Super Administrator: renaming
-  // AquaVission away from that exact username would make the startup seed
+  // AquaVision away from that exact username would make the startup seed
   // (see db._seed_super_admin_if_missing) create a brand-new second
   // Super Administrator account with the default password on next
   // restart, since it only checks for that literal username.
@@ -2391,10 +2391,10 @@ function openAccountEditor(account) {
   $("#accountAvatar").value = account ? account.avatar : "💧";
   $("#accountPassword").value = "";
   const iAmSuperAdmin = !!(state.staffAccount && state.staffAccount.is_super_admin);
-  // Only AquaVission may set/reset a password. Creating a brand-new
+  // Only AquaVision may set/reset a password. Creating a brand-new
   // account still needs an initial password from whoever has
   // create_accounts; changing an EXISTING account's password does not —
-  // that's restricted to AquaVission only, so hide the field entirely
+  // that's restricted to AquaVision only, so hide the field entirely
   // when editing as anyone else.
   const showPasswordField = !account || iAmSuperAdmin;
   $("#accountPassword").style.display = showPasswordField ? "" : "none";
@@ -2573,6 +2573,10 @@ async function loadWebsiteContentAdmin() {
 function renderWebsiteContentList(pages) {
   const summaryEl = $("#websiteSyncSummary");
   const wrap = $("#websiteContentList");
+  const captchaNote = $("#websiteCaptchaNote");
+  const looksCaptchaBlocked = pages.some((p) => p.status !== "ok" && /captcha|anti-bot/i.test(p.error || ""));
+  if (captchaNote) captchaNote.style.display = looksCaptchaBlocked ? "block" : "none";
+
   if (!pages.length) {
     if (summaryEl) summaryEl.textContent = "Not synced yet.";
     if (wrap) wrap.innerHTML = `<p class="hint-text">No pages synced yet — click "Sync now" below.</p>`;
@@ -2587,12 +2591,13 @@ function renderWebsiteContentList(pages) {
     const row = document.createElement("div");
     row.className = "tip-manage-row";
     const statusBadge = p.status === "ok" ? `<span style="color:#2E9E5B;">✓ ${p.chars} chars</span>` : `<span style="color:#D64545;">✗ ${escapeHtml(p.error || "failed")}</span>`;
+    const sourceBadge = p.source === "manual" ? ` <span style="color:#0072BC;">(manually added)</span>` : "";
     const previewHtml = p.status === "ok" && p.preview
       ? `<div class="hint-text" style="margin-top:.2rem;">"${escapeHtml(p.preview)}${p.chars > 220 ? "…" : ""}"</div>`
       : "";
     row.innerHTML = `
       <span class="tip-manage-text">
-        <b>${escapeHtml(p.title)}</b> — ${statusBadge}<br>
+        <b>${escapeHtml(p.title)}</b> — ${statusBadge}${sourceBadge}<br>
         <span class="hint-text">${escapeHtml(p.url)} · last attempt ${escapeHtml(p.fetched_at)}</span>
         ${previewHtml}
       </span>
@@ -2603,26 +2608,66 @@ function renderWebsiteContentList(pages) {
 
 function setupWebsiteSync() {
   const btn = $("#websiteSyncBtn");
-  if (!btn) return;
-  btn.addEventListener("click", async () => {
-    btn.disabled = true;
-    const original = btn.textContent;
-    btn.textContent = "🔄 Syncing...";
-    try {
-      const res = await staffFetch("/api/website-content/sync", { method: "POST" });
-      const data = await res.json();
-      if (data.error) {
-        alert(`Sync failed: ${data.error}`);
-      } else if (data.kb_reseed_ok === false) {
-        alert(`Fetched ${data.ok}/${data.total} pages from nawasa.gd successfully, but rebuilding the searchable knowledge base failed (${data.kb_reseed_error || "unknown error"}). The pages are saved — try syncing again in a moment to retry the knowledge-base rebuild.`);
+  if (btn) {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = "🔄 Syncing...";
+      try {
+        const res = await staffFetch("/api/website-content/sync", { method: "POST" });
+        const data = await res.json();
+        if (data.error) {
+          alert(`Sync failed: ${data.error}`);
+        } else if (data.kb_reseed_ok === false) {
+          alert(`Fetched ${data.ok}/${data.total} pages from nawasa.gd successfully, but rebuilding the searchable knowledge base failed (${data.kb_reseed_error || "unknown error"}). The pages are saved — try syncing again in a moment to retry the knowledge-base rebuild.`);
+        }
+        await loadWebsiteContentAdmin();
+        await loadFaqsAdmin(); // knowledge base entries changed too
+      } finally {
+        btn.disabled = false;
+        btn.textContent = original;
       }
-      await loadWebsiteContentAdmin();
-      await loadFaqsAdmin(); // knowledge base entries changed too
-    } finally {
-      btn.disabled = false;
-      btn.textContent = original;
-    }
-  });
+    });
+  }
+
+  const toggleBtn = $("#websiteManualToggleBtn");
+  const manualForm = $("#websiteManualForm");
+  if (toggleBtn && manualForm) {
+    toggleBtn.addEventListener("click", () => {
+      manualForm.style.display = manualForm.style.display === "none" ? "block" : "none";
+    });
+  }
+
+  const saveBtn = $("#websiteManualSaveBtn");
+  if (saveBtn) {
+    saveBtn.addEventListener("click", async () => {
+      const errEl = $("#websiteManualError");
+      errEl.style.display = "none";
+      const url = $("#websiteManualUrl").value.trim();
+      const title = $("#websiteManualTitle").value.trim();
+      const content = $("#websiteManualContent").value.trim();
+      saveBtn.disabled = true;
+      try {
+        const res = await staffFetch("/api/website-content/manual", {
+          method: "POST", body: JSON.stringify({ url, title, content }),
+        });
+        const data = await res.json();
+        if (data.error) {
+          errEl.textContent = data.error;
+          errEl.style.display = "block";
+          return;
+        }
+        $("#websiteManualUrl").value = "";
+        $("#websiteManualTitle").value = "";
+        $("#websiteManualContent").value = "";
+        manualForm.style.display = "none";
+        await loadWebsiteContentAdmin();
+        await loadFaqsAdmin();
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+  }
 }
 
 // ---------------------------------------------------------------------
