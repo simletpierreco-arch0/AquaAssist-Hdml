@@ -137,8 +137,16 @@ PERMISSION_DEFS = [
 ALL_PERMISSION_KEYS = [p[0] for p in PERMISSION_DEFS]
 _VALID_PERMISSION_SET = set(ALL_PERMISSION_KEYS)
 
-SUPER_ADMIN_USERNAME = "AquaVission"
-DEFAULT_SUPER_ADMIN_PASSWORD = os.environ.get("AQUAVISSION_PASSWORD", "Admin123")
+SUPER_ADMIN_USERNAME = "AquaVision"
+# Accept either env var name — AQUAVISION_PASSWORD is the current one;
+# AQUAVISSION_PASSWORD (old double-s spelling) is honored too so an
+# already-configured deployment's env var doesn't silently stop working
+# after this rename.
+DEFAULT_SUPER_ADMIN_PASSWORD = (
+    os.environ.get("AQUAVISION_PASSWORD")
+    or os.environ.get("AQUAVISSION_PASSWORD")
+    or "Admin123"
+)
 
 
 # ---------------------------------------------------------------------
@@ -382,8 +390,23 @@ def init_db():
         """)
 
     migrate_legacy_storage()
+    _add_column_if_missing("website_pages", "source", "TEXT")
     _seed_tips_if_empty()
     _seed_features_if_empty()
+
+
+def _add_column_if_missing(table, column, coltype_sql):
+    """Best-effort ALTER TABLE ADD COLUMN for a table created before this
+    column existed. There's no portable IF NOT EXISTS for ADD COLUMN
+    across SQLite and Postgres, so this just tries it and swallows the
+    error if the column is already there. Runs as its own isolated
+    transaction (not nested in the big CREATE TABLE block above) so a
+    failure here can't roll back unrelated table creation."""
+    try:
+        with _cursor(commit=True) as cur:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype_sql}")
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------
@@ -729,8 +752,8 @@ def save_features(updates):
             current["maintenance_message"] = text or DEFAULT_MAINTENANCE_MESSAGE
         # NOTE: chatbot_name is intentionally NOT settable through this
         # generic function — it's changed only via set_chatbot_name()
-        # below, which app.py gates to the AquaVission Super Administrator
-        # account specifically, per the "AquaVission only" requirement.
+        # below, which app.py gates to the AquaVision Super Administrator
+        # account specifically, per the "AquaVision only" requirement.
     ph = _ph()
     with _cursor(commit=True) as cur:
         if USE_POSTGRES:
@@ -744,7 +767,7 @@ def save_features(updates):
 
 
 def set_chatbot_name(new_name):
-    """Dedicated setter so the AquaVission-only restriction lives entirely
+    """Dedicated setter so the AquaVision-only restriction lives entirely
     in app.py's route (which checks is_super_admin before ever calling
     this), rather than being bypassable through the general-purpose
     save_features()."""
@@ -854,7 +877,7 @@ def delete_faq(faq_id):
 # a transient site outage during a sync shouldn't erase what the bot
 # already knew). See website_sync.py for the fetch/parse logic.
 # =======================================================================
-def save_website_page(url, title, content, status="ok", error=""):
+def save_website_page(url, title, content, status="ok", error="", source="auto"):
     ph = _ph()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with _cursor() as cur:
@@ -864,21 +887,21 @@ def save_website_page(url, title, content, status="ok", error=""):
         if existing:
             if status == "ok":
                 cur.execute(
-                    f"UPDATE website_pages SET title={ph}, content={ph}, fetched_at={ph}, status={ph}, error={ph} WHERE url={ph}",
-                    (title, content, now, status, error, url),
+                    f"UPDATE website_pages SET title={ph}, content={ph}, fetched_at={ph}, status={ph}, error={ph}, source={ph} WHERE url={ph}",
+                    (title, content, now, status, error, source, url),
                 )
             else:
-                # Fetch failed — keep the last-good title/content, just
-                # record that this attempt failed and when.
+                # Fetch failed — keep the last-good title/content/source,
+                # just record that this attempt failed and when.
                 cur.execute(
                     f"UPDATE website_pages SET fetched_at={ph}, status={ph}, error={ph} WHERE url={ph}",
                     (now, status, error, url),
                 )
         else:
             cur.execute(
-                f"INSERT INTO website_pages (url, title, content, fetched_at, status, error) "
-                f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph})",
-                (url, title, content, now, status, error),
+                f"INSERT INTO website_pages (url, title, content, fetched_at, status, error, source) "
+                f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (url, title, content, now, status, error, source),
             )
 
 
@@ -1183,10 +1206,20 @@ def account_has_permission(account, key):
 
 
 def _seed_super_admin_if_missing():
-    """Creates the AquaVission Super Administrator account on first run,
+    """Creates the AquaVision Super Administrator account on first run,
     with full access to every current and future permission key. No-op if
     an account with this username already exists (so this is safe to call
-    on every startup)."""
+    on every startup).
+
+    MIGRATION: earlier versions of this app used the username
+    "AquaVision" (double s). If that exact legacy account still exists,
+    it's renamed in place to "AquaVision" — preserving its real password
+    and every other field — instead of being left alone while a brand-new
+    account with the DEFAULT password gets created under the new name.
+    Without this, a deployment that already has a live "AquaVision"
+    account would end up with two Super Administrators after this rename:
+    the real one, and a second one anyone could log into with the default
+    password."""
     ph = _ph()
     with _cursor() as cur:
         cur.execute(f"SELECT id FROM staff_accounts WHERE username_lower = {ph}",
@@ -1194,10 +1227,29 @@ def _seed_super_admin_if_missing():
         existing = cur.fetchone()
     if existing:
         return
+
+    with _cursor() as cur:
+        cur.execute(f"SELECT id, full_name FROM staff_accounts WHERE username_lower = {ph}", ("aquavission",))
+        legacy = cur.fetchone()
+    if legacy:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        new_full_name = "AquaVision" if legacy["full_name"] == "AquaVision" else legacy["full_name"]
+        with _cursor(commit=True) as cur:
+            cur.execute(
+                f"UPDATE staff_accounts SET username={ph}, username_lower={ph}, full_name={ph}, updated_at={ph} WHERE id={ph}",
+                (SUPER_ADMIN_USERNAME, SUPER_ADMIN_USERNAME.lower(), new_full_name, now, legacy["id"]),
+            )
+        logger.warning(
+            "Renamed the existing Super Administrator account from the old default "
+            "username 'AquaVision' to '%s'. Its password was NOT changed.",
+            SUPER_ADMIN_USERNAME,
+        )
+        return
+
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     row = {
         "id": uuid.uuid4().hex[:10],
-        "full_name": "AquaVission", "username": SUPER_ADMIN_USERNAME,
+        "full_name": "AquaVision", "username": SUPER_ADMIN_USERNAME,
         "username_lower": SUPER_ADMIN_USERNAME.lower(),
         "password_hash": generate_password_hash(DEFAULT_SUPER_ADMIN_PASSWORD),
         "role": "Super Administrator",
@@ -1215,9 +1267,9 @@ def _seed_super_admin_if_missing():
              row["created_at"], row["updated_at"], row["created_by"]),
         )
     logger.warning(
-        "Seeded the AquaVission Super Administrator account with the configured default "
+        "Seeded the AquaVision Super Administrator account with the configured default "
         "password. Log in and change it immediately via Staff Accounts \u2192 Change Password "
-        "(or set AQUAVISSION_PASSWORD before first startup)."
+        "(or set AQUAVISION_PASSWORD before first startup)."
     )
 
 
