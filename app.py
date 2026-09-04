@@ -5,7 +5,7 @@ AquaAssist backend — Flask API + a LangChain/LangGraph conversational agent
 Run with:
     pip install -r requirements.txt
     export GEMINI_API_KEY=your-key-here
-    export AQUAVISSION_PASSWORD=change-me-immediately   # optional, default: Admin123
+    export AQUAVISION_PASSWORD=change-me-immediately    # optional, default: Admin123 (old name AQUAVISSION_PASSWORD still works)
     export ELEVENLABS_API_KEY=your-elevenlabs-key      # optional, enables Caribbean-accent read-aloud
     export ELEVENLABS_VOICE_ID=your-chosen-voice-id    # optional, from the ElevenLabs Voice Library
     export PINECONE_API_KEY=your-pinecone-key          # optional, enables live RAG retrieval (see agent.py)
@@ -20,7 +20,7 @@ STAFF AUTH — this version replaces the old shared-passcode model
 staff accounts and a granular, per-feature permission system. See db.py's
 PERMISSION_DEFS for the full list of permission keys and
 require_permission()/require_any_permission() below for how routes enforce
-them. A single Super Administrator account (username "AquaVission") is
+them. A single Super Administrator account (username "AquaVision") is
 seeded automatically on first startup — see db._seed_super_admin_if_missing
 for the default password and how to override it.
 """
@@ -351,7 +351,7 @@ If a question is unrelated to NAWASA services, politely explain that you can onl
 
 
 # Initialize the database (creates tables + seeds default tips/features/FAQs
-# and the AquaVission Super Administrator account on first run).
+# and the AquaVision Super Administrator account on first run).
 db.init_db()
 db._seed_faqs_if_empty(FAQS)
 db._seed_super_admin_if_missing()
@@ -946,11 +946,11 @@ def api_features_update():
 @app.route("/api/settings/chatbot-name", methods=["PATCH"])
 @require_login
 def api_settings_chatbot_name():
-    """Renaming the chatbot is restricted to the AquaVission Super
+    """Renaming the chatbot is restricted to the AquaVision Super
     Administrator account specifically — not just anyone holding
-    manage_chatbot_settings — per the "AquaVission only" requirement."""
+    manage_chatbot_settings — per the "AquaVision only" requirement."""
     if not request.staff_account.get("is_super_admin"):
-        return jsonify({"error": "Only the AquaVission Super Administrator account can rename the chatbot."}), 403
+        return jsonify({"error": "Only the AquaVision Super Administrator account can rename the chatbot."}), 403
     body = request.get_json(force=True) or {}
     new_name = (body.get("name") or "").strip()
     if not new_name:
@@ -1010,14 +1010,14 @@ def api_staff_me():
 @app.route("/api/staff/change-password", methods=["POST"])
 @require_login
 def api_staff_change_password():
-    """Password changes are restricted to the AquaVission Super
+    """Password changes are restricted to the AquaVision Super
     Administrator account only — no other account, regardless of its
     permissions, can change any password (its own included) through this
     endpoint or through /api/staff/accounts/<id>/reset-password below.
-    Only AquaVission may change its own password here."""
+    Only AquaVision may change its own password here."""
     account = request.staff_account
     if not account.get("is_super_admin"):
-        return jsonify({"error": "Only the AquaVission Super Administrator account can change a password. "
+        return jsonify({"error": "Only the AquaVision Super Administrator account can change a password. "
                                   "Ask a Super Administrator for help."}), 403
 
     body = request.get_json(force=True) or {}
@@ -1094,7 +1094,7 @@ def api_staff_accounts_update(account_id):
     new_username = body.get("username")
     if target.get("is_super_admin") == "1" and new_username is not None and new_username.strip().lower() != target["username_lower"]:
         # The startup seed (db._seed_super_admin_if_missing) looks for the
-        # exact username "AquaVission" and creates a fresh one with the
+        # exact username "AquaVision" and creates a fresh one with the
         # default password if it's missing — so renaming this account
         # would silently spawn a second Super Administrator on next
         # restart. Keep the username fixed; everything else about the
@@ -1154,11 +1154,11 @@ def api_staff_accounts_status(account_id):
 @require_login
 def api_staff_accounts_reset_password(account_id):
     """Resetting ANY account's password — including your own — is
-    restricted to the AquaVission Super Administrator account only.
-    Holding "edit_accounts" is not enough by itself; only AquaVission can
+    restricted to the AquaVision Super Administrator account only.
+    Holding "edit_accounts" is not enough by itself; only AquaVision can
     reset passwords, no exceptions."""
     if not request.staff_account.get("is_super_admin"):
-        return jsonify({"error": "Only the AquaVission Super Administrator account can reset a password."}), 403
+        return jsonify({"error": "Only the AquaVision Super Administrator account can reset a password."}), 403
 
     target = db.get_account_by_id(account_id)
     if target is None:
@@ -1302,6 +1302,7 @@ def api_website_content_list():
             "fetched_at": p["fetched_at"], "error": p.get("error") or "",
             "preview": (p.get("content") or "")[:220],
             "chars": len(p.get("content") or ""),
+            "source": p.get("source") or "auto",
         }
         for p in pages
     ])
@@ -1316,6 +1317,29 @@ def api_website_content_sync():
         detail += " — but the knowledge base rebuild failed, so search may still show old content"
     db.log_audit(_actor_label(), "Website content synced", details=detail)
     return jsonify(summary)
+
+
+@app.route("/api/website-content/manual", methods=["POST"])
+@require_any_permission("sync_website_content", "manage_faqs", "manage_knowledge_base")
+def api_website_content_manual():
+    """Fallback for when the automated fetch can't reach nawasa.gd at all
+    (e.g. it's behind an anti-bot/CAPTCHA gate that a plain HTTP client
+    can never pass — see website_sync.py). Staff open the real page in
+    their own browser, copy the text, and paste it here; a human browsing
+    normally isn't subject to the same bot-blocking the sync thread hits."""
+    body = request.get_json(force=True) or {}
+    url = (body.get("url") or "").strip()
+    title = (body.get("title") or "").strip()
+    content = (body.get("content") or "").strip()
+    if not url or not title or not content:
+        return jsonify({"error": "url, title, and content are all required."}), 400
+    if len(content) < 20:
+        return jsonify({"error": "That content looks too short to be useful — paste the full page text."}), 400
+
+    db.save_website_page(url, title, content[:6000], status="ok", error="", source="manual")
+    _reseed_knowledge_base()
+    db.log_audit(_actor_label(), "Website content manually imported", item=url, details=title)
+    return jsonify({"ok": True, "url": url, "title": title})
 
 
 # =======================================================================
