@@ -3,27 +3,17 @@ db.py — persistent storage for AquaAssist.
 
 Backed by SQLite by default or Postgres if DATABASE_URL is set.
 
-THIS VERSION adds (on top of the previous reports/notifications/outages/
-tips/features/faqs/unanswered_questions/chat_events/chat_messages/
-handoff_requests/paused_sessions tables):
-
-  - `staff_accounts`   — individual named staff accounts with a hashed
-                          password, a free-text role label, a JSON list of
-                          granular permission keys, an avatar, and a status
-                          (Active/Disabled). Replaces the old shared
-                          STAFF_PASSCODE model entirely.
-  - `staff_sessions`   — bearer tokens issued on login (X-Staff-Token
-                          header), so "passcode in every request" becomes
-                          "log in once, use a token".
-  - `audit_log`        — one row per administrative action (account
-                          created/disabled/deleted, permission changed,
-                          password reset, content published, report status
-                          changed, etc.) for accountability.
-  - `report_notes`     — internal, staff-only notes attached to a report
-                          (separate from the customer-facing description),
-                          backing the "Add Internal Notes" permission.
-
-See app.py for the permission-checking decorators and route wiring.
+IMPORTANT FOR RENDER DEPLOYMENTS: Render's web service filesystem is
+EPHEMERAL — anything written to local disk (including the default SQLite
+file this module falls back to) is wiped on every restart, redeploy, or
+sleep/wake cycle. To make the NAWASA website knowledge base (and every
+other table here — reports, FAQs, staff accounts, etc.) survive those
+events on Render, set the DATABASE_URL environment variable to a
+persistent Postgres database (e.g. a Render Postgres instance, or Neon/
+Supabase) — this module automatically switches to Postgres the moment
+DATABASE_URL is set, with no other code changes required. Without
+DATABASE_URL, this still runs (via local SQLite) for local development,
+but on Render that data will NOT persist across deploys.
 """
 
 import csv
@@ -52,6 +42,11 @@ if USE_POSTGRES:
     import psycopg2.pool
 else:
     import sqlite3
+    logging.getLogger("aquaassist.db").warning(
+        "DATABASE_URL is not set — using local SQLite (%s). On Render this file "
+        "does NOT survive restarts/redeploys. Set DATABASE_URL to a persistent "
+        "Postgres database for production.", str(DATA_DIR / "aquaassist.db")
+    )
 
 SQLITE_PATH = DATA_DIR / "aquaassist.db"
 
@@ -83,16 +78,7 @@ DEFAULT_TIPS = [
     "Regularly check your faucets and toilets for silent leaks — a toilet that keeps running after flushing can waste hundreds of gallons a month.",
 ]
 
-# =======================================================================
-# NEW: Granular staff permissions — the single source of truth for what
-# permission keys exist, their display labels, and which category they
-# render under in the Staff Accounts permissions panel. app.py imports
-# PERMISSION_DEFS / ALL_PERMISSION_KEYS from here so the backend decorator
-# checks and the /api/staff/permission-defs response (used by the frontend
-# to render checkboxes) never drift apart.
-# =======================================================================
 PERMISSION_DEFS = [
-    # key, category, label
     ("view_website_management", "Website", "View Website Management"),
     ("edit_website_content", "Website", "Edit Website Content"),
     ("create_edit_news", "Website", "Create/Edit News"),
@@ -138,10 +124,6 @@ ALL_PERMISSION_KEYS = [p[0] for p in PERMISSION_DEFS]
 _VALID_PERMISSION_SET = set(ALL_PERMISSION_KEYS)
 
 SUPER_ADMIN_USERNAME = "AquaVision"
-# Accept either env var name — AQUAVISION_PASSWORD is the current one;
-# AQUAVISSION_PASSWORD (old double-s spelling) is honored too so an
-# already-configured deployment's env var doesn't silently stop working
-# after this rename.
 DEFAULT_SUPER_ADMIN_PASSWORD = (
     os.environ.get("AQUAVISION_PASSWORD")
     or os.environ.get("AQUAVISSION_PASSWORD")
@@ -330,7 +312,6 @@ def init_db():
             )
         """)
 
-        # --- NEW TABLES: accounts, sessions, audit log, report notes ---
         cur.execute("""
             CREATE TABLE IF NOT EXISTS staff_accounts (
                 id TEXT PRIMARY KEY,
@@ -379,9 +360,9 @@ def init_db():
         # `website_pages` holds imported content from nawasa.gd — one row
         # per source page, refreshed by a periodic/on-demand sync (see
         # website_sync.py) rather than fetched live during a customer
-        # conversation. This gets merged into the same knowledge base the
-        # chatbot already searches (see app.py's _build_kb_entries()), so
-        # the bot never depends on nawasa.gd being reachable at chat time.
+        # conversation. Persisted in this same database (Postgres when
+        # DATABASE_URL is set), so it survives Render restarts/redeploys/
+        # sleep-wake cycles exactly like every other table here.
         cur.execute("""
             CREATE TABLE IF NOT EXISTS website_pages (
                 url TEXT PRIMARY KEY,
@@ -391,17 +372,12 @@ def init_db():
 
     migrate_legacy_storage()
     _add_column_if_missing("website_pages", "source", "TEXT")
+    _add_column_if_missing("website_pages", "first_indexed_at", "TEXT")
     _seed_tips_if_empty()
     _seed_features_if_empty()
 
 
 def _add_column_if_missing(table, column, coltype_sql):
-    """Best-effort ALTER TABLE ADD COLUMN for a table created before this
-    column existed. There's no portable IF NOT EXISTS for ADD COLUMN
-    across SQLite and Postgres, so this just tries it and swallows the
-    error if the column is already there. Runs as its own isolated
-    transaction (not nested in the big CREATE TABLE block above) so a
-    failure here can't roll back unrelated table creation."""
     try:
         with _cursor(commit=True) as cur:
             cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype_sql}")
@@ -558,9 +534,6 @@ def delete_report(reference):
     return deleted
 
 
-# =======================================================================
-# NEW: Report notes (internal, staff-only — backs "Add Internal Notes")
-# =======================================================================
 def add_report_note(reference, author, note):
     ph = _ph()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -750,10 +723,6 @@ def save_features(updates):
         elif k == "maintenance_message":
             text = (v or "").strip()
             current["maintenance_message"] = text or DEFAULT_MAINTENANCE_MESSAGE
-        # NOTE: chatbot_name is intentionally NOT settable through this
-        # generic function — it's changed only via set_chatbot_name()
-        # below, which app.py gates to the AquaVision Super Administrator
-        # account specifically, per the "AquaVision only" requirement.
     ph = _ph()
     with _cursor(commit=True) as cur:
         if USE_POSTGRES:
@@ -767,10 +736,6 @@ def save_features(updates):
 
 
 def set_chatbot_name(new_name):
-    """Dedicated setter so the AquaVision-only restriction lives entirely
-    in app.py's route (which checks is_super_admin before ever calling
-    this), rather than being bypassable through the general-purpose
-    save_features()."""
     current = load_features()
     current["chatbot_name"] = (new_name or "").strip() or DEFAULT_CHATBOT_NAME
     ph = _ph()
@@ -870,25 +835,32 @@ def delete_faq(faq_id):
 
 
 # =======================================================================
-# NEW: Imported nawasa.gd website content
+# Imported nawasa.gd website content
 #
-# One row per source URL. `status` is "ok" or "error" (a page that failed
+# One row per source URL, persisted in the same database as everything
+# else (Postgres on Render when DATABASE_URL is set) — so this survives
+# restarts, redeploys, and sleep/wake cycles exactly like reports, FAQs,
+# and staff accounts do. `status` is "ok" or "error" (a page that failed
 # to fetch keeps its last-known-good `content` rather than being wiped —
 # a transient site outage during a sync shouldn't erase what the bot
-# already knew). See website_sync.py for the fetch/parse logic.
+# already knew). `first_indexed_at` is set once and never overwritten,
+# so staff can see how long a page has been in the knowledge base
+# alongside `fetched_at` (the most recent sync attempt, success or not).
+# See website_sync.py for the fetch/parse logic.
 # =======================================================================
 def save_website_page(url, title, content, status="ok", error="", source="auto"):
     ph = _ph()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with _cursor() as cur:
-        cur.execute(f"SELECT url FROM website_pages WHERE url = {ph}", (url,))
+        cur.execute(f"SELECT url, first_indexed_at FROM website_pages WHERE url = {ph}", (url,))
         existing = cur.fetchone()
     with _cursor(commit=True) as cur:
         if existing:
             if status == "ok":
                 cur.execute(
-                    f"UPDATE website_pages SET title={ph}, content={ph}, fetched_at={ph}, status={ph}, error={ph}, source={ph} WHERE url={ph}",
-                    (title, content, now, status, error, source, url),
+                    f"UPDATE website_pages SET title={ph}, content={ph}, fetched_at={ph}, status={ph}, "
+                    f"error={ph}, source={ph}, first_indexed_at=COALESCE(first_indexed_at, {ph}) WHERE url={ph}",
+                    (title, content, now, status, error, source, now, url),
                 )
             else:
                 # Fetch failed — keep the last-good title/content/source,
@@ -899,9 +871,9 @@ def save_website_page(url, title, content, status="ok", error="", source="auto")
                 )
         else:
             cur.execute(
-                f"INSERT INTO website_pages (url, title, content, fetched_at, status, error, source) "
-                f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
-                (url, title, content, now, status, error, source),
+                f"INSERT INTO website_pages (url, title, content, fetched_at, status, error, source, first_indexed_at) "
+                f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (url, title, content, now, status, error, source, now if status == "ok" else None),
             )
 
 
@@ -910,6 +882,27 @@ def load_website_pages():
         cur.execute("SELECT * FROM website_pages ORDER BY url ASC")
         rows = _rows(cur.fetchall())
     return rows
+
+
+def deactivate_website_pages_not_in(urls_to_keep):
+    """Marks any previously-synced page whose URL is no longer in the
+    current curated page list (website_sync.NAWASA_PAGES) as removed, so
+    stale content that's no longer part of the sync set stops being fed
+    into the knowledge base. Manually-imported pages (source='manual')
+    are left alone — they were added deliberately by staff and aren't
+    part of the automated crawl set."""
+    if not urls_to_keep:
+        return 0
+    ph = _ph()
+    placeholders = ",".join([ph] * len(urls_to_keep))
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"UPDATE website_pages SET status={ph}, error={ph}, fetched_at={ph} "
+            f"WHERE source != {ph} AND url NOT IN ({placeholders})",
+            ("removed", "No longer part of the synced page list", now, "manual", *urls_to_keep),
+        )
+        return cur.rowcount
 
 
 # =======================================================================
@@ -1167,10 +1160,9 @@ def delete_all_sessions():
 
 
 # =======================================================================
-# NEW: Staff accounts, sessions (tokens), permissions, audit log
+# Staff accounts, sessions (tokens), permissions, audit log
 # =======================================================================
 def _clean_permissions(permissions):
-    """Keeps only known permission keys, de-duplicated, in canonical order."""
     if not permissions:
         return []
     given = set(permissions) & _VALID_PERMISSION_SET
@@ -1196,30 +1188,12 @@ def _account_out(row, include_hash=False):
 
 
 def account_has_permission(account, key):
-    """account is the dict shape returned by _account_out(). Super Admins
-    always have every permission, regardless of what's stored — this is
-    what makes "Super Administrator must always have full access" true
-    even if a permission is added to PERMISSION_DEFS later."""
     if account.get("is_super_admin"):
         return True
     return key in (account.get("permissions") or [])
 
 
 def _seed_super_admin_if_missing():
-    """Creates the AquaVision Super Administrator account on first run,
-    with full access to every current and future permission key. No-op if
-    an account with this username already exists (so this is safe to call
-    on every startup).
-
-    MIGRATION: earlier versions of this app used the username
-    "AquaVision" (double s). If that exact legacy account still exists,
-    it's renamed in place to "AquaVision" — preserving its real password
-    and every other field — instead of being left alone while a brand-new
-    account with the DEFAULT password gets created under the new name.
-    Without this, a deployment that already has a live "AquaVision"
-    account would end up with two Super Administrators after this rename:
-    the real one, and a second one anyone could log into with the default
-    password."""
     ph = _ph()
     with _cursor() as cur:
         cur.execute(f"SELECT id FROM staff_accounts WHERE username_lower = {ph}",
@@ -1321,9 +1295,6 @@ def create_staff_account(full_name, username, password, role, permissions, avata
 
 
 def update_staff_account(account_id, full_name=None, username=None, role=None, avatar=None):
-    """Edits identity fields only — not permissions or status, which have
-    their own dedicated (and separately permissioned) update functions
-    below so each can be audit-logged with its own action label."""
     existing = get_account_by_id(account_id)
     if existing is None:
         return None, "Account not found."
@@ -1361,9 +1332,6 @@ def update_staff_permissions(account_id, permissions):
 
 
 def set_staff_status(account_id, status):
-    """status is 'Active' or 'Disabled'. A disabled account's historical
-    actions/reports are untouched — only future login/session validity is
-    affected (see get_account_for_token, which rejects disabled accounts)."""
     ph = _ph()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with _cursor(commit=True) as cur:
@@ -1395,9 +1363,6 @@ def delete_staff_account(account_id):
 
 
 def verify_login(username, password):
-    """Returns the account dict (with password_hash) on success, or None
-    on a bad username/password/disabled account. Callers must check
-    status themselves if they need a specific error message."""
     row = get_account_by_username(username)
     if row is None:
         return None
@@ -1422,9 +1387,6 @@ def create_session(account_id):
 
 
 def get_account_for_token(token):
-    """Returns the account dict (public shape, no password_hash) for a
-    valid session token belonging to an Active account, or None. Also
-    touches last_seen_at, best-effort."""
     if not token:
         return None
     ph = _ph()
@@ -1449,9 +1411,6 @@ def delete_session(token):
 
 
 def delete_sessions_for_account(account_id):
-    """Called when an account is disabled or deleted, so any tokens it
-    already issued stop working immediately rather than staying valid
-    until they happen to be checked against a disabled account."""
     ph = _ph()
     with _cursor(commit=True) as cur:
         cur.execute(f"DELETE FROM staff_sessions WHERE account_id = {ph}", (account_id,))
