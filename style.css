@@ -457,9 +457,7 @@ body.dark .card { box-shadow: 0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(25
   .form-row-2 { grid-template-columns: 1fr; }
 }
 
-/* =========================================================================
-   WATERY BACKGROUND
-   ========================================================================= */
+/* WATERY BACKGROUND */
 .ocean-bg {
   position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none;
   background:
@@ -546,9 +544,7 @@ body.dark .ocean-caustics { opacity: 0.14; }
   .bubble:nth-child(n+9) { display: none; }
 }
 
-/* =========================================================================
-   MOCK NAWASA WEBSITE
-   ========================================================================= */
+/* MOCK NAWASA WEBSITE */
 .mock-site { background: var(--bg); color: var(--text); }
 
 .mock-nav {
@@ -660,14 +656,11 @@ body.dark .ocean-caustics { opacity: 0.14; }
   .mock-card-grid { grid-template-columns: 1fr; }
 }
 
-/* =========================================================================
-   STAFF PORTAL — SITE SECTION
-   ========================================================================= */
+/* STAFF PORTAL — SITE SECTION */
 .staff-site-section { background: var(--bg); min-height: 70vh; padding: 2rem 1.5rem 4rem; }
 .staff-site-inner { max-width: 1180px; margin: 0 auto; }
 .staff-site-hero { border-radius: 20px; margin-bottom: 1.5rem; padding: 1.6rem 1.6rem 2.4rem; }
 
-/* ---------------- Staff Portal: sidebar shell ---------------- */
 .staff-shell { display: flex; gap: 1.4rem; align-items: flex-start; }
 .staff-sidebar {
   flex: 0 0 210px; position: sticky; top: 1rem;
@@ -694,7 +687,6 @@ body.dark .ocean-caustics { opacity: 0.14; }
   .staff-nav-group { flex-basis: 100%; padding-top: .5rem; }
 }
 
-/* Live Chat notification badge on its sidebar nav button */
 .livechat-badge {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 18px; height: 18px; padding: 0 .3rem; border-radius: 999px;
@@ -708,9 +700,7 @@ body.dark .ocean-caustics { opacity: 0.14; }
 }
 @media (prefers-reduced-motion: reduce) { .livechat-badge { animation: none; } }
 
-/* =========================================================================
-   WIDGET SHELL
-   ========================================================================= */
+/* WIDGET SHELL */
 .aqua-widget { position: fixed; z-index: 1000; bottom: 20px; right: 20px; }
 
 .widget-fab {
@@ -808,9 +798,7 @@ body.aqua-widget-open { overflow: visible; }
   .widget-fab-icon { width: 24px; height: 24px; font-size: .95rem; }
 }
 
-/* =========================================================================
-   STAFF PORTAL — Live Chat monitor
-   ========================================================================= */
+/* STAFF PORTAL — Live Chat monitor */
 .livechat-shell { display: flex; gap: 1rem; align-items: stretch; height: 560px; max-height: 70vh; }
 .livechat-sidebar {
   flex: 0 0 260px; display: flex; flex-direction: column; min-height: 0;
@@ -873,9 +861,7 @@ body.dark .livechat-msg-staff { background: #3A2E12; border-color: #6B5522; }
   .livechat-sidebar { flex: none; max-height: 220px; }
 }
 
-/* =========================================================================
-   NEW: Staff Accounts / Permissions / Audit Log / topbar
-   ========================================================================= */
+/* Staff Accounts / Permissions / Audit Log / topbar */
 .staff-topbar {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 1rem; gap: .6rem; flex-wrap: wrap;
@@ -905,24 +891,15 @@ body.dark .livechat-msg-staff { background: #3A2E12; border-color: #6B5522; }
   border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
 }
 
-/* =========================================================================
-   NEW: Mobile responsiveness pass — fixes overflow, cramped controls,
-   modal sizing, and input zoom on iPhone/Android/small & large phones/tablets.
-   Applied on top of the existing rules above without removing any of them.
-   ========================================================================= */
+/* Mobile responsiveness pass */
 html, body { overflow-x: hidden; max-width: 100%; }
 img, svg, video, canvas { max-width: 100%; height: auto; }
-* { min-width: 0; } /* stops flex/grid children from forcing horizontal overflow */
+* { min-width: 0; }
 
-/* iOS auto-zooms any input under 16px on focus — keep all inputs at/above
-   that size on touch screens, regardless of the large-text setting. */
 @media (max-width: 900px) {
   input, select, textarea { font-size: 16px; }
 }
 
-/* Staff Portal shell — the fixed 210px sidebar was forcing a horizontal
-   scrollbar on phones; below 780px it already stacks (existing rule), this
-   tightens spacing so it doesn't feel cramped once stacked. */
 @media (max-width: 780px) {
   .staff-site-section { padding: 1rem .6rem 3rem; }
   .staff-site-hero { padding: 1.1rem 1.1rem 1.7rem; border-radius: 16px; }
@@ -939,7 +916,6 @@ img, svg, video, canvas { max-width: 100%; height: auto; }
   .metric-box .label { font-size: .62rem; }
 }
 
-/* Very small phones (iPhone SE and similar, ~360px and under) */
 @media (max-width: 380px) {
   .section-label { font-size: .72rem; }
   .card { padding: .85rem 1rem; }
@@ -948,15 +924,9 @@ img, svg, video, canvas { max-width: 100%; height: auto; }
   .metric-box { min-width: 68px; }
 }
 
-/* Reports/subscriber/audit tables never break page width — they already
-   scroll inside .table-wrap; make sure that container can't be forced
-   wider than the viewport by a long cell value. */
 .table-wrap { max-width: 100%; -webkit-overflow-scrolling: touch; }
 .reports-table th, .reports-table td { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 
-/* Chat widget on phones: buttons/input never overflow the row, and the
-   panel respects iOS safe-area insets (notch / home indicator) instead of
-   sitting flush under them. */
 @media (max-width: 640px) {
   .widget-panel {
     padding-top: env(safe-area-inset-top);
@@ -976,9 +946,6 @@ img, svg, video, canvas { max-width: 100%; height: auto; }
   .attach-btn { width: 1.8rem; height: 1.8rem; font-size: .88rem; }
 }
 
-/* Modals (camera capture, attachment viewer) must never exceed the
-   viewport height on short/landscape phone screens — add scroll instead
-   of clipping the action buttons off-screen. */
 .camera-modal-inner {
   max-height: 92vh;
   overflow-y: auto;
@@ -986,8 +953,6 @@ img, svg, video, canvas { max-width: 100%; height: auto; }
 }
 .attachment-viewer-inner { max-height: 92vh; overflow-y: auto; }
 
-/* Staff account / permissions forms: two-column rows collapse cleanly,
-   and the permission checkbox grid never gets squeezed unreadably. */
 @media (max-width: 560px) {
   .form-row-2 { grid-template-columns: 1fr; }
   .perm-grid { grid-template-columns: 1fr; }
@@ -995,26 +960,18 @@ img, svg, video, canvas { max-width: 100%; height: auto; }
   .livechat-header-actions button { flex: 1; }
 }
 
-/* Mock public-site header: with the desktop nav links hidden below 900px
-   (existing rule), keep the remaining brand/staff-link/CTA row from
-   wrapping awkwardly or overflowing on narrow phones. */
 @media (max-width: 480px) {
   .mock-nav-inner { padding: .6rem .8rem; gap: .5rem; }
-  .mock-nav-name { display: none; } /* logo alone is enough at this width */
+  .mock-nav-name { display: none; }
   .mock-nav-cta { padding: .5rem .8rem; font-size: .8rem; }
   .nav-staff-link { padding: .28rem .55rem; font-size: .78rem; }
 }
 
-/* Tablets (iPad portrait and similar) — give the staff sidebar a middle
-   ground between full-width mobile stacking and the fixed 210px desktop
-   rail so nav buttons aren't oversized relative to the content pane. */
 @media (min-width: 781px) and (max-width: 1024px) {
   .staff-sidebar { flex-basis: 180px; }
 }
 
-/* =========================================================================
-   NEW: Live Chat staff reply suggestions
-   ========================================================================= */
+/* Live Chat staff reply suggestions */
 .livechat-suggestions {
   display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 .5rem;
   min-height: 0;
