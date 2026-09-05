@@ -9,20 +9,11 @@ Run with:
     export ELEVENLABS_API_KEY=your-elevenlabs-key      # optional, enables Caribbean-accent read-aloud
     export ELEVENLABS_VOICE_ID=your-chosen-voice-id    # optional, from the ElevenLabs Voice Library
     export PINECONE_API_KEY=your-pinecone-key          # optional, enables live RAG retrieval (see agent.py)
-    export DATABASE_URL=your-postgres-url              # RECOMMENDED for production — see db.py
+    export DATABASE_URL=your-postgres-url              # REQUIRED on Render for persistence — see db.py
     export SELF_PING_URL=https://your-app.onrender.com # RECOMMENDED for production — see _keep_alive_loop below
     python app.py
 
 Then open http://localhost:5000
-
-STAFF AUTH — this version replaces the old shared-passcode model
-(STAFF_PASSCODE / STAFF_PASSCODE_WEBSITE / etc.) with individually named
-staff accounts and a granular, per-feature permission system. See db.py's
-PERMISSION_DEFS for the full list of permission keys and
-require_permission()/require_any_permission() below for how routes enforce
-them. A single Super Administrator account (username "AquaVision") is
-seeded automatically on first startup — see db._seed_super_admin_if_missing
-for the default password and how to override it.
 """
 
 import os
@@ -58,7 +49,6 @@ FRONTEND_DIR = BASE_DIR
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
-# ElevenLabs — used for Caribbean-accented read-aloud (see /api/tts below).
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
 ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "")
 ELEVENLABS_MODEL_ID = os.environ.get("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
@@ -324,7 +314,7 @@ WHAT YOU DO NOT HAVE ACCESS TO:
 AquaAssist is not connected to NAWASA's billing or account systems. You do not have access to any individual customer's actual account balance, consumption figures, or meter readings, and you must never state or estimate a number for these. If a customer asks for their specific balance or reading, say plainly that you can't pull up their account directly, and explain how they can check it instead (their NAWASA bill, the office, or by phone).
 
 KNOWLEDGE BASE — use the search_knowledge_base tool, don't guess:
-NAWASA's official FAQ knowledge base (new connections, billing, disconnections, water usage & leaks, general info) is NOT pre-loaded into this prompt — it lives in a searchable knowledge base that also includes content periodically imported from NAWASA's official website, nawasa.gd. Whenever a customer asks something that sounds like a policy, cost, process, or general-information question, call the search_knowledge_base tool with their question (or a short paraphrase of it) and answer using what it returns. Treat what it returns as authoritative — prefer it over general knowledge, and never contradict it. Paraphrase naturally in your own words rather than reciting it verbatim. If it returns no close match, say so plainly rather than guessing. If a customer wants more detail than what's in the knowledge base, you may point them to nawasa.gd for the full page.
+NAWASA's official FAQ knowledge base (new connections, billing, disconnections, water usage & leaks, general info) is NOT pre-loaded into this prompt — it lives in a searchable knowledge base that also includes content periodically imported from NAWASA's official website, nawasa.gd. Whenever a customer asks something that sounds like a policy, cost, process, or general-information question, call the search_knowledge_base tool with their question (or a short paraphrase of it) and answer using what it returns. Treat what it returns as authoritative — prefer it over general knowledge, and never contradict it. Paraphrase naturally in your own words rather than reciting it verbatim. If it returns no close match, say so plainly rather than guessing — tell the customer you couldn't find that information in what's available to you and suggest they contact NAWASA directly to confirm. If a customer wants more detail than what's in the knowledge base, you may point them to nawasa.gd for the full page.
 
 LIVE STAFF HANDOFF — use the request_human_handoff tool when you can't help:
 Use the request_human_handoff tool whenever a customer explicitly asks to speak with a person, representative, or agent, or whenever you genuinely cannot resolve what they need (e.g. the knowledge base has no matching entry and the customer is still stuck after you've said so, a billing dispute needs a manual account review, or the situation calls for judgment you don't have). Calling this tool alerts NAWASA staff in the Live Chat monitor and flags the conversation so a person can step in and reply directly in this same chat — you do not need to end the conversation or stop responding, staff will simply join in. After calling it, tell the customer plainly (in your own words, matching the current business-hours status) that a NAWASA representative has been notified and will follow up here, or call/WhatsApp them directly if that's more urgent. Don't call this tool for questions you can actually answer yourself — it's for genuine dead ends or explicit requests for a human, not a substitute for trying the knowledge base first.
@@ -361,9 +351,10 @@ def _build_kb_entries():
     """Everything the chatbot's knowledge-base search draws on: staff-
     authored FAQs plus the last-synced content from nawasa.gd, in the same
     {category, q, a} shape agent.seed_knowledge_base() already expects.
-    A page that has never successfully synced (status != "ok", empty
-    content) is skipped rather than feeding empty/error text into the
-    embedding index."""
+    A page that has never successfully synced, has been deactivated
+    (status == "removed" — no longer part of the curated crawl set), or
+    has no content is skipped rather than feeding empty/stale text into
+    the embedding index."""
     entries = list(db.load_faqs(include_disabled=False))
     for page in db.load_website_pages():
         if page.get("status") == "ok" and (page.get("content") or "").strip():
@@ -377,15 +368,9 @@ def _reseed_knowledge_base():
 
 def _sync_website_and_reseed():
     """Runs the nawasa.gd fetch, then rebuilds the Pinecone index so the
-    chatbot picks up whatever changed.
-
-    BUG FIX: this used to wrap BOTH steps in one try/except, so if the
-    knowledge-base reseed step failed for any reason (Pinecone hiccup,
-    auth issue) — even after the website fetch itself had already
-    succeeded and saved pages to the database — the whole function
-    returned {"ok": 0, "failed": 0, "total": 0}, making it look to staff
-    like nothing was synced at all, when the pages were in fact fetched
-    and saved fine. The two steps are now reported independently."""
+    chatbot picks up whatever changed. The two steps are reported
+    independently: a knowledge-base reseed failure after a successful
+    page fetch never masks the fact that pages WERE fetched and saved."""
     try:
         summary = website_sync.sync_all(db)
     except Exception as e:
@@ -407,11 +392,6 @@ WEBSITE_SYNC_INTERVAL_SECONDS = int(os.environ.get("WEBSITE_SYNC_INTERVAL_SECOND
 
 
 def _website_sync_loop():
-    # Run once shortly after startup (not blocking app boot — this runs in
-    # its own thread), then again on a fixed interval. A slow or
-    # unreachable nawasa.gd on any given run just means stale-but-present
-    # content until the next attempt — never a crash, never a blocked
-    # request path.
     while True:
         _sync_website_and_reseed()
         time.sleep(WEBSITE_SYNC_INTERVAL_SECONDS)
@@ -420,7 +400,7 @@ def _website_sync_loop():
 agent.seed_knowledge_base(_build_kb_entries())
 threading.Thread(target=_website_sync_loop, daemon=True).start()
 
-SESSIONS = {}  # session_id -> {"graph": compiled LangGraph agent, "territory": str}
+SESSIONS = {}
 LAST_REPORT = {}
 CURRENT_ATTACHMENT = {}
 
@@ -567,17 +547,7 @@ def _get_or_create_agent(session_id, territory):
     return sess["graph"]
 
 
-# =======================================================================
-# NEW: Staff auth — token-based, per-account, granular permissions.
-#
-# Every authenticated staff request carries an "X-Staff-Token" header
-# (issued by POST /api/staff/login). require_login() validates the token
-# and attaches the account to request.staff_account; require_permission()
-# additionally checks a specific permission key, with Super Administrators
-# always passing regardless of their stored permission list.
-# =======================================================================
 def _actor_label():
-    """Human-readable "who did this" for audit log entries."""
     account = getattr(request, "staff_account", None)
     if account:
         return f"{account['full_name']} ({account['username']})"
@@ -662,6 +632,7 @@ def api_init():
         "gemini_configured": bool(GEMINI_API_KEY),
         "tts_configured": bool(ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID),
         "rag_configured": bool(agent.PINECONE_API_KEY),
+        "persistent_db": db.USE_POSTGRES,
         "chatbot_name": load_features().get("chatbot_name") or "AquaAssist",
     })
 
@@ -946,9 +917,6 @@ def api_features_update():
 @app.route("/api/settings/chatbot-name", methods=["PATCH"])
 @require_login
 def api_settings_chatbot_name():
-    """Renaming the chatbot is restricted to the AquaVision Super
-    Administrator account specifically — not just anyone holding
-    manage_chatbot_settings — per the "AquaVision only" requirement."""
     if not request.staff_account.get("is_super_admin"):
         return jsonify({"error": "Only the AquaVision Super Administrator account can rename the chatbot."}), 403
     body = request.get_json(force=True) or {}
@@ -958,18 +926,13 @@ def api_settings_chatbot_name():
     if len(new_name) > 40:
         return jsonify({"error": "Keep the chatbot name under 40 characters."}), 400
     saved_name = db.set_chatbot_name(new_name)
-    SESSIONS.clear()  # in-flight agent graphs were built with the old system prompt — rebuild lazily with the new name
+    SESSIONS.clear()
     db.log_audit(_actor_label(), "Chatbot renamed", details=f"New name: {saved_name}")
     return jsonify({"chatbot_name": saved_name})
 
 
-# =======================================================================
-# NEW: Staff account authentication + management
-# =======================================================================
 @app.route("/api/staff/permission-defs")
 def api_staff_permission_defs():
-    """Public (read-only, no secrets) — lets the login/setup screen and the
-    permissions panel render checkboxes without hardcoding the list twice."""
     return jsonify([{"key": k, "category": c, "label": l} for (k, c, l) in db.PERMISSION_DEFS])
 
 
@@ -1010,11 +973,6 @@ def api_staff_me():
 @app.route("/api/staff/change-password", methods=["POST"])
 @require_login
 def api_staff_change_password():
-    """Password changes are restricted to the AquaVision Super
-    Administrator account only — no other account, regardless of its
-    permissions, can change any password (its own included) through this
-    endpoint or through /api/staff/accounts/<id>/reset-password below.
-    Only AquaVision may change its own password here."""
     account = request.staff_account
     if not account.get("is_super_admin"):
         return jsonify({"error": "Only the AquaVision Super Administrator account can change a password. "
@@ -1060,10 +1018,6 @@ def api_staff_accounts_create():
     if username.lower() == db.SUPER_ADMIN_USERNAME.lower():
         return jsonify({"error": "That username is reserved for the Super Administrator."}), 400
 
-    # Only someone who already has manage_permissions may grant permissions
-    # beyond none at creation time — otherwise an Administration-only
-    # account (create_accounts but not manage_permissions) could mint a
-    # fully-privileged account and hand it off.
     if permissions and not db.account_has_permission(request.staff_account, "manage_permissions"):
         return jsonify({"error": "You don't have permission to assign permissions. "
                                   "Create the account first, then ask a Super Administrator "
@@ -1093,12 +1047,6 @@ def api_staff_accounts_update(account_id):
 
     new_username = body.get("username")
     if target.get("is_super_admin") == "1" and new_username is not None and new_username.strip().lower() != target["username_lower"]:
-        # The startup seed (db._seed_super_admin_if_missing) looks for the
-        # exact username "AquaVision" and creates a fresh one with the
-        # default password if it's missing — so renaming this account
-        # would silently spawn a second Super Administrator on next
-        # restart. Keep the username fixed; everything else about the
-        # account (full name, role label, avatar, password) can change.
         return jsonify({"error": "The Super Administrator's username can't be changed."}), 400
 
     account, error = db.update_staff_account(
@@ -1153,10 +1101,6 @@ def api_staff_accounts_status(account_id):
 @app.route("/api/staff/accounts/<account_id>/reset-password", methods=["POST"])
 @require_login
 def api_staff_accounts_reset_password(account_id):
-    """Resetting ANY account's password — including your own — is
-    restricted to the AquaVision Super Administrator account only.
-    Holding "edit_accounts" is not enough by itself; only AquaVision can
-    reset passwords, no exceptions."""
     if not request.staff_account.get("is_super_admin"):
         return jsonify({"error": "Only the AquaVision Super Administrator account can reset a password."}), 403
 
@@ -1237,9 +1181,6 @@ def api_tts():
     return resp.content, 200, {"Content-Type": "audio/mpeg"}
 
 
-# =======================================================================
-# Knowledge base (FAQ) admin endpoints
-# =======================================================================
 @app.route("/api/faqs", methods=["GET"])
 @require_any_permission("manage_faqs", "manage_knowledge_base")
 def api_faqs_list():
@@ -1284,18 +1225,10 @@ def api_faqs_delete(faq_id):
     return jsonify({"deleted": faq_id})
 
 
-# =======================================================================
-# NEW: nawasa.gd website content sync — lets the chatbot's knowledge base
-# include official site content without ever fetching it live during a
-# customer conversation (see website_sync.py for the reliability
-# rationale).
-# =======================================================================
 @app.route("/api/website-content", methods=["GET"])
 @require_any_permission("sync_website_content", "manage_faqs", "manage_knowledge_base")
 def api_website_content_list():
     pages = db.load_website_pages()
-    # Trim the full page text for the admin list view — staff need to see
-    # what's synced and when, not re-read the whole page here.
     return jsonify([
         {
             "url": p["url"], "title": p["title"], "status": p["status"],
@@ -1303,6 +1236,7 @@ def api_website_content_list():
             "preview": (p.get("content") or "")[:220],
             "chars": len(p.get("content") or ""),
             "source": p.get("source") or "auto",
+            "first_indexed_at": p.get("first_indexed_at") or "",
         }
         for p in pages
     ])
@@ -1313,6 +1247,8 @@ def api_website_content_list():
 def api_website_content_sync():
     summary = _sync_website_and_reseed()
     detail = f"{summary.get('ok', 0)}/{summary.get('total', 0)} pages fetched"
+    if summary.get("deactivated"):
+        detail += f", {summary['deactivated']} deactivated"
     if summary.get("kb_reseed_ok") is False:
         detail += " — but the knowledge base rebuild failed, so search may still show old content"
     db.log_audit(_actor_label(), "Website content synced", details=detail)
@@ -1322,11 +1258,6 @@ def api_website_content_sync():
 @app.route("/api/website-content/manual", methods=["POST"])
 @require_any_permission("sync_website_content", "manage_faqs", "manage_knowledge_base")
 def api_website_content_manual():
-    """Fallback for when the automated fetch can't reach nawasa.gd at all
-    (e.g. it's behind an anti-bot/CAPTCHA gate that a plain HTTP client
-    can never pass — see website_sync.py). Staff open the real page in
-    their own browser, copy the text, and paste it here; a human browsing
-    normally isn't subject to the same bot-blocking the sync thread hits."""
     body = request.get_json(force=True) or {}
     url = (body.get("url") or "").strip()
     title = (body.get("title") or "").strip()
@@ -1342,9 +1273,6 @@ def api_website_content_manual():
     return jsonify({"ok": True, "url": url, "title": title})
 
 
-# =======================================================================
-# Unanswered questions
-# =======================================================================
 @app.route("/api/unanswered", methods=["GET"])
 @require_permission("review_unanswered_questions")
 def api_unanswered_list():
@@ -1375,18 +1303,12 @@ def api_unanswered_delete(q_id):
     return jsonify({"deleted": q_id})
 
 
-# =======================================================================
-# Chat stats (staff Overview panel)
-# =======================================================================
 @app.route("/api/chat-stats")
 @require_permission("view_chat_analytics")
 def api_chat_stats():
     return jsonify(db.get_chat_stats_today())
 
 
-# =======================================================================
-# Live Chat monitor
-# =======================================================================
 @app.route("/api/sessions")
 @require_any_permission("access_live_chat", "view_aquaassist_dashboard")
 def api_sessions_list():
@@ -1402,11 +1324,6 @@ def api_session_messages(session_id):
 @app.route("/api/sessions/<session_id>/suggestions")
 @require_any_permission("access_live_chat", "view_aquaassist_dashboard")
 def api_session_suggestions(session_id):
-    """Best-effort staff reply drafts for the Live Chat monitor — see
-    agent.suggest_staff_replies for why this is a separate, non-agentic
-    call. Always returns 200 with a (possibly empty) list rather than
-    erroring, since the monitor should degrade gracefully with no
-    suggestions rather than show a broken state."""
     messages = db.load_session_messages(session_id)
     suggestions = agent.suggest_staff_replies(messages)
     return jsonify({"suggestions": suggestions})
@@ -1494,9 +1411,6 @@ def api_handoffs_list():
     return jsonify(db.load_open_handoffs())
 
 
-# ---------------------------------------------------------------------
-# Keep-alive
-# ---------------------------------------------------------------------
 SELF_PING_URL = os.environ.get("SELF_PING_URL", "").strip()
 SELF_PING_INTERVAL_SECONDS = int(os.environ.get("SELF_PING_INTERVAL_SECONDS", "600"))
 
