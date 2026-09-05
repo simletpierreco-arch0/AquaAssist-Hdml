@@ -138,7 +138,12 @@ def fetch_page(url):
 def sync_all(db, pages=None):
     """Fetches every page in `pages` (defaults to NAWASA_PAGES) and saves
     each via db.save_website_page(). Returns a summary dict. A page that
-    fails does not stop the rest — see module docstring."""
+    fails does not stop the rest — see module docstring.
+
+    Also deactivates any previously-synced (auto) page whose URL is no
+    longer in the curated page list, so removing a URL from NAWASA_PAGES
+    is enough to retire it from the knowledge base on the next sync —
+    no manual database cleanup needed."""
     pages = pages if pages is not None else NAWASA_PAGES
     ok_count, error_count = 0, 0
     for url, title in pages:
@@ -150,5 +155,10 @@ def sync_all(db, pages=None):
         else:
             db.save_website_page(url, title, text, status="ok", error="")
             ok_count += 1
-    logger.info("Website sync complete: %d ok, %d failed.", ok_count, error_count)
-    return {"ok": ok_count, "failed": error_count, "total": len(pages)}
+    removed = 0
+    try:
+        removed = db.deactivate_website_pages_not_in([u for u, _ in pages])
+    except Exception as e:
+        logger.warning("Could not deactivate stale website pages: %s", e)
+    logger.info("Website sync complete: %d ok, %d failed, %d deactivated.", ok_count, error_count, removed)
+    return {"ok": ok_count, "failed": error_count, "total": len(pages), "deactivated": removed}
