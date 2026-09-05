@@ -433,7 +433,7 @@
       <svg class="wave" viewBox="0 0 500 40" preserveAspectRatio="none"><path class="wave-fill" d="M0,20 C150,45 350,-5 500,20 L500,40 L0,40 Z"></path></svg>
     </div>
 
-    <!-- ===== LOGIN: username + password (replaces the old shared passcode) ===== -->
+    <!-- ===== LOGIN: username + password ===== -->
     <div id="staffLoginCard" class="card" style="max-width: 380px;">
       <label class="field-label">Username</label>
       <input id="staffUsernameInput" type="text" autocomplete="username" placeholder="e.g. AquaVision" />
@@ -586,7 +586,7 @@
 
             <div class="card">
               <div class="section-label" style="margin-top:0;">🌐 nawasa.gd Website Content</div>
-              <p class="hint-text">AquaAssist's knowledge base also includes content periodically imported from the official NAWASA website, so the bot can draw on it without depending on nawasa.gd being reachable mid-conversation. <span id="websiteSyncSummary">Not synced yet.</span></p>
+              <p class="hint-text">AquaAssist's knowledge base also includes content periodically imported from the official NAWASA website, stored in the same persistent database as everything else, so the bot can draw on it without depending on nawasa.gd being reachable mid-conversation. <span id="websiteSyncSummary">Not synced yet.</span></p>
               <p id="websiteCaptchaNote" class="hint-text" style="display:none;color:#C98A11;">⚠️ nawasa.gd is presenting an anti-bot/CAPTCHA challenge to automated requests, so pages can't be fetched automatically right now. Use "Add manually" below instead — open the real page in your own browser, copy the text, and paste it here.</p>
               <button type="button" id="websiteSyncBtn" class="btn-secondary">🔄 Sync now</button>
               <button type="button" id="websiteManualToggleBtn" class="btn-secondary">✍️ Add manually</button>
