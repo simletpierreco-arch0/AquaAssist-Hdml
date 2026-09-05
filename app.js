@@ -13,10 +13,9 @@ const state = {
   sessionId: localStorage.getItem("aqua_session_id") || null,
   territory: localStorage.getItem("aqua_territory") || "Grenada",
   messages: JSON.parse(localStorage.getItem("aqua_messages") || "[]"),
-  // NEW: token-based staff auth (replaces the old shared-passcode model)
   staffToken: sessionStorage.getItem("aqua_staff_token") || "",
   staffAccount: JSON.parse(sessionStorage.getItem("aqua_staff_account") || "null"),
-  permissionDefs: [], // [{key, category, label}, ...] loaded from /api/staff/permission-defs
+  permissionDefs: [],
   staffAccountsCache: [],
   editingAccountId: null,
   faqsAdmin: [],
@@ -51,17 +50,11 @@ function applyChatbotName(name) {
     const el = document.getElementById(id);
     if (el) el.textContent = clean;
   });
-  // If the greeting bubble is still just the default welcome message (no
-  // real conversation yet), refresh it in place so a rename propagates
-  // without the customer needing to start a new chat.
   if (changed && state.messages.length === 0) {
     renderChat();
   }
 }
 
-// ---------------------------------------------------------------------
-// Widget shell
-// ---------------------------------------------------------------------
 function setupWidgetToggle() {
   const widget = $("#aquaWidget");
   const panel = $("#widgetPanel");
@@ -103,9 +96,6 @@ function setupWidgetToggle() {
   });
 }
 
-// ---------------------------------------------------------------------
-// Init
-// ---------------------------------------------------------------------
 async function init() {
   setupWidgetToggle();
   applyPrefsFromStorage();
@@ -148,9 +138,6 @@ async function init() {
   });
 }
 
-// ---------------------------------------------------------------------
-// Site nav
-// ---------------------------------------------------------------------
 function setupSiteNav() {
   const showSite = (pushUrl = true) => {
     $("#mockSiteMain").style.display = "";
@@ -247,9 +234,6 @@ function startApp() {
     renderHero();
   }, 60000);
 
-  // Near-real-time sync: AquaVision-only changes (chatbot name) and
-  // staff-controlled feature toggles/maintenance message propagate to
-  // every open customer tab within ~20s, no manual refresh needed.
   setInterval(async () => {
     try {
       const [featRes, initRes] = await Promise.all([
@@ -264,9 +248,6 @@ function startApp() {
   }, 20000);
 }
 
-// ---------------------------------------------------------------------
-// Hero / business hours
-// ---------------------------------------------------------------------
 function renderHero() {
   const bh = state.config.business_hours;
   const pill = $("#hoursPill");
@@ -299,9 +280,6 @@ function renderContactRow() {
   $("#whatsappFloat").href = wa;
 }
 
-// ---------------------------------------------------------------------
-// Feature flags
-// ---------------------------------------------------------------------
 const FEATURE_DEFS = [
   { id: "faqs", label: "FAQs" },
   { id: "water_tips", label: "Water Tips" },
@@ -445,9 +423,6 @@ function applyMaintenanceMode() {
   }
 }
 
-// ---------------------------------------------------------------------
-// Water Service Tips
-// ---------------------------------------------------------------------
 async function loadTips() {
   try {
     const res = await fetch(`${API}/api/tips`);
@@ -491,9 +466,6 @@ function stopTipRotation() {
   }
 }
 
-// ---------------------------------------------------------------------
-// Tabs (customer widget)
-// ---------------------------------------------------------------------
 function setupTabs() {
   $$(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -508,9 +480,6 @@ function setupTabs() {
   });
 }
 
-// ---------------------------------------------------------------------
-// Quick actions
-// ---------------------------------------------------------------------
 const QUICK_ACTIONS = [
   { label: "👷 Report a Leak", prompt: "I'd like to report a water leak." },
   { label: "🚰 Water Supply & Outages", prompt: "Are there any scheduled outages or planned maintenance in my area?" },
@@ -568,9 +537,6 @@ function suggestFollowupChips() {
   return null;
 }
 
-// ---------------------------------------------------------------------
-// FAQ (customer-facing)
-// ---------------------------------------------------------------------
 function renderFAQ(query) {
   const q = (query || "").toLowerCase();
   const results = state.config.faqs.filter(
@@ -607,9 +573,6 @@ function renderFAQ(query) {
   $("#faqSearch").oninput = (e) => renderFAQ(e.target.value);
 }
 
-// ---------------------------------------------------------------------
-// Chat
-// ---------------------------------------------------------------------
 let pendingAttachment = null;
 let pendingReportPhoto = null;
 
@@ -674,9 +637,6 @@ function appendBubble(role, content, attachmentName, reportCard, attachmentMime,
   }
 }
 
-// ---------------------------------------------------------------------
-// Text-to-speech
-// ---------------------------------------------------------------------
 let availableVoices = [];
 let currentAudio = null;
 let currentSpeakBtn = null;
@@ -857,9 +817,6 @@ function setupVoiceTestButton() {
   });
 }
 
-// ---------------------------------------------------------------------
-// Lightweight markdown + auto-linking
-// ---------------------------------------------------------------------
 const PHONE_NUMBER_RE = /(\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/g;
 
 function linkifyPhoneNumbers(html) {
@@ -1028,9 +985,6 @@ async function sendMessage(text, directAttachment, locationCard) {
   }
 }
 
-// ---------------------------------------------------------------------
-// Staff live-message polling (customer widget side)
-// ---------------------------------------------------------------------
 let staffPollTimer = null;
 function startStaffMessagePolling() {
   if (staffPollTimer) return;
@@ -1055,9 +1009,6 @@ function startStaffMessagePolling() {
   }, 6000);
 }
 
-// ---------------------------------------------------------------------
-// Outage banners (customer)
-// ---------------------------------------------------------------------
 function grenadaTodayISO() {
   const grenadaMs = Date.now() - 4 * 60 * 60 * 1000;
   return new Date(grenadaMs).toISOString().slice(0, 10);
@@ -1090,9 +1041,6 @@ async function renderOutageBanners() {
   });
 }
 
-// ---------------------------------------------------------------------
-// Report & Track
-// ---------------------------------------------------------------------
 function nearestParish(lat, lng) {
   const pointSets = state.config.parish_reference_points;
   if (pointSets) {
@@ -1256,9 +1204,6 @@ function setupReportForm() {
   });
 }
 
-// ---------------------------------------------------------------------
-// Camera capture
-// ---------------------------------------------------------------------
 let cameraStream = null;
 let cameraFacingMode = "environment";
 let cameraTarget = null;
@@ -1449,9 +1394,6 @@ function closeCamera() {
   $("#cameraModal").style.display = "none";
 }
 
-// ---------------------------------------------------------------------
-// Voice notes
-// ---------------------------------------------------------------------
 let voiceRecorder = null;
 let voiceChunks = [];
 let voiceStartTime = null;
@@ -1514,9 +1456,6 @@ function setupMic() {
   });
 }
 
-// ---------------------------------------------------------------------
-// Location sharing
-// ---------------------------------------------------------------------
 function setupLocationShare() {
   if (!navigator.geolocation) {
     $("#chatLocationBtn").style.display = "none";
@@ -1584,9 +1523,6 @@ function setupTrackForm() {
   });
 }
 
-// ---------------------------------------------------------------------
-// Notify
-// ---------------------------------------------------------------------
 const NOTIFY_CATEGORIES = ["Planned maintenance", "Water outages", "Emergency repairs", "Service updates"];
 function renderNotifyCategories() {
   const wrap = $("#notifyCategories");
@@ -1617,9 +1553,6 @@ function setupNotifyForm() {
   });
 }
 
-// ---------------------------------------------------------------------
-// Settings (customer)
-// ---------------------------------------------------------------------
 function setupSettings() {
   const dark = $("#darkModeToggle"), hc = $("#highContrastToggle"), large = $("#largeTextToggle"), readAloud = $("#readAloudToggle");
   dark.checked = document.body.classList.contains("dark");
@@ -1684,12 +1617,6 @@ function setupSettings() {
   });
 }
 
-// =========================================================================
-// STAFF PORTAL — "NAWASA Digital Management Center"
-// =========================================================================
-
-// Which permission (or set of permissions — any one is enough) unlocks each
-// sidebar section. `null` means "any logged-in staff member can see this".
 const SECTION_PERMISSIONS = {
   "overview": null,
   "website-alerts": ["manage_service_alerts", "view_website_management"],
@@ -1704,7 +1631,7 @@ const SECTION_PERMISSIONS = {
   "reports-notify": ["view_reports", "manage_subscribers"],
   "staff-accounts": ["manage_staff_accounts"],
   "audit-log": ["system_settings", "manage_staff_accounts"],
-  "chatbot-name": "SUPER_ADMIN_ONLY", // special-cased below — no permission unlocks this except AquaVision itself
+  "chatbot-name": "SUPER_ADMIN_ONLY",
 };
 
 function hasPerm(key) {
@@ -1714,7 +1641,7 @@ function hasPerm(key) {
   return (acct.permissions || []).includes(key);
 }
 function hasAnyPerm(keys) {
-  if (!keys) return true; // null => always visible
+  if (!keys) return true;
   return keys.some((k) => hasPerm(k));
 }
 
@@ -1774,9 +1701,6 @@ function applyStaffRoleVisibility() {
     label.textContent = `${state.staffAccount.avatar || "🙂"} ${state.staffAccount.full_name} — ${state.staffAccount.role}`;
   }
 
-  // Only AquaVision can change a password — hide the self-service panel
-  // (and everyone else's Reset Password button, handled elsewhere) for
-  // every other account.
   const pwSection = $("#changePasswordSection");
   if (pwSection) pwSection.style.display = (state.staffAccount && state.staffAccount.is_super_admin) ? "block" : "none";
 }
@@ -1831,9 +1755,6 @@ async function loadOverviewAquaStats() {
   }
 }
 
-// ---------------------------------------------------------------------
-// Knowledge Base (FAQ) admin
-// ---------------------------------------------------------------------
 async function loadFaqsAdmin() {
   const res = await staffFetch("/api/faqs");
   if (res.status === 401) { staffLogout(); return; }
@@ -1892,9 +1813,6 @@ function renderFaqManageList(faqs, query) {
   });
 }
 
-// ---------------------------------------------------------------------
-// Unanswered questions admin
-// ---------------------------------------------------------------------
 async function loadUnansweredAdmin() {
   const res = await staffFetch("/api/unanswered");
   if (res.status === 401) { staffLogout(); return; }
@@ -1952,9 +1870,6 @@ function renderUnansweredList(items) {
   });
 }
 
-// ---------------------------------------------------------------------
-// Live Chat monitor
-// ---------------------------------------------------------------------
 let liveChatTranscriptTimer = null;
 let liveChatSessionsTimer = null;
 let handoffsTimer = null;
@@ -2067,11 +1982,6 @@ function renderLiveChatTranscript(messages) {
   if (wasAtBottom || messages.length <= 2) wrap.scrollTop = wrap.scrollHeight;
 }
 
-// ---------------------------------------------------------------------
-// NEW: Staff reply suggestions ("💡" button + auto-load on open). Clicking
-// a suggestion only fills the reply box — it never sends on its own, so
-// staff always review/edit before anything reaches the customer.
-// ---------------------------------------------------------------------
 async function loadLiveChatSuggestions() {
   const sessionId = state.currentLiveChatSession;
   if (!sessionId) return;
@@ -2080,7 +1990,7 @@ async function loadLiveChatSuggestions() {
   wrap.innerHTML = `<span class="hint-text livechat-suggestions-loading">💡 Thinking of reply ideas...</span>`;
   try {
     const res = await staffFetch(`/api/sessions/${encodeURIComponent(sessionId)}/suggestions`);
-    if (sessionId !== state.currentLiveChatSession) return; // switched conversations while this was in flight
+    if (sessionId !== state.currentLiveChatSession) return;
     if (!res.ok) { wrap.innerHTML = ""; return; }
     const data = await res.json();
     renderLiveChatSuggestions(data.suggestions || []);
@@ -2120,7 +2030,7 @@ function setupLiveChatMonitor() {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!state.currentLiveChatSession) return;
-    if (liveChatSending) return; // guards against double-tap / double-submit on mobile
+    if (liveChatSending) return;
     const input = $("#liveChatReplyText");
     const text = input.value.trim();
     if (!text) return;
@@ -2142,7 +2052,7 @@ function setupLiveChatMonitor() {
     loadLiveChatTranscript();
     loadLiveChatSessions();
     loadHandoffs();
-    loadLiveChatSuggestions(); // context changed — refresh the reply ideas
+    loadLiveChatSuggestions();
   });
 
   const suggestBtn = $("#liveChatSuggestBtn");
@@ -2250,9 +2160,6 @@ function setupStaffNotifySetting() {
   });
 }
 
-// =========================================================================
-// NEW: Staff Accounts management (Administration)
-// =========================================================================
 function permissionCheckboxesHTML(idPrefix, checkedKeys) {
   const checked = new Set(checkedKeys || []);
   const byCategory = {};
@@ -2276,9 +2183,6 @@ function collectCheckedPermissions(container) {
 }
 
 function accountCanBeManagedByMe(account) {
-  // The Super Administrator can only be modified by itself (e.g. password
-  // change); everyone else is fair game for someone with the right
-  // permission (server enforces this too — this just drives the UI).
   if (!account.is_super_admin) return true;
   return state.staffAccount && state.staffAccount.id === account.id;
 }
@@ -2378,24 +2282,11 @@ function openAccountEditor(account) {
   $("#accountFormTitle").textContent = account ? `Edit ${account.username}` : "Create staff account";
   $("#accountFullName").value = account ? account.full_name : "";
   $("#accountUsername").value = account ? account.username : "";
-  // BUG FIX: this used to always disable the username field on edit,
-  // AND submitAccountForm() never even sent it — so username could never
-  // actually be changed from the UI despite the backend fully supporting
-  // it. Now editable for everyone except the Super Administrator: renaming
-  // AquaVision away from that exact username would make the startup seed
-  // (see db._seed_super_admin_if_missing) create a brand-new second
-  // Super Administrator account with the default password on next
-  // restart, since it only checks for that literal username.
   $("#accountUsername").disabled = !!(account && account.is_super_admin);
   $("#accountRole").value = account ? account.role : "";
   $("#accountAvatar").value = account ? account.avatar : "💧";
   $("#accountPassword").value = "";
   const iAmSuperAdmin = !!(state.staffAccount && state.staffAccount.is_super_admin);
-  // Only AquaVision may set/reset a password. Creating a brand-new
-  // account still needs an initial password from whoever has
-  // create_accounts; changing an EXISTING account's password does not —
-  // that's restricted to AquaVision only, so hide the field entirely
-  // when editing as anyone else.
   const showPasswordField = !account || iAmSuperAdmin;
   $("#accountPassword").style.display = showPasswordField ? "" : "none";
   $("#accountPassword").previousElementSibling.style.display = showPasswordField ? "" : "none";
@@ -2538,9 +2429,6 @@ function setupStaffAccountsUI() {
   }
 }
 
-// ---------------------------------------------------------------------
-// Audit Log
-// ---------------------------------------------------------------------
 async function loadAuditLog() {
   const res = await staffFetch("/api/audit-log");
   if (res.status === 401) { staffLogout(); return; }
@@ -2559,9 +2447,6 @@ async function loadAuditLog() {
   `).join("");
 }
 
-// ---------------------------------------------------------------------
-// NEW: nawasa.gd website content sync (Knowledge Base admin panel)
-// ---------------------------------------------------------------------
 async function loadWebsiteContentAdmin() {
   const res = await staffFetch("/api/website-content");
   if (res.status === 401) { staffLogout(); return; }
@@ -2590,7 +2475,7 @@ function renderWebsiteContentList(pages) {
   pages.forEach((p) => {
     const row = document.createElement("div");
     row.className = "tip-manage-row";
-    const statusBadge = p.status === "ok" ? `<span style="color:#2E9E5B;">✓ ${p.chars} chars</span>` : `<span style="color:#D64545;">✗ ${escapeHtml(p.error || "failed")}</span>`;
+    const statusBadge = p.status === "ok" ? `<span style="color:#2E9E5B;">✓ ${p.chars} chars</span>` : p.status === "removed" ? `<span style="color:#999;">— removed</span>` : `<span style="color:#D64545;">✗ ${escapeHtml(p.error || "failed")}</span>`;
     const sourceBadge = p.source === "manual" ? ` <span style="color:#0072BC;">(manually added)</span>` : "";
     const previewHtml = p.status === "ok" && p.preview
       ? `<div class="hint-text" style="margin-top:.2rem;">"${escapeHtml(p.preview)}${p.chars > 220 ? "…" : ""}"</div>`
@@ -2622,7 +2507,7 @@ function setupWebsiteSync() {
           alert(`Fetched ${data.ok}/${data.total} pages from nawasa.gd successfully, but rebuilding the searchable knowledge base failed (${data.kb_reseed_error || "unknown error"}). The pages are saved — try syncing again in a moment to retry the knowledge-base rebuild.`);
         }
         await loadWebsiteContentAdmin();
-        await loadFaqsAdmin(); // knowledge base entries changed too
+        await loadFaqsAdmin();
       } finally {
         btn.disabled = false;
         btn.textContent = original;
@@ -2670,9 +2555,6 @@ function setupWebsiteSync() {
   }
 }
 
-// ---------------------------------------------------------------------
-// Staff portal core (login, feature toggles, reports, map, outages, tips)
-// ---------------------------------------------------------------------
 function setupStaffPortal() {
   setupReportsTableActions();
   setupReportNotes();
@@ -2777,15 +2659,6 @@ function setupStaffPortal() {
   });
 }
 
-// ---------------------------------------------------------------------
-// NEW: Keep a logged-in staffer's own permissions in sync. Without this,
-// an account (or its permissions) changed by someone else would silently
-// keep the OLD access/sidebar until the affected person logged out and
-// back in — confusing for both "you were granted X but don't see it yet"
-// and, more importantly, "you were supposed to lose access to Y but
-// still see the button" (the backend already blocks the actual request
-// either way — this only fixes what the UI shows).
-// ---------------------------------------------------------------------
 async function refreshMyStaffAccount() {
   try {
     const res = await staffFetch("/api/staff/me");
@@ -3054,11 +2927,6 @@ function setupReportsTableActions() {
   });
 }
 
-// ---------------------------------------------------------------------
-// NEW: Internal report notes — the backend and permission for this
-// already existed, but there was no way to actually reach it from the
-// Staff Portal. This wires it up.
-// ---------------------------------------------------------------------
 let reportNotesCurrentRef = null;
 
 async function openReportNotes(reference) {
