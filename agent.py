@@ -1,7 +1,5 @@
 """
 AquaAssist agent layer — LangGraph orchestration + Pinecone-backed RAG.
-Unchanged from the existing project — carried forward as-is. See the
-project README for details on the LangChain agent + Pinecone RAG wiring.
 """
 
 import json
@@ -125,14 +123,6 @@ def seed_knowledge_base(faqs, force=False):
     try:
         index = _get_pinecone_index()
     except Exception as e:
-        # BUG FIX: this call used to sit outside the try/except below, so
-        # any Pinecone connectivity/auth/index-creation failure raised
-        # straight up through seed_knowledge_base() uncaught. Since this
-        # function is called from app.py's _reseed_knowledge_base() inside
-        # a broader try/except, that meant a Pinecone hiccup could make
-        # the *entire* website-content sync look like it fetched nothing
-        # (see app.py's _sync_website_and_reseed fix) even when the
-        # website pages themselves were fetched and saved just fine.
         logger.error("Could not reach Pinecone to seed the knowledge base (%s) — "
                      "falling back to the static FAQ/website text dump for now.", e)
         return
@@ -151,20 +141,9 @@ def seed_knowledge_base(faqs, force=False):
                 logger.info("Pinecone index %r already seeded (%d vectors) — skipping.", PINECONE_INDEX_NAME, existing_count)
                 return
         else:
-            # BUG FIX: vectors were previously upserted with purely
-            # positional ids (faq-0, faq-1, ...) and NEVER deleted. If the
-            # entry list later shrinks (an FAQ deleted, or a synced
-            # website page that fails to re-fetch and drops out), the old
-            # vectors at the now-unused higher ids were left behind
-            # forever and could keep surfacing in search results long
-            # after their source content was gone. A forced reseed is
-            # meant to be a full rebuild, so clear the index first.
             try:
                 index.delete(delete_all=True)
             except Exception as e:
-                # Some Pinecone setups error on delete_all against an
-                # already-empty index — that's fine, just means there was
-                # nothing stale to clear.
                 logger.info("Pinecone delete-all before reseed: %s (continuing)", e)
         embeddings = _get_embeddings()
         texts = [f"{f['q']} {f['a']}" for f in faqs]
@@ -203,10 +182,6 @@ def make_search_knowledge_base_tool(on_no_match=None):
         try:
             index = _get_pinecone_index()
         except Exception as e:
-            # Same class of bug as seed_knowledge_base above — this used
-            # to be unguarded, so a Pinecone hiccup mid-conversation would
-            # raise out of this tool call entirely instead of gracefully
-            # falling back to the static text dump.
             logger.error("Could not reach Pinecone for a knowledge-base search (%s) — using static fallback.", e)
             return _static_faq_fallback_text
         if index is None:
@@ -269,16 +244,6 @@ def invoke_agent(graph, thread_id, content_blocks):
     return _extract_reply_text(final_message.content)
 
 
-# =======================================================================
-# NEW: Staff reply suggestions for the Live Chat monitor.
-#
-# Deliberately a single, non-agentic completion call — no tools, no
-# checkpointer, no shared state with the customer-facing conversation
-# graph. Kept fully separate on purpose: a slow or failed suggestion
-# call must never affect the actual chatbot, and this never writes
-# anything or sends anything on its own — it only proposes drafts for a
-# human to review, edit, and choose to send (or not).
-# =======================================================================
 def suggest_staff_replies(transcript_messages, max_suggestions=3):
     """transcript_messages: list of {"role","content",...} dicts from
     db.load_session_messages() (role is "user"/"assistant"/"staff").
@@ -295,7 +260,7 @@ def suggest_staff_replies(transcript_messages, max_suggestions=3):
         role_labels = {"user": "Customer", "assistant": "AquaAssist (bot)", "staff": "Staff"}
         convo_lines = [
             f"{role_labels.get(m.get('role'), m.get('role'))}: {m.get('content', '')}"
-            for m in transcript_messages[-12:]  # recent context is what matters; keeps the prompt small and fast
+            for m in transcript_messages[-12:]
         ]
         convo_text = "\n".join(convo_lines)
 
