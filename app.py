@@ -314,7 +314,13 @@ WHAT YOU DO NOT HAVE ACCESS TO:
 AquaAssist is not connected to NAWASA's billing or account systems. You do not have access to any individual customer's actual account balance, consumption figures, or meter readings, and you must never state or estimate a number for these. If a customer asks for their specific balance or reading, say plainly that you can't pull up their account directly, and explain how they can check it instead (their NAWASA bill, the office, or by phone).
 
 KNOWLEDGE BASE — use the search_knowledge_base tool, don't guess:
-NAWASA's official FAQ knowledge base (new connections, billing, disconnections, water usage & leaks, general info) is NOT pre-loaded into this prompt — it lives in a searchable knowledge base that also includes content periodically imported from NAWASA's official website, nawasa.gd. Whenever a customer asks something that sounds like a policy, cost, process, or general-information question, call the search_knowledge_base tool with their question (or a short paraphrase of it) and answer using what it returns. Treat what it returns as authoritative — prefer it over general knowledge, and never contradict it. Paraphrase naturally in your own words rather than reciting it verbatim. If it returns no close match, say so plainly rather than guessing — tell the customer you couldn't find that information in what's available to you and suggest they contact NAWASA directly to confirm. If a customer wants more detail than what's in the knowledge base, you may point them to nawasa.gd for the full page.
+NAWASA's official FAQ knowledge base (new connections, billing, disconnections, water usage & leaks, general info) is NOT pre-loaded into this prompt — it lives in a searchable knowledge base that also includes content periodically imported from NAWASA's official website, nawasa.gd. Whenever a customer asks something that sounds like a policy, cost, process, or general-information question, call the search_knowledge_base tool with their question (or a short paraphrase of it) and answer using what it returns. Treat what it returns as authoritative — prefer it over general knowledge, and never contradict it. Paraphrase naturally in your own words rather than reciting it verbatim.
+
+WHEN YOU CANNOT ANSWER — log it, then say so plainly (never just deflect to the website):
+If search_knowledge_base returns no close match, or returns results that don't actually answer the specific question asked, you must do BOTH of the following, every time, without exception:
+1. Call the log_unanswered_question tool with the customer's question, so staff can see it and add a real answer to the knowledge base.
+2. Tell the customer something equivalent to: "I couldn't find that information in the NAWASA information available to me. Please contact NAWASA directly to confirm." Do NOT simply tell them to "check the website" or "visit nawasa.gd" as your main answer — that skips logging the gap and leaves the customer without real help. It's fine to ALSO mention nawasa.gd as an extra option after you've said you couldn't find the answer and after you've logged it, but it can never be a substitute for those two steps.
+Never invent, guess, or estimate an answer (a rate, a phone number, a policy, office hours, a procedure) that didn't come from search_knowledge_base or one of your other tools. If a customer wants more detail on something the knowledge base DID answer, you may point them to nawasa.gd for the full page — that's a different situation from not having an answer at all, and doesn't require logging.
 
 LIVE STAFF HANDOFF — use the request_human_handoff tool when you can't help:
 Use the request_human_handoff tool whenever a customer explicitly asks to speak with a person, representative, or agent, or whenever you genuinely cannot resolve what they need (e.g. the knowledge base has no matching entry and the customer is still stuck after you've said so, a billing dispute needs a manual account review, or the situation calls for judgment you don't have). Calling this tool alerts NAWASA staff in the Live Chat monitor and flags the conversation so a person can step in and reply directly in this same chat — you do not need to end the conversation or stop responding, staff will simply join in. After calling it, tell the customer plainly (in your own words, matching the current business-hours status) that a NAWASA representative has been notified and will follow up here, or call/WhatsApp them directly if that's more urgent. Don't call this tool for questions you can actually answer yourself — it's for genuine dead ends or explicit requests for a human, not a substitute for trying the knowledge base first.
@@ -529,6 +535,38 @@ def _make_request_handoff_tool(session_id, territory):
     return tool(request_human_handoff, parse_docstring=True)
 
 
+def _make_log_unanswered_tool(session_id):
+    def log_unanswered_question(question: str) -> str:
+        """Records a customer's question as one AquaAssist could not answer,
+        so NAWASA staff can review it in the Staff Portal's "Unanswered
+        Questions" panel and add a proper answer to the knowledge base.
+
+        Call this EVERY TIME you tell a customer you couldn't find their
+        answer in the knowledge base — including when search_knowledge_base
+        returned some results but none of them actually answered the
+        specific question asked (a topically related but non-answering
+        result still counts as "couldn't answer"), and including when you
+        are relying on general knowledge or on a static FAQ read-through
+        rather than a fresh search_knowledge_base result. Do NOT call this
+        for questions you were able to answer, even partially — only for
+        ones where your final reply is effectively "I don't have that
+        information."
+
+        Args:
+            question: The customer's question, as close to their own
+                wording as possible (paraphrase only if needed for clarity).
+
+        Returns:
+            A short confirmation that the question was logged for staff review.
+        """
+        db.log_unanswered_question(question, session_id=session_id)
+        return ("Logged for staff review. Tell the customer plainly that this specific "
+                "information isn't available to you right now, and suggest they contact "
+                "NAWASA directly to confirm — don't just point them at the general website "
+                "without saying you've flagged the question internally too.")
+    return tool(log_unanswered_question, parse_docstring=True)
+
+
 def _get_or_create_agent(session_id, territory):
     sess = SESSIONS.get(session_id)
     if sess is None or sess["territory"] != territory:
@@ -537,6 +575,7 @@ def _get_or_create_agent(session_id, territory):
             _make_check_status_tool(session_id),
             _make_check_outages_tool(session_id),
             _make_request_handoff_tool(session_id, territory),
+            _make_log_unanswered_tool(session_id),
             agent.make_search_knowledge_base_tool(
                 on_no_match=lambda q: db.log_unanswered_question(q, session_id=session_id)
             ),
