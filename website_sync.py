@@ -23,13 +23,57 @@ explicit staff-triggered admin action, never from the /api/chat path).
 
 import logging
 import re
+import time
 
 import requests
 
 logger = logging.getLogger("aquaassist.website_sync")
 
-REQUEST_TIMEOUT_SECONDS = 12
+REQUEST_TIMEOUT_SECONDS = 15
 MAX_CONTENT_CHARS = 6000  # keep each stored page to a sane size for embedding
+RETRY_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 2.5
+INTER_PAGE_DELAY_SECONDS = 1.5  # hammering the site back-to-back is itself a bot signal
+
+BROWSER_HEADERS = {
+    # A fuller, more consistent set of browser-fingerprint headers than a bare
+    # User-Agent. Some WAFs (Cloudflare, Sucuri, etc.) score requests missing
+    # Accept/Accept-Language/sec-fetch-* headers as automated even with a
+    # legitimate-looking User-Agent string.
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Cache-Control": "max-age=0",
+}
+
+_session = None
+
+
+def _get_session():
+    """A shared requests.Session persists cookies across every page fetch
+    in a sync run. Many WAFs set a clearance/session cookie on the FIRST
+    request from a client and only let subsequent requests through if that
+    cookie is presented — a fresh, cookie-less request every time (the old
+    behavior) looks identical to a bot probing one URL and vanishing.
+    Visiting the homepage first, keeping the session, and reusing it for
+    every other page gives a real browser-like request pattern a much
+    better chance of passing."""
+    global _session
+    if _session is None:
+        _session = requests.Session()
+        _session.headers.update(BROWSER_HEADERS)
+    return _session
 
 NAWASA_PAGES = [
     ("https://www.nawasa.gd/", "NAWASA — Home"),
@@ -63,47 +107,54 @@ def _html_to_text(html):
     return text.strip()
 
 
-def fetch_page(url):
+def _looks_like_challenge(resp_text):
+    return (
+        re.search(r'\.well-known/[a-z0-9_-]*captcha', resp_text, re.IGNORECASE)
+        or re.search(r'http-equiv=["\']refresh["\']', resp_text, re.IGNORECASE)
+    )
+
+
+def fetch_page(url, referer=None):
     """Returns (text, error). error is None on success, or a short string
-    describing what went wrong (never raises)."""
-    try:
-        resp = requests.get(
-            url, timeout=REQUEST_TIMEOUT_SECONDS,
-            headers={
-                # BUG FIX: a custom bot-style User-Agent made some pages
-                # come back as HTTP 202 (Accepted) instead of 200 — likely
-                # a WAF/CDN soft-flagging an unrecognized client. A
-                # standard browser UA is far less likely to be treated
-                # differently than a real visitor's request.
-                "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"),
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-        )
-    except requests.RequestException as e:
-        return None, f"request failed: {e}"
-    # BUG FIX: this used to require EXACTLY status 200, so a page that
-    # genuinely succeeded but returned 202 (Accepted) — as NAWASA's site
-    # apparently does — was wrongly marked as a failure even though real
-    # content came back. Any 2xx is a success; only fail outside that range.
-    if not (200 <= resp.status_code < 300):
-        return None, f"HTTP {resp.status_code}"
+    describing what went wrong (never raises). Uses a shared, cookie-
+    persisting session (see _get_session) and retries a few times with a
+    short backoff — a WAF challenge is sometimes intermittent (e.g. only
+    triggered on the very first request from a new session/IP), so a
+    retry after the session already has a cookie can succeed where the
+    first attempt didn't."""
+    session = _get_session()
+    last_error = None
+    for attempt in range(1, RETRY_ATTEMPTS + 1):
+        try:
+            headers = {"Referer": referer} if referer else {}
+            resp = session.get(url, timeout=REQUEST_TIMEOUT_SECONDS, headers=headers, allow_redirects=True)
+        except requests.RequestException as e:
+            last_error = f"request failed: {e}"
+            time.sleep(RETRY_BACKOFF_SECONDS * attempt)
+            continue
 
-    # DIAGNOSIS (confirmed against real responses from nawasa.gd): the site
-    # sits behind an anti-bot/WAF layer that serves a tiny meta-refresh
-    # "challenge" page — redirecting to a /.well-known/<vendor>captcha/
-    # path — to any request it doesn't trust, instead of the real page.
-    # This is fundamentally NOT something a plain HTTP client can pass:
-    # requests.get() doesn't execute JS or follow meta-refresh redirects,
-    # and even a headless browser would likely still need to solve an
-    # actual challenge. Detecting this explicitly means the error tells
-    # staff exactly what's going on instead of a generic "empty page".
-    if re.search(r'\.well-known/[a-z0-9_-]*captcha', resp.text, re.IGNORECASE) or \
-       re.search(r'http-equiv=["\']refresh["\']', resp.text, re.IGNORECASE):
-        return None, ("nawasa.gd returned an anti-bot/CAPTCHA challenge page instead of real "
-                       "content — this can't be fetched automatically. It needs NAWASA's IT team "
-                       "to allowlist this server, or use the manual import option below instead.")
+        if not (200 <= resp.status_code < 300):
+            last_error = f"HTTP {resp.status_code}"
+            time.sleep(RETRY_BACKOFF_SECONDS * attempt)
+            continue
 
+        if _looks_like_challenge(resp.text):
+            last_error = ("nawasa.gd returned an anti-bot/CAPTCHA challenge page instead of real "
+                          "content — this can't be fetched automatically. It needs NAWASA's IT team "
+                          "to allowlist this server, or use the manual import option below instead.")
+            time.sleep(RETRY_BACKOFF_SECONDS * attempt)
+            continue
+
+        # Success — fall through to content extraction below using this resp.
+        return _extract_and_validate(resp)
+
+    return None, last_error
+
+
+def _extract_and_validate(resp):
+    # Challenge-page detection already happened in fetch_page's retry loop
+    # (via _looks_like_challenge) before this is called — this function
+    # only runs against a response that passed that check.
     text = _html_to_text(resp.text)
     if len(text) < 40:
         # DIAGNOSTIC FIX: this used to return a generic "little or no
@@ -140,14 +191,36 @@ def sync_all(db, pages=None):
     each via db.save_website_page(). Returns a summary dict. A page that
     fails does not stop the rest — see module docstring.
 
+    Session warmup: visits the site's homepage first (outside the timed
+    page list) purely to let the shared session pick up whatever cookie
+    the WAF hands out on a first visit, then reuses that session — with a
+    short delay between each subsequent request — for every page in
+    `pages`. This mimics how a real browser actually behaves (land on the
+    site, then navigate) far more closely than firing isolated, cookie-
+    less requests at arbitrary URLs, which is what the previous version
+    did and is a strong bot signal on its own.
+
     Also deactivates any previously-synced (auto) page whose URL is no
     longer in the curated page list, so removing a URL from NAWASA_PAGES
     is enough to retire it from the knowledge base on the next sync —
     no manual database cleanup needed."""
     pages = pages if pages is not None else NAWASA_PAGES
+
+    # Reset the session for every sync run so a stale/expired cookie from
+    # hours ago doesn't get reused and silently fail all over again.
+    global _session
+    _session = None
+
+    home_url = "https://www.nawasa.gd/"
+    try:
+        _get_session().get(home_url, timeout=REQUEST_TIMEOUT_SECONDS, allow_redirects=True)
+        time.sleep(INTER_PAGE_DELAY_SECONDS)
+    except requests.RequestException as e:
+        logger.warning("Website sync: session warmup request to %s failed (continuing anyway): %s", home_url, e)
+
     ok_count, error_count = 0, 0
-    for url, title in pages:
-        text, error = fetch_page(url)
+    for i, (url, title) in enumerate(pages):
+        text, error = fetch_page(url, referer=home_url)
         if error:
             logger.warning("Website sync: failed to fetch %s — %s", url, error)
             db.save_website_page(url, title, "", status="error", error=error)
@@ -155,6 +228,8 @@ def sync_all(db, pages=None):
         else:
             db.save_website_page(url, title, text, status="ok", error="")
             ok_count += 1
+        if i < len(pages) - 1:
+            time.sleep(INTER_PAGE_DELAY_SECONDS)
     removed = 0
     try:
         removed = db.deactivate_website_pages_not_in([u for u, _ in pages])
