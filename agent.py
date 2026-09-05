@@ -22,6 +22,21 @@ PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY", "")
 PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "aquaassist-knowledge-base")
 PINECONE_CLOUD = os.environ.get("PINECONE_CLOUD", "aws")
 PINECONE_REGION = os.environ.get("PINECONE_REGION", "us-east-1")
+# BUG FIX: Pinecone's query() always returns its top_k nearest vectors,
+# even when every one of them is a poor/irrelevant match for the query —
+# there's no built-in relevance cutoff. That meant the "no matches found"
+# branch below (which is what triggers on_no_match / unanswered-question
+# logging) almost never fired once the index had any content in it at
+# all: a customer could ask something completely absent from the
+# knowledge base and still get back three low-relevance FAQ entries,
+# which the model would then read, correctly judge as not answering the
+# question, and improvise a "check nawasa.gd" reply — all without ever
+# triggering the logging path, since from the tool's perspective matches
+# WERE found. Filtering out matches below this cosine-similarity floor
+# makes "no matches" actually reflect "nothing relevant was found".
+# Tunable via env var since the right cutoff depends on the embedding
+# model and the mix of content indexed.
+KB_MIN_RELEVANCE_SCORE = float(os.environ.get("KB_MIN_RELEVANCE_SCORE", "0.55"))
 
 GRENADA_DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
@@ -194,6 +209,13 @@ def make_search_knowledge_base_tool(on_no_match=None):
             return _static_faq_fallback_text
 
         matches = results.get("matches") if isinstance(results, dict) else getattr(results, "matches", [])
+        # Apply the relevance floor — see KB_MIN_RELEVANCE_SCORE above.
+        relevant_matches = []
+        for m in matches or []:
+            score = m.get("score") if isinstance(m, dict) else getattr(m, "score", None)
+            if score is None or score >= KB_MIN_RELEVANCE_SCORE:
+                relevant_matches.append(m)
+        matches = relevant_matches
         if not matches:
             if on_no_match:
                 try:
