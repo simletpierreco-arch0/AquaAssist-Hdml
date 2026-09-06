@@ -62,6 +62,7 @@ DEFAULT_FEATURES = {
     "voice_notes": True, "notify": True, "camera": True, "quick_actions": True,
     "dark_mode": True, "high_contrast": True, "large_text": True, "read_aloud": True,
     "call_us": True, "website": True, "chatbot_available": True, "settings": True,
+    "forms": True,
 }
 DEFAULT_MAINTENANCE_MESSAGE = (
     "We're sorry — AquaAssist is temporarily unavailable. Please contact "
@@ -99,6 +100,7 @@ PERMISSION_DEFS = [
     ("view_chat_analytics", "AquaAssist", "View Chat Analytics"),
     ("manage_voice_settings", "AquaAssist", "Manage Voice Settings"),
     ("sync_website_content", "AquaAssist", "Sync Website Content (nawasa.gd)"),
+    ("manage_forms", "AquaAssist", "Manage Forms"),
 
     ("view_reports", "Reports & Operations", "View Reports"),
     ("view_reporting_map", "Reports & Operations", "View Reporting Map"),
@@ -367,6 +369,19 @@ def init_db():
             CREATE TABLE IF NOT EXISTS website_pages (
                 url TEXT PRIMARY KEY,
                 title TEXT, content TEXT, fetched_at TEXT, status TEXT, error TEXT
+            )
+        """)
+        # `forms` holds the official NAWASA PDF forms AquaAssist surfaces in
+        # the customer-facing Forms panel and can recommend in chat. Kept as
+        # a small, staff-editable table (not staff-creatable/deletable — see
+        # app.py's DEFAULT_FORMS and _seed_forms_if_empty) so the five
+        # official forms have stable IDs but their name/description/URL can
+        # be corrected if NAWASA changes a document, without a code deploy.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS forms (
+                id TEXT PRIMARY KEY,
+                name TEXT, description TEXT, url TEXT,
+                enabled TEXT, source TEXT, created_at TEXT, updated_at TEXT
             )
         """)
 
@@ -832,6 +847,84 @@ def delete_faq(faq_id):
     with _cursor(commit=True) as cur:
         cur.execute(f"DELETE FROM faqs WHERE id = {ph}", (faq_id,))
         return cur.rowcount > 0
+
+
+# =======================================================================
+# NAWASA official forms (customer-facing Forms panel + chat recommendations)
+#
+# Deliberately update-only from the API (no create/delete route) — the
+# five official forms are seeded once by _seed_forms_if_empty and staff
+# can correct their name/description/URL/enabled state if NAWASA changes
+# a document, but the set of forms itself is a deliberate, reviewable
+# code change (see app.py's DEFAULT_FORMS), same reasoning as
+# website_sync.py's curated NAWASA_PAGES list.
+# =======================================================================
+def _form_out(row):
+    return {
+        "id": row["id"], "name": row["name"], "description": row["description"],
+        "url": row["url"], "enabled": row.get("enabled", "1") == "1",
+        "source": row.get("source") or "NAWASA",
+        "created_at": row.get("created_at", ""), "updated_at": row.get("updated_at", ""),
+    }
+
+
+def _seed_forms_if_empty(default_forms):
+    with _cursor() as cur:
+        cur.execute("SELECT COUNT(*) AS c FROM forms")
+        count = cur.fetchone()["c"]
+    if count:
+        return
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        for f in default_forms:
+            cur.execute(
+                f"INSERT INTO forms (id, name, description, url, enabled, source, created_at, updated_at) "
+                f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (f["id"], f["name"], f["description"], f["url"], "1", "NAWASA", now, now),
+            )
+
+
+def load_forms(include_disabled=True):
+    with _cursor() as cur:
+        if include_disabled:
+            cur.execute("SELECT * FROM forms ORDER BY created_at ASC")
+        else:
+            ph = _ph()
+            cur.execute(f"SELECT * FROM forms WHERE enabled = {ph} ORDER BY created_at ASC", ("1",))
+        rows = _rows(cur.fetchall())
+    return [_form_out(r) for r in rows]
+
+
+def get_form(form_id):
+    ph = _ph()
+    with _cursor() as cur:
+        cur.execute(f"SELECT * FROM forms WHERE id = {ph}", (form_id,))
+        row = cur.fetchone()
+    return _form_out(row) if row else None
+
+
+def update_form(form_id, name=None, description=None, url=None, enabled=None):
+    ph = _ph()
+    with _cursor() as cur:
+        cur.execute(f"SELECT * FROM forms WHERE id = {ph}", (form_id,))
+        existing = cur.fetchone()
+    if existing is None:
+        return None
+    existing = dict(existing)
+    new_vals = {
+        "name": name if name is not None else existing["name"],
+        "description": description if description is not None else existing["description"],
+        "url": url if url is not None else existing["url"],
+        "enabled": ("1" if enabled else "0") if enabled is not None else existing["enabled"],
+    }
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"UPDATE forms SET name={ph}, description={ph}, url={ph}, enabled={ph}, updated_at={ph} WHERE id={ph}",
+            (new_vals["name"], new_vals["description"], new_vals["url"], new_vals["enabled"], now, form_id),
+        )
+    return _form_out({**existing, **new_vals, "id": form_id, "updated_at": now})
 
 
 # =======================================================================
