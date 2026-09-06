@@ -207,6 +207,7 @@ function startApp() {
   renderContactRow();
   renderQuickActions();
   renderFAQ();
+  renderForms();
   populateSelect($("#reportParish"), state.config.parishes);
   populateSelect($("#reportIssueType"), state.config.issue_types);
   populateSelect($("#reportSeverity"), state.config.severity_levels);
@@ -297,6 +298,7 @@ const FEATURE_DEFS = [
   { id: "website", label: "Website" },
   { id: "chatbot_available", label: "Chatbot Available" },
   { id: "settings", label: "Settings Tab" },
+  { id: "forms", label: "Forms Tab" },
 ];
 
 async function loadFeatureFlags() {
@@ -325,6 +327,9 @@ function applyFeatureVisibility() {
 
   const settingsTab = $('.tab-btn[data-tab="settings"]');
   if (settingsTab) settingsTab.style.display = featureEnabled("settings") ? "" : "none";
+
+  const formsTab = $('.tab-btn[data-tab="forms"]');
+  if (formsTab) formsTab.style.display = featureEnabled("forms") ? "" : "none";
 
   const hasCameraSupport = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   const cameraEls = [$("#chatCameraBtn"), $("#reportCameraBtn")];
@@ -487,6 +492,7 @@ const QUICK_ACTIONS = [
   { label: "📄 Check My Bill", prompt: "How can I check my current NAWASA bill balance and consumption?" },
   { label: "📍 Office Locations", prompt: "Where are NAWASA's office locations?" },
   { label: "👤 Speak to an Agent", prompt: "I'd like to speak with a customer service representative." },
+  { label: "📄 Forms", tab: "forms" },
 ];
 function renderQuickActions() {
   const grid = $("#quickActions");
@@ -495,7 +501,10 @@ function renderQuickActions() {
     const btn = document.createElement("button");
     btn.className = "quick-action-btn";
     btn.textContent = qa.label;
-    btn.addEventListener("click", () => sendMessage(qa.prompt));
+    btn.addEventListener("click", () => {
+      if (qa.tab) { const t = $(`.tab-btn[data-tab="${qa.tab}"]`); if (t) t.click(); return; }
+      sendMessage(qa.prompt);
+    });
     grid.appendChild(btn);
   });
 }
@@ -573,6 +582,46 @@ function renderFAQ(query) {
   $("#faqSearch").oninput = (e) => renderFAQ(e.target.value);
 }
 
+// ---------------------------------------------------------------------
+// Forms (customer-facing)
+// ---------------------------------------------------------------------
+function renderForms() {
+  const list = $("#formsList");
+  if (!list) return;
+  const forms = (state.config && state.config.forms) || [];
+  list.innerHTML = "";
+  if (!forms.length) {
+    list.innerHTML = `<p class="hint-text">No forms are available right now. Please contact NAWASA directly.</p>`;
+    return;
+  }
+  forms.forEach((f) => {
+    const item = document.createElement("div");
+    item.className = "form-item";
+    item.innerHTML = `
+      <div class="form-item-name">${escapeHtml(f.name)}</div>
+      <div class="form-item-desc">${escapeHtml(f.description)}</div>
+      <a class="btn-primary form-open-btn" href="${escapeHtml(f.url)}" target="_blank" rel="noopener noreferrer">Open Form</a>
+    `;
+    list.appendChild(item);
+  });
+}
+
+function buildFormCardsEl(cards) {
+  const wrap = document.createElement("div");
+  wrap.className = "form-cards-wrap";
+  cards.forEach((f) => {
+    const card = document.createElement("div");
+    card.className = "form-card";
+    card.innerHTML = `
+      <div class="form-card-name">📄 ${escapeHtml(f.name)}</div>
+      <div class="form-card-desc">${escapeHtml(f.description)}</div>
+      <a class="btn-primary form-open-btn" href="${escapeHtml(f.url)}" target="_blank" rel="noopener noreferrer">Open Form</a>
+    `;
+    wrap.appendChild(card);
+  });
+  return wrap;
+}
+
 let pendingAttachment = null;
 let pendingReportPhoto = null;
 
@@ -582,7 +631,7 @@ function renderChat() {
   if (!state.messages.length) {
     appendBubble("assistant", welcomeText());
   } else {
-    state.messages.forEach((m) => appendBubble(m.role, m.content, m.attachmentName, m.reportCard, m.attachmentMime, m.locationCard, false));
+    state.messages.forEach((m) => appendBubble(m.role, m.content, m.attachmentName, m.reportCard, m.attachmentMime, m.locationCard, false, m.formCards));
   }
   $("#messageCount").textContent = `${state.messages.length} messages in this session.`;
   renderFollowupChips();
@@ -592,7 +641,7 @@ function welcomeText() {
   return `👋 **Welcome to ${state.chatbotName}**\n\nI'm NAWASA's official virtual assistant, available 24/7 to help with water outages, billing, new connections, reporting leaks, office locations, FAQs, and general support.\n\nHow may I assist you today?`;
 }
 
-function appendBubble(role, content, attachmentName, reportCard, attachmentMime, locationCard, isLive = true) {
+function appendBubble(role, content, attachmentName, reportCard, attachmentMime, locationCard, isLive = true, formCards) {
   const row = document.createElement("div");
   row.className = `msg-row ${role}`;
   const avatar = document.createElement("div");
@@ -617,6 +666,9 @@ function appendBubble(role, content, attachmentName, reportCard, attachmentMime,
   }
   if (locationCard) {
     bubble.appendChild(buildLocationCardEl(locationCard));
+  }
+  if (formCards && formCards.length) {
+    bubble.appendChild(buildFormCardsEl(formCards));
   }
   let speakBtn = null;
   if (role === "assistant" && featureEnabled("read_aloud")) {
@@ -975,9 +1027,9 @@ async function sendMessage(text, directAttachment, locationCard) {
       appendBubble("assistant", `⚠️ ${data.error}`);
       return;
     }
-    state.messages.push({ role: "assistant", content: data.reply, reportCard: data.report_card || null });
+    state.messages.push({ role: "assistant", content: data.reply, reportCard: data.report_card || null, formCards: data.form_cards || null });
     saveMessages();
-    appendBubble("assistant", data.reply, null, data.report_card);
+    appendBubble("assistant", data.reply, null, data.report_card, null, null, true, data.form_cards);
     renderFollowupChips();
   } catch (err) {
     typingRow.remove();
@@ -1625,6 +1677,7 @@ const SECTION_PERMISSIONS = {
   "aqua-livechat": ["access_live_chat", "view_aquaassist_dashboard"],
   "aqua-kb": ["manage_faqs", "manage_knowledge_base", "sync_website_content"],
   "aqua-unanswered": ["review_unanswered_questions"],
+  "aqua-forms": ["manage_forms", "manage_knowledge_base"],
   "aqua-settings": ["manage_chatbot_settings"],
   "reports-map": ["view_reporting_map"],
   "reports-table": ["view_reports"],
@@ -1670,6 +1723,7 @@ function setupStaffSidebar() {
       if (btn.dataset.staffSection === "audit-log") loadAuditLog();
       if (btn.dataset.staffSection === "chatbot-name") $("#chatbotNameInput").value = state.chatbotName;
       if (btn.dataset.staffSection === "aqua-kb") loadWebsiteContentAdmin();
+      if (btn.dataset.staffSection === "aqua-forms") loadFormsAdmin();
     });
   });
 }
@@ -1867,6 +1921,65 @@ function renderUnansweredList(items) {
     btnRow.appendChild(addBtn); btnRow.appendChild(dismissBtn);
     card.appendChild(catInput); card.appendChild(ansInput); card.appendChild(btnRow);
     wrap.appendChild(card);
+  });
+}
+
+// ---------------------------------------------------------------------
+// Forms admin (Staff Portal — view/edit/enable-disable only, no add/delete)
+// ---------------------------------------------------------------------
+async function loadFormsAdmin() {
+  const res = await staffFetch("/api/forms/all");
+  if (res.status === 401) { staffLogout(); return; }
+  if (res.status === 403) return;
+  renderFormManageList(await res.json());
+}
+
+function renderFormManageList(forms) {
+  const wrap = $("#formsManageList");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  if (!forms.length) { wrap.innerHTML = `<p class="hint-text">No forms found.</p>`; return; }
+  forms.forEach((f) => {
+    const row = document.createElement("div");
+    row.className = "tip-manage-row";
+    const textSpan = document.createElement("span");
+    textSpan.className = "tip-manage-text" + (f.enabled ? "" : " tip-disabled");
+    textSpan.innerHTML = `<b>${escapeHtml(f.name)}</b><br><span class="hint-text">${escapeHtml(f.description)}</span><br><span class="hint-text">${escapeHtml(f.url)}</span>`;
+    row.appendChild(textSpan);
+
+    const actions = document.createElement("div");
+    actions.className = "tip-manage-actions";
+
+    const editBtn = document.createElement("button");
+    editBtn.type = "button"; editBtn.className = "btn-secondary"; editBtn.textContent = "Edit";
+    editBtn.addEventListener("click", async () => {
+      const newName = prompt("Form name:", f.name);
+      if (newName === null || !newName.trim()) return;
+      const newDesc = prompt("Description:", f.description);
+      if (newDesc === null || !newDesc.trim()) return;
+      const newUrl = prompt("Official PDF URL:", f.url);
+      if (newUrl === null || !newUrl.trim()) return;
+      if (!/^https?:\/\//i.test(newUrl.trim())) { alert("URL must start with http:// or https://"); return; }
+      const res2 = await staffFetch(`/api/forms/${f.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: newName.trim(), description: newDesc.trim(), url: newUrl.trim() }),
+      });
+      const data = await res2.json();
+      if (data.error) { alert(data.error); return; }
+      loadFormsAdmin();
+    });
+
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button"; toggleBtn.className = "btn-secondary";
+    toggleBtn.textContent = f.enabled ? "Disable" : "Enable";
+    toggleBtn.addEventListener("click", async () => {
+      await staffFetch(`/api/forms/${f.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !f.enabled }) });
+      loadFormsAdmin();
+    });
+
+    actions.appendChild(editBtn); actions.appendChild(toggleBtn);
+    row.appendChild(actions);
+    wrap.appendChild(row);
   });
 }
 
@@ -2687,6 +2800,7 @@ function staffLoginSuccess() {
   loadTipsAdmin();
   loadFeaturesAdmin();
   loadFaqsAdmin();
+  loadFormsAdmin();
   loadWebsiteContentAdmin();
   loadUnansweredAdmin();
   refreshOverview();
