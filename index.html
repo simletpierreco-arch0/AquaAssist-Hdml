@@ -244,6 +244,7 @@
             <button class="tab-btn" data-tab="report">📋 Report &amp; Track</button>
             <button class="tab-btn" data-tab="faq">❓ FAQ</button>
             <button class="tab-btn" data-tab="notify">🔔 Notify</button>
+            <button class="tab-btn" data-tab="forms">📄 Forms</button>
             <button class="tab-btn" data-tab="settings">⚙️ Settings</button>
           </nav>
 
@@ -382,6 +383,13 @@
             </div>
           </section>
 
+          <!-- FORMS TAB -->
+          <section id="tab-forms" class="tab-panel">
+            <div class="section-label">📄 NAWASA Forms</div>
+            <p class="hint-text">Official NAWASA PDF forms. Tap "Open Form" to view, download, or print.</p>
+            <div id="formsList"></div>
+          </section>
+
           <!-- SETTINGS TAB -->
           <section id="tab-settings" class="tab-panel">
             <div class="section-label">📍 Territory</div>
@@ -464,6 +472,7 @@
           <button class="staff-nav-btn" data-staff-section="aqua-livechat">Live Chat <span id="liveChatBadge" class="livechat-badge" style="display:none;">0</span></button>
           <button class="staff-nav-btn" data-staff-section="aqua-kb">Knowledge Base</button>
           <button class="staff-nav-btn" data-staff-section="aqua-unanswered">Unanswered Questions</button>
+          <button class="staff-nav-btn" data-staff-section="aqua-forms">Forms</button>
           <button class="staff-nav-btn" data-staff-section="aqua-settings">Settings</button>
 
           <div class="staff-nav-group">📍 Reports &amp; Operations</div>
@@ -623,6 +632,13 @@
             <div class="section-label" style="margin-top:0;">❓ Questions AquaAssist Couldn't Answer</div>
             <p class="hint-text">Logged automatically whenever a customer's question doesn't match anything in the knowledge base. Answer it here to add it straight to the FAQ list above.</p>
             <div id="unansweredList"></div>
+          </section>
+
+          <!-- ===== AQUAASSIST > Forms Management ===== -->
+          <section id="staffSection-aqua-forms" class="staff-section">
+            <div class="section-label" style="margin-top:0;">📄 Forms Management</div>
+            <p class="hint-text">The five official NAWASA forms shown in the customer-facing Forms panel. You can correct a form's name, description, or PDF link, or enable/disable it — the set of forms itself isn't editable here.</p>
+            <div id="formsManageList" class="tip-manage-list"></div>
           </section>
 
           <!-- ===== AQUAASSIST > Settings ===== -->
