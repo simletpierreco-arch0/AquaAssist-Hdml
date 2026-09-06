@@ -989,3 +989,34 @@ img, svg, video, canvas { max-width: 100%; height: auto; }
   background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 #liveChatSuggestBtn { flex-shrink: 0; padding: .5rem .7rem; font-size: 1rem; }
+
+/* =========================================================================
+   NAWASA Forms — customer-facing Forms tab + in-chat form recommendation cards
+   ========================================================================= */
+.form-item {
+  background: color-mix(in srgb, var(--card) 85%, transparent);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border: 1px solid color-mix(in srgb, var(--primary) 15%, transparent);
+  border-radius: 14px; padding: .9rem 1rem; margin-bottom: .7rem;
+}
+.form-item-name { font-weight: 700; font-size: .92rem; margin-bottom: .3rem; color: var(--text); }
+.form-item-desc { font-size: .82rem; color: color-mix(in srgb, var(--text) 70%, transparent); line-height: 1.45; margin-bottom: .7rem; }
+.form-open-btn {
+  display: inline-block; text-decoration: none; font-size: .84rem;
+  padding: .55rem 1rem; min-height: 2.4rem; line-height: 1.3;
+}
+
+.form-cards-wrap { display: flex; flex-direction: column; gap: .5rem; margin-top: .5rem; }
+.form-card {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--card) 92%, transparent), color-mix(in srgb, var(--bg-soft) 92%, transparent));
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid color-mix(in srgb, var(--primary) 18%, transparent);
+  border-radius: 14px; padding: .75rem .9rem;
+}
+.form-card-name { font-weight: 700; font-size: .86rem; margin-bottom: .25rem; color: var(--text); }
+.form-card-desc { font-size: .78rem; color: color-mix(in srgb, var(--text) 68%, transparent); line-height: 1.4; margin-bottom: .6rem; }
+
+@media (max-width: 480px) {
+  .form-item, .form-card { padding: .75rem .8rem; }
+  .form-open-btn { width: 100%; text-align: center; }
+}
