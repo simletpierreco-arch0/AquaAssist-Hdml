@@ -280,6 +280,47 @@ FAQS = [
      "a": "NAWASA's main office is now located on Lucas Street, St. George's (previously on the Carenage). Sub-offices are located at Seaton James Street, Grenville; Lower Depradine Street, Gouyave; and additional sub-offices in Sauteurs, St. David's, and Grand Anse."},
 ]
 
+# =======================================================================
+# NAWASA official forms — seeded once into db.forms (see
+# db._seed_forms_if_empty). URLs/names/descriptions are editable by staff
+# afterward (require_permission("manage_forms")) without a code deploy,
+# but the SET of forms itself is a deliberate code change, same reasoning
+# as website_sync.py's curated NAWASA_PAGES list. IDs are stable strings
+# (not regenerated per seed) so staff edits survive redeploys/re-seeds.
+# =======================================================================
+DEFAULT_FORMS = [
+    {
+        "id": "form-water-service-application",
+        "name": "Water Service Application Form",
+        "description": "Application for Private Water Service, Additional Meter, Temporary Water Service or Sewer Connection.",
+        "url": "https://www.nawasa.gd/images/newform.pdf",
+    },
+    {
+        "id": "form-cancellation",
+        "name": "Private Water Service Cancellation Form",
+        "description": "Application to cancel a Private Water Service before installation.",
+        "url": "https://www.nawasa.gd/images/nawasa-cancellation.pdf",
+    },
+    {
+        "id": "form-no-proof-of-ownership",
+        "name": "Customer Without Proof of Ownership Agreement",
+        "description": "Agreement for customers requesting Private Water Service without proof of legal ownership.",
+        "url": "https://www.nawasa.gd/images/customer-without-proof.pdf",
+    },
+    {
+        "id": "form-declaration-of-ownership",
+        "name": "Declaration of Ownership",
+        "description": "Declaration of ownership of land in the absence of a Deed of Conveyance for a water connection application.",
+        "url": "https://www.nawasa.gd/images/declaration-of-ownership.pdf",
+    },
+    {
+        "id": "form-permission-in-support",
+        "name": "Permission in Support of Application for Water Connection",
+        "description": "Permission from the property owner supporting another applicant's water connection application.",
+        "url": "https://www.nawasa.gd/images/permission-in-support-of-application.pdf",
+    },
+]
+
 
 def build_system_instruction(territory):
     territory_whatsapp = TERRITORY_WHATSAPP.get(territory, TERRITORY_WHATSAPP["Grenada"])
@@ -322,6 +363,9 @@ If search_knowledge_base returns no close match, or returns results that don't a
 2. Tell the customer something equivalent to: "I couldn't find that information in the NAWASA information available to me. Please contact NAWASA directly to confirm." Do NOT simply tell them to "check the website" or "visit nawasa.gd" as your main answer — that skips logging the gap and leaves the customer without real help. It's fine to ALSO mention nawasa.gd as an extra option after you've said you couldn't find the answer and after you've logged it, but it can never be a substitute for those two steps.
 Never invent, guess, or estimate an answer (a rate, a phone number, a policy, office hours, a procedure) that didn't come from search_knowledge_base or one of your other tools. If a customer wants more detail on something the knowledge base DID answer, you may point them to nawasa.gd for the full page — that's a different situation from not having an answer at all, and doesn't require logging.
 
+NAWASA FORMS — use the recommend_form tool, never guess which form applies:
+There is also a dedicated "📄 Forms" section in this chat widget where customers can browse all official NAWASA forms directly, without asking you — mention that it exists if it seems useful, but don't assume the customer has seen it. Whenever a customer asks which form they need, mentions applying for a new water connection, cancelling a private water service, lacking proof of property ownership, needing a property owner's permission, or anything else that sounds like it needs an official NAWASA document, call the recommend_form tool with a short description of what they need. If it returns matching form(s), they are automatically attached to your reply as clickable "Open Form" buttons — mention the form(s) by name in your own words, but don't repeat the raw PDF URL as text. If recommend_form finds nothing relevant, say so plainly and suggest they check the Forms section or contact NAWASA directly — don't guess which form might apply. Never invent or assume details that aren't in the form's name/description as returned by the tool — no required documents, fees, eligibility rules, approval timelines, or deadlines beyond what you're given. When a customer's situation seems to touch on ownership questions (missing proof of ownership, needing another person's permission, etc.), you may mention that more than one form could apply depending on their specific situation, but never tell them which one definitely applies or that they qualify — that's a legal/administrative judgment call for NAWASA staff, not you.
+
 LIVE STAFF HANDOFF — use the request_human_handoff tool when you can't help:
 Use the request_human_handoff tool whenever a customer explicitly asks to speak with a person, representative, or agent, or whenever you genuinely cannot resolve what they need (e.g. the knowledge base has no matching entry and the customer is still stuck after you've said so, a billing dispute needs a manual account review, or the situation calls for judgment you don't have). Calling this tool alerts NAWASA staff in the Live Chat monitor and flags the conversation so a person can step in and reply directly in this same chat — you do not need to end the conversation or stop responding, staff will simply join in. After calling it, tell the customer plainly (in your own words, matching the current business-hours status) that a NAWASA representative has been notified and will follow up here, or call/WhatsApp them directly if that's more urgent. Don't call this tool for questions you can actually answer yourself — it's for genuine dead ends or explicit requests for a human, not a substitute for trying the knowledge base first.
 
@@ -350,18 +394,25 @@ If a question is unrelated to NAWASA services, politely explain that you can onl
 # and the AquaVision Super Administrator account on first run).
 db.init_db()
 db._seed_faqs_if_empty(FAQS)
+db._seed_forms_if_empty(DEFAULT_FORMS)
 db._seed_super_admin_if_missing()
 
 
 def _build_kb_entries():
     """Everything the chatbot's knowledge-base search draws on: staff-
-    authored FAQs plus the last-synced content from nawasa.gd, in the same
-    {category, q, a} shape agent.seed_knowledge_base() already expects.
-    A page that has never successfully synced, has been deactivated
-    (status == "removed" — no longer part of the curated crawl set), or
-    has no content is skipped rather than feeding empty/stale text into
-    the embedding index."""
+    authored FAQs, the official NAWASA forms, plus the last-synced content
+    from nawasa.gd, in the same {category, q, a} shape
+    agent.seed_knowledge_base() already expects. A page that has never
+    successfully synced, has been deactivated (status == "removed" — no
+    longer part of the curated crawl set), or has no content is skipped
+    rather than feeding empty/stale text into the embedding index."""
     entries = list(db.load_faqs(include_disabled=False))
+    for f in db.load_forms(include_disabled=False):
+        entries.append({
+            "category": "NAWASA Forms",
+            "q": f"{f['name']} — official NAWASA PDF form",
+            "a": f"{f['description']} Official PDF form: {f['url']}",
+        })
     for page in db.load_website_pages():
         if page.get("status") == "ok" and (page.get("content") or "").strip():
             entries.append({"category": "NAWASA Website", "q": page["title"], "a": page["content"]})
@@ -408,6 +459,7 @@ threading.Thread(target=_website_sync_loop, daemon=True).start()
 
 SESSIONS = {}
 LAST_REPORT = {}
+LAST_FORM_CARDS = {}
 CURRENT_ATTACHMENT = {}
 
 
@@ -567,6 +619,68 @@ def _make_log_unanswered_tool(session_id):
     return tool(log_unanswered_question, parse_docstring=True)
 
 
+_FORM_STOPWORDS = {
+    "the", "a", "an", "i", "my", "me", "to", "for", "of", "is", "do", "does", "what",
+    "which", "need", "want", "can", "how", "form", "forms", "and", "or", "in", "on",
+    "get", "have", "has", "you", "your", "please", "would", "like", "am", "im", "it",
+    "this", "that", "with", "be", "if",
+}
+
+
+def _tokenize_for_form_match(text):
+    words = re.findall(r"[a-z']+", (text or "").lower())
+    return [w for w in words if w not in _FORM_STOPWORDS and len(w) > 2]
+
+
+def _make_recommend_form_tool(session_id):
+    def recommend_form(query: str) -> str:
+        """Looks up NAWASA's official PDF forms (new water service application,
+        cancellation, proof-of-ownership documents, declaration of ownership,
+        permission in support of an application, etc.) that best match what
+        the customer is trying to do, and returns their official names,
+        descriptions, and direct PDF links. Call this whenever a customer
+        asks which form they need, mentions applying for a new connection,
+        cancelling a private water service, lacking proof of ownership, or
+        otherwise sounds like they need an official NAWASA form or document —
+        rather than guessing which form applies from memory.
+
+        Args:
+            query: What the customer described needing, in their own words
+                or a short paraphrase (e.g. "apply for a new water
+                connection", "I don't own the property").
+
+        Returns:
+            The matching form(s) with name, description, and official PDF
+            URL, or a message saying no matching form was found.
+        """
+        forms = db.load_forms(include_disabled=False)
+        query_tokens = set(_tokenize_for_form_match(query))
+        scored = []
+        for f in forms:
+            form_tokens = set(_tokenize_for_form_match(f["name"] + " " + f["description"]))
+            overlap = len(query_tokens & form_tokens)
+            if overlap > 0:
+                scored.append((overlap, f))
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        top_matches = [f for _, f in scored[:2]]
+
+        if not top_matches:
+            return ("No closely matching NAWASA form was found for this request. Tell the "
+                    "customer plainly that you couldn't identify a specific form for their "
+                    "situation and suggest they contact NAWASA directly, or check the Forms "
+                    "section in this chat for the full list.")
+
+        LAST_FORM_CARDS[session_id] = [
+            {"id": f["id"], "name": f["name"], "description": f["description"], "url": f["url"]}
+            for f in top_matches
+        ]
+        lines = [f"Name: {f['name']}\nDescription: {f['description']}\nOfficial PDF: {f['url']}" for f in top_matches]
+        return ("\n\n".join(lines) + "\n\nThese have already been attached to your reply as "
+                "clickable 'Open Form' buttons for the customer — mention the form(s) by name "
+                "in your own words, but you don't need to repeat the raw URL in your text.")
+    return tool(recommend_form, parse_docstring=True)
+
+
 def _get_or_create_agent(session_id, territory):
     sess = SESSIONS.get(session_id)
     if sess is None or sess["territory"] != territory:
@@ -576,6 +690,7 @@ def _get_or_create_agent(session_id, territory):
             _make_check_outages_tool(session_id),
             _make_request_handoff_tool(session_id, territory),
             _make_log_unanswered_tool(session_id),
+            _make_recommend_form_tool(session_id),
             agent.make_search_knowledge_base_tool(
                 on_no_match=lambda q: db.log_unanswered_question(q, session_id=session_id)
             ),
@@ -665,6 +780,7 @@ def api_init():
         "severity_levels": SEVERITY_LEVELS,
         "status_stages": STATUS_STAGES,
         "faqs": [{"category": f["category"], "q": f["q"], "a": f["a"]} for f in db.load_faqs(include_disabled=False)],
+        "forms": [{"id": f["id"], "name": f["name"], "description": f["description"], "url": f["url"]} for f in db.load_forms(include_disabled=False)],
         "business_hours": get_business_hours_status(),
         "nawasa_phone": NAWASA_PHONE,
         "nawasa_website": NAWASA_WEBSITE,
@@ -716,6 +832,7 @@ def api_chat():
 
     graph = _get_or_create_agent(session_id, territory)
     LAST_REPORT.pop(session_id, None)
+    LAST_FORM_CARDS.pop(session_id, None)
 
     content_blocks = []
     if message:
@@ -766,6 +883,9 @@ def api_chat():
     report_card = LAST_REPORT.pop(session_id, None)
     if report_card:
         result["report_card"] = report_card
+    form_cards = LAST_FORM_CARDS.pop(session_id, None)
+    if form_cards:
+        result["form_cards"] = form_cards
     return jsonify(result)
 
 
@@ -1264,6 +1384,48 @@ def api_faqs_delete(faq_id):
     return jsonify({"deleted": faq_id})
 
 
+# =======================================================================
+# NAWASA official forms — public read-only list for the customer-facing
+# Forms panel, plus staff view-all/update. No create/delete route: the
+# set of five official forms is a deliberate code change (DEFAULT_FORMS
+# above), only their name/description/url/enabled state are staff-editable.
+# =======================================================================
+@app.route("/api/forms", methods=["GET"])
+def api_forms_list():
+    forms = db.load_forms(include_disabled=False)
+    return jsonify([{"id": f["id"], "name": f["name"], "description": f["description"], "url": f["url"]} for f in forms])
+
+
+@app.route("/api/forms/all", methods=["GET"])
+@require_any_permission("manage_forms", "manage_knowledge_base")
+def api_forms_list_all():
+    return jsonify(db.load_forms(include_disabled=True))
+
+
+@app.route("/api/forms/<form_id>", methods=["PATCH"])
+@require_any_permission("manage_forms", "manage_knowledge_base")
+def api_forms_update(form_id):
+    body = request.get_json(force=True) or {}
+    name = body.get("name")
+    description = body.get("description")
+    url = body.get("url")
+    enabled = body.get("enabled")
+    if url is not None and not url.strip().lower().startswith(("http://", "https://")):
+        return jsonify({"error": "URL must be a valid http(s) link."}), 400
+    row = db.update_form(
+        form_id,
+        name=name.strip() if isinstance(name, str) else name,
+        description=description.strip() if isinstance(description, str) else description,
+        url=url.strip() if isinstance(url, str) else url,
+        enabled=enabled,
+    )
+    if row is None:
+        return jsonify({"error": "Form not found."}), 404
+    _reseed_knowledge_base()
+    db.log_audit(_actor_label(), "NAWASA form updated", item=row["name"])
+    return jsonify(row)
+
+
 @app.route("/api/website-content", methods=["GET"])
 @require_any_permission("sync_website_content", "manage_faqs", "manage_knowledge_base")
 def api_website_content_list():
@@ -1421,6 +1583,7 @@ def api_session_delete(session_id):
     db.delete_session_messages(session_id)
     SESSIONS.pop(session_id, None)
     LAST_REPORT.pop(session_id, None)
+    LAST_FORM_CARDS.pop(session_id, None)
     CURRENT_ATTACHMENT.pop(session_id, None)
     return jsonify({"deleted": session_id})
 
@@ -1431,6 +1594,7 @@ def api_sessions_delete_all():
     db.delete_all_sessions()
     SESSIONS.clear()
     LAST_REPORT.clear()
+    LAST_FORM_CARDS.clear()
     CURRENT_ATTACHMENT.clear()
     return jsonify({"deleted": "all"})
 
