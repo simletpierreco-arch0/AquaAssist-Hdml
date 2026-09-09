@@ -54,16 +54,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
-import requests
+import pdf_ingest
 
 logger = logging.getLogger("aquaassist.form_wizard")
 
-DOWNLOAD_HEADERS = {
-    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"),
-    "Accept": "application/pdf,*/*;q=0.8",
-}
-DOWNLOAD_TIMEOUT_SECONDS = 30
 OUTPUT_DIR = Path("/tmp/aquaassist_generated")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 DOWNLOAD_TOKEN_TTL_SECONDS = 60 * 60  # 1 hour
@@ -439,12 +433,6 @@ def edit_field(session_id, question_id):
 # ---------------------------------------------------------------------
 # PDF generation
 # ---------------------------------------------------------------------
-def _download_official_pdf(url):
-    resp = requests.get(url, timeout=DOWNLOAD_TIMEOUT_SECONDS, headers=DOWNLOAD_HEADERS)
-    resp.raise_for_status()
-    return resp.content
-
-
 def _safe_filename(base):
     return re.sub(r"[^A-Za-z0-9_.-]", "_", base) + ".pdf"
 
@@ -572,7 +560,10 @@ def generate_pdf(session_id):
         return None, None, [], "This form session is missing its official PDF URL — please restart the wizard."
 
     try:
-        pdf_bytes = _download_official_pdf(pdf_url)
+        pdf_bytes, error = pdf_ingest.download_pdf(pdf_url)
+        if error:
+            logger.error("Form wizard: could not download official PDF %s: %s", pdf_url, error)
+            return None, None, [], f"Couldn't download the official form to fill it in ({error})."
     except Exception as e:
         logger.error("Form wizard: could not download official PDF %s: %s", pdf_url, e)
         return None, None, [], f"Couldn't download the official form to fill it in ({e}). Please try again shortly."
