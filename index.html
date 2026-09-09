@@ -23,11 +23,11 @@
       </div>
       <nav class="mock-nav-links">
         <a href="#" id="navHomeLink" class="active">Home</a>
-        <a href="https://www.nawasa.gd/about-us/vision-mission" target="_blank" rel="noopener">About Us</a>
-        <a href="https://www.nawasa.gd/customer-care/customer-service-charter" target="_blank" rel="noopener">Customer Care</a>
-        <a href="https://www.nawasa.gd/resources" target="_blank" rel="noopener">Resources</a>
-        <a href="https://www.nawasa.gd/media-room" target="_blank" rel="noopener">Media Room</a>
-        <a href="https://www.nawasa.gd/contact-us" target="_blank" rel="noopener">Contact Us</a>
+        <a href="https://www.nawasa.gd/about-us/vision-mission" target="_blank" rel="noopener" class="mock-info-link" data-info-url="https://www.nawasa.gd/about-us/vision-mission" data-info-title="About Us">About Us</a>
+        <a href="https://www.nawasa.gd/customer-care/customer-service-charter" target="_blank" rel="noopener" class="mock-info-link" data-info-url="https://www.nawasa.gd/customer-care/customer-service-charter" data-info-title="Customer Care">Customer Care</a>
+        <a href="https://www.nawasa.gd/resources" target="_blank" rel="noopener" class="mock-info-link" data-info-url="https://www.nawasa.gd/resources" data-info-title="Resources">Resources</a>
+        <a href="https://www.nawasa.gd/media-room" target="_blank" rel="noopener" class="mock-info-link" data-info-url="https://www.nawasa.gd/media-room" data-info-title="Media Room">Media Room</a>
+        <a href="https://www.nawasa.gd/contact-us" target="_blank" rel="noopener" class="mock-info-link" data-info-url="https://www.nawasa.gd/contact-us" data-info-title="Contact Us">Contact Us</a>
         <a href="#" id="navStaffPortalLink" class="nav-staff-link">🔐 Staff Portal</a>
       </nav>
       <a href="#" id="navCustomerPortalCta" class="mock-nav-cta">Customer Portal</a>
@@ -47,7 +47,7 @@
       <h1>NAWASA — committed to meeting customers' needs</h1>
       <p>Serving Grenada, Carriacou &amp; Petite Martinique with safe drinking water and modern sewerage services.</p>
       <div class="mock-hero-actions">
-        <a href="https://www.nawasa.gd/contact-us" target="_blank" rel="noopener" class="mock-btn mock-btn-primary">Report a Leak</a>
+        <button type="button" id="heroReportLeakBtn" class="mock-btn mock-btn-primary">Report a Leak</button>
         <a href="https://www.nawasa.gd/customer-care/customer-service-charter" target="_blank" rel="noopener" class="mock-btn mock-btn-ghost">Customer Service Charter</a>
         <button type="button" id="testVoiceBtn" class="mock-btn mock-btn-ghost">🔊 Test Caribbean Voice</button>
       </div>
@@ -65,19 +65,19 @@
         <div class="mock-card-icon">🧾</div>
         <h3>Customer Care</h3>
         <p>Read NAWASA's Customer Service Charter to see what to expect from us, and what we ask of our customers.</p>
-        <a href="https://www.nawasa.gd/customer-care/customer-service-charter" target="_blank" rel="noopener" class="mock-card-link">Read more →</a>
+        <a href="#" class="mock-card-link mock-info-link" data-info-url="https://www.nawasa.gd/customer-care/customer-service-charter" data-info-title="Customer Service Charter">Read more →</a>
       </div>
       <div class="mock-card">
         <div class="mock-card-icon">📰</div>
         <h3>Media Room</h3>
         <p>Browse NAWASA press releases, photo and video galleries, newsletters, and brochures.</p>
-        <a href="https://www.nawasa.gd/media-room" target="_blank" rel="noopener" class="mock-card-link">Read more →</a>
+        <a href="#" class="mock-card-link mock-info-link" data-info-url="https://www.nawasa.gd/media-room" data-info-title="Media Room">Read more →</a>
       </div>
       <div class="mock-card">
         <div class="mock-card-icon">📚</div>
         <h3>Resources</h3>
         <p>Explore legislation, annual reports, water treatment info, and other NAWASA research and publications.</p>
-        <a href="https://www.nawasa.gd/resources" target="_blank" rel="noopener" class="mock-card-link">Read more →</a>
+        <a href="#" class="mock-card-link mock-info-link" data-info-url="https://www.nawasa.gd/resources" data-info-title="Resources">Read more →</a>
       </div>
     </div>
   </section>
@@ -112,7 +112,7 @@
       <div>
         <b>Customer Service Charter</b>
         <p>NAWASA's Customer Service Charter sets out our commitment to helping customers get the most from our services, and gives you a way to share feedback and suggestions with us directly.</p>
-        <a href="https://www.nawasa.gd/customer-care/customer-service-charter" target="_blank" rel="noopener" class="mock-card-link">Read the charter →</a>
+        <a href="#" class="mock-card-link mock-info-link" data-info-url="https://www.nawasa.gd/customer-care/customer-service-charter" data-info-title="Customer Service Charter">Read the charter →</a>
       </div>
     </div>
   </section>
@@ -129,8 +129,8 @@
       <div>
         <h4>Quicklinks</h4>
         <p><a href="https://www.nawasa.gd/nawasa-calender" target="_blank" rel="noopener">Events Calendar</a></p>
-        <p><a href="https://www.nawasa.gd/contact-us" target="_blank" rel="noopener">Report a Leak</a></p>
-        <p><a href="https://www.nawasa.gd/contact-us" target="_blank" rel="noopener">Make a Suggestion</a></p>
+        <p><a href="#" id="footerReportLeakBtn">Report a Leak</a></p>
+        <p><a href="#" id="footerSuggestionBtn">Make a Suggestion</a></p>
         <p><a href="https://www.nawasa.gd/career-opportunities" target="_blank" rel="noopener">Job Opportunities</a></p>
       </div>
       <div>
@@ -386,7 +386,7 @@
           <!-- FORMS TAB -->
           <section id="tab-forms" class="tab-panel">
             <div class="section-label">📄 NAWASA Forms</div>
-            <p class="hint-text">Official NAWASA PDF forms. Tap "Open Form" to view, download, or print.</p>
+            <p class="hint-text">Official NAWASA PDF forms. Open the original PDF, ask AquaAssist about a form, or have AquaAssist fill it out with you step-by-step.</p>
             <div id="formsList"></div>
           </section>
 
@@ -483,7 +483,7 @@
           <div class="staff-nav-group">👑 Administration</div>
           <button class="staff-nav-btn" data-staff-section="staff-accounts">Staff Accounts</button>
           <button class="staff-nav-btn" data-staff-section="audit-log">Audit Log</button>
-          <button class="staff-nav-btn" data-staff-section="chatbot-name">Chatbot Settings</button>
+          <button class="staff-nav-btn" data-staff-section="chatbot-name">Chatbot Setting</button>
         </aside>
 
         <main class="staff-main">
@@ -637,7 +637,22 @@
           <!-- ===== AQUAASSIST > Forms Management ===== -->
           <section id="staffSection-aqua-forms" class="staff-section">
             <div class="section-label" style="margin-top:0;">📄 Forms Management</div>
-            <p class="hint-text">The five official NAWASA forms shown in the customer-facing Forms panel. You can correct a form's name, description, or PDF link, or enable/disable it — the set of forms itself isn't editable here.</p>
+            <p class="hint-text">The five official NAWASA forms can't be deleted (only disabled/edited). Forms you add here can be fully removed later.</p>
+
+            <div class="card">
+              <div class="section-label" style="margin-top:0;">＋ Add a form</div>
+              <form id="formCreateForm">
+                <label class="field-label">Form name</label>
+                <input id="formCreateName" type="text" required />
+                <label class="field-label">Description</label>
+                <textarea id="formCreateDescription" rows="2" required></textarea>
+                <label class="field-label">Official PDF URL</label>
+                <input id="formCreateUrl" type="text" placeholder="https://..." required />
+                <button type="submit" class="btn-primary" style="margin-top:0.6rem;width:100%;">Add form</button>
+                <p id="formCreateError" class="error-text" style="display:none;"></p>
+              </form>
+            </div>
+
             <div id="formsManageList" class="tip-manage-list"></div>
           </section>
 
@@ -768,10 +783,10 @@
             </div>
           </section>
 
-          <!-- ===== ADMINISTRATION > Chatbot Settings (AquaVision only) ===== -->
+          <!-- ===== ADMINISTRATION > Chatbot Setting (AquaVision only can actually save) ===== -->
           <section id="staffSection-chatbot-name" class="staff-section">
-            <div class="section-label" style="margin-top:0;">🤖 Chatbot Settings</div>
-            <p class="hint-text">Only the AquaVision Super Administrator account can rename the chatbot. The new name appears everywhere it's shown to customers and staff — no page refresh needed elsewhere, it updates on the next automatic sync (within about a minute).</p>
+            <div class="section-label" style="margin-top:0;">🤖 Chatbot Setting</div>
+            <p class="hint-text">Only the AquaVision Super Administrator account can actually rename the chatbot — other accounts with this section visible can view it but will get a clear error if they try to save. The new name appears everywhere it's shown to customers and staff — no page refresh needed elsewhere, it updates on the next automatic sync (within about a minute).</p>
             <div class="card" style="max-width:420px;">
               <form id="chatbotNameForm">
                 <label class="field-label">Chatbot name</label>
@@ -839,6 +854,17 @@
       <textarea id="reportNotesInput" rows="2" placeholder="Add an internal note — customers never see this..."></textarea>
       <button type="submit" class="btn-primary" style="width:100%;">Add note</button>
     </form>
+  </div>
+</div>
+
+<!-- ===================== INFO PANEL MODAL (in-app "About/Resources/Contact" — see setupMockInfoLinks) ===================== -->
+<div id="infoModal" class="camera-modal" style="display:none;">
+  <div class="camera-modal-inner attachment-viewer-inner">
+    <div class="camera-modal-head">
+      <span id="infoModalTitle">Information</span>
+      <button type="button" id="infoModalCloseBtn" class="camera-close-btn">✕</button>
+    </div>
+    <div id="infoModalBody" class="info-modal-body"></div>
   </div>
 </div>
 
