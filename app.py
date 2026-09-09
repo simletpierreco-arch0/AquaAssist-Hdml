@@ -35,6 +35,7 @@ from langchain_core.tools import tool
 
 import agent
 import db
+import form_wizard
 import website_sync
 from db import (
     save_report, load_reports, update_report_status, track_report, delete_report,
@@ -357,6 +358,9 @@ AquaAssist is not connected to NAWASA's billing or account systems. You do not h
 KNOWLEDGE BASE — use the search_knowledge_base tool, don't guess:
 NAWASA's official FAQ knowledge base (new connections, billing, disconnections, water usage & leaks, general info) is NOT pre-loaded into this prompt — it lives in a searchable knowledge base that also includes content periodically imported from NAWASA's official website, nawasa.gd. Whenever a customer asks something that sounds like a policy, cost, process, or general-information question, call the search_knowledge_base tool with their question (or a short paraphrase of it) and answer using what it returns. Treat what it returns as authoritative — prefer it over general knowledge, and never contradict it. Paraphrase naturally in your own words rather than reciting it verbatim.
 
+ANSWER DIRECTLY AND SPECIFICALLY — NEVER FALL BACK TO THE BARE HOMEPAGE:
+When search_knowledge_base returns a real, relevant match, give the customer the actual substance of the answer in that same reply — the requirements, the steps, the fee, whatever it is. Do not respond with only "check nawasa.gd" or "visit our website" when you actually have the specific information in front of you; that is a non-answer and customers have explicitly complained about it. If the matched content came from a specific NAWASA page or an official form, you may ALSO mention that page/form by name as a place to see the full original if the customer wants it, but the specific page/form you name must be one search_knowledge_base or recommend_form actually returned to you in THIS conversation — never invent a page name or a URL, and never point to the generic https://nawasa.gd/ homepage as if it were a specific answer. If you genuinely have nothing specific (no match from search_knowledge_base and no relevant form from recommend_form), say plainly that you don't have that specific detail rather than guessing, log it with log_unanswered_question, and only THEN suggest contacting NAWASA directly — the generic website or phone number is a last resort, not a substitute for an answer you already have.
+
 WHEN YOU CANNOT ANSWER — log it, then say so plainly (never just deflect to the website):
 If search_knowledge_base returns no close match, or returns results that don't actually answer the specific question asked, you must do BOTH of the following, every time, without exception:
 1. Call the log_unanswered_question tool with the customer's question, so staff can see it and add a real answer to the knowledge base.
@@ -364,14 +368,23 @@ If search_knowledge_base returns no close match, or returns results that don't a
 Never invent, guess, or estimate an answer (a rate, a phone number, a policy, office hours, a procedure) that didn't come from search_knowledge_base or one of your other tools. If a customer wants more detail on something the knowledge base DID answer, you may point them to nawasa.gd for the full page — that's a different situation from not having an answer at all, and doesn't require logging.
 
 NAWASA FORMS — use the recommend_form tool, never guess which form applies:
-There is also a dedicated "📄 Forms" section in this chat widget where customers can browse all official NAWASA forms directly, without asking you — mention that it exists if it seems useful, but don't assume the customer has seen it. Whenever a customer asks which form they need, mentions applying for a new water connection, cancelling a private water service, lacking proof of property ownership, needing a property owner's permission, or anything else that sounds like it needs an official NAWASA document, call the recommend_form tool with a short description of what they need. If it returns matching form(s), they are automatically attached to your reply as clickable "Open Form" buttons — mention the form(s) by name in your own words, but don't repeat the raw PDF URL as text. If recommend_form finds nothing relevant, say so plainly and suggest they check the Forms section or contact NAWASA directly — don't guess which form might apply. Never invent or assume details that aren't in the form's name/description as returned by the tool — no required documents, fees, eligibility rules, approval timelines, or deadlines beyond what you're given. When a customer's situation seems to touch on ownership questions (missing proof of ownership, needing another person's permission, etc.), you may mention that more than one form could apply depending on their specific situation, but never tell them which one definitely applies or that they qualify — that's a legal/administrative judgment call for NAWASA staff, not you.
+There is also a dedicated "📄 Forms" section in this chat widget where customers can browse all official NAWASA forms directly, without asking you — mention that it exists if it seems useful, but don't assume the customer has seen it. Whenever a customer asks which form they need, mentions applying for a new water connection, cancelling a private water service, lacking proof of property ownership, needing a property owner's permission, or anything else that sounds like it needs an official NAWASA document, call the recommend_form tool with a short description of what they need. If it returns matching form(s), they are automatically attached to your reply as clickable "Open Form" buttons — mention the form(s) by name in your own words, and you may state the exact official URL it returned since that URL came directly from the tool, but never repeat it more than once and never alter it. If recommend_form finds nothing relevant, say so plainly and suggest they check the Forms section or contact NAWASA directly — don't guess which form might apply. Never invent or assume details that aren't in the form's name/description as returned by the tool — no required documents, fees, eligibility rules, approval timelines, or deadlines beyond what you're given, UNLESS that same detail was also independently confirmed by search_knowledge_base (the indexed form content or website page), in which case you may combine both sources. When a customer's situation seems to touch on ownership questions (missing proof of ownership, needing another person's permission, etc.), you may mention that more than one form could apply depending on their specific situation, but never tell them which one definitely applies or that they qualify — that's a legal/administrative judgment call for NAWASA staff, not you.
+
+WATER CONNECTION QUESTIONS SPECIFICALLY:
+Questions about applying for a new water connection (what's required, what it costs, how long it takes, what happens without proof of ownership) are common and important — always answer them with real substance from search_knowledge_base first, and pair that with recommend_form so the customer gets both the explanation AND the correct specific form to act on, in the same reply. Never respond to a connection question with just a link to the NAWASA homepage.
 
 LIVE STAFF HANDOFF — use the request_human_handoff tool when you can't help:
 Use the request_human_handoff tool whenever a customer explicitly asks to speak with a person, representative, or agent, or whenever you genuinely cannot resolve what they need (e.g. the knowledge base has no matching entry and the customer is still stuck after you've said so, a billing dispute needs a manual account review, or the situation calls for judgment you don't have). Calling this tool alerts NAWASA staff in the Live Chat monitor and flags the conversation so a person can step in and reply directly in this same chat — you do not need to end the conversation or stop responding, staff will simply join in. After calling it, tell the customer plainly (in your own words, matching the current business-hours status) that a NAWASA representative has been notified and will follow up here, or call/WhatsApp them directly if that's more urgent. Don't call this tool for questions you can actually answer yourself — it's for genuine dead ends or explicit requests for a human, not a substitute for trying the knowledge base first.
 
+CUSTOMER/EMPLOYEE EDUCATION:
+Some questions aren't a specific personal request but a general "how does this work" question (e.g. "what is a private water service?", "how does cancellation work?", "what's the declaration of ownership for?"). Treat these as genuine requests to explain a NAWASA process clearly, the way you'd explain it to someone learning the ropes (a new customer or a new NAWASA employee) — walk through the relevant steps/purpose in plain language, grounded in what search_knowledge_base and recommend_form actually return, not general assumptions about how water utilities work elsewhere.
+
+LOCATION AWARENESS:
+Each customer message may include a "[CUSTOMER LOCATION CONTEXT]" note telling you the customer's last known parish and how long ago it was confirmed. Use a RECENTLY confirmed location freely (for outage checks, logging a report, etc.) without re-asking. But if that note says the location is old/stale, do NOT silently assume the customer is still there — this has been a specific point of customer confusion. Before using a stale location for something location-specific (checking outages, logging a new report), ask a brief confirming question first, e.g. "Are you still in St. George's, or has that changed?" — once they confirm or correct it, proceed normally. This does not apply to unrelated small talk; only ask when a stale location would actually be used for something.
+
 Use the following facts to answer user questions:
 - Help customers report water leaks by collecting the location and relevant details.
-- When a customer asks about outages, low water pressure, "no water", or scheduled maintenance in their area, call the check_active_outages tool with their parish (from what they've told you, or shared earlier via GPS) rather than answering from general knowledge — it returns real, currently-active notices. If you don't know their parish yet, ask for it first.
+- When a customer asks about outages, low water pressure, "no water", or scheduled maintenance in their area, call the check_active_outages tool with their parish (from what they've told you, or shared earlier via GPS — see LOCATION AWARENESS above about staleness) rather than answering from general knowledge — it returns real, currently-active notices. If you don't know their parish yet, ask for it first.
 - Explain the available methods for paying NAWASA bills.
 - Provide NAWASA customer service contact information and transfer users to a representative when requested.
 - If the issue is an emergency, advise the user to contact NAWASA immediately at (473) 440-2155.
@@ -383,7 +396,7 @@ Use the following facts to answer user questions:
 - When a customer reports a visible physical issue (a leak, burst main, damaged hydrant, water quality concern, etc.), ask them to send a photo of it via the attachment (📎) button in the chat box. This helps our technicians assess severity and prepare before visiting. Ask for this naturally as part of your reply — don't make it a precondition for logging the report, and don't ask for a photo for issues that wouldn't have one (e.g. billing questions or no water supply with nothing to see).
 - If the customer attaches a photo of the issue, look at it before calling log_water_report and set severity based on what you actually see.
 - Use natural understanding, not keyword matching.
-- If a customer shares their GPS location (a message like "My current location is [parish], Grenada (GPS: lat, lng)"), treat that parish as their location for the rest of the conversation — use it for outage/service questions and when logging a report, without asking them to repeat it.
+- If a customer shares their GPS location (a message like "My current location is [parish], Grenada (GPS: lat, lng)"), treat that parish as their location for the rest of the conversation — use it for outage/service questions and when logging a report, without asking them to repeat it. See LOCATION AWARENESS above for how to handle an OLDER, previously-shared location.
 - Customers may send a voice note (spoken audio) or a short video instead of typing or a photo. Always listen to / watch the attachment directly and treat what you actually hear or see as their real message — respond to its actual content (what they said, what the leak or damage looks like, etc.). Never reply with a generic "thanks for the recording" acknowledgement, and never ask them to type it out instead — if for some reason the audio or video truly can't be made out, say so plainly and ask them to also type a quick summary, rather than pretending you understood it.
 
 If a question is unrelated to NAWASA services, politely explain that you can only assist with NAWASA-related topics and invite the user to ask another water service question.
@@ -454,7 +467,26 @@ def _website_sync_loop():
         time.sleep(WEBSITE_SYNC_INTERVAL_SECONDS)
 
 
-agent.seed_knowledge_base(_build_kb_entries())
+# SPEED FIX: this used to be `agent.seed_knowledge_base(_build_kb_entries())`
+# called directly at module import time — i.e. BEFORE Flask could accept a
+# single request, the whole process blocked on embedding every FAQ/form/
+# website page and upserting them into Pinecone. On a cold start (a fresh
+# Render deploy, or waking from sleep) that startup cost stacks on top of
+# the container boot time itself, and a request that arrives during that
+# window either queues behind it or times out — a very plausible cause of
+# multi-minute first-response times. None of that work needs to finish
+# before the app can serve chat/report/FAQ traffic (the agent's
+# search_knowledge_base tool just queries whatever's already in Pinecone;
+# an empty/stale index degrades answer quality, it doesn't crash anything),
+# so it now runs in a background thread instead.
+def _initial_kb_seed():
+    try:
+        agent.seed_knowledge_base(_build_kb_entries())
+    except Exception as e:
+        logger.error("Initial knowledge-base seed failed (will retry on the next website sync cycle): %s", e)
+
+
+threading.Thread(target=_initial_kb_seed, daemon=True).start()
 threading.Thread(target=_website_sync_loop, daemon=True).start()
 
 SESSIONS = {}
@@ -820,6 +852,7 @@ def api_chat():
     territory = body.get("territory", "Grenada")
     message = (body.get("message") or "").strip()
     attachments = body.get("attachments") or []
+    location_context = body.get("location_context") or None
 
     if not message and not attachments:
         return jsonify({"error": "Empty message."}), 400
@@ -845,6 +878,24 @@ def api_chat():
         bh_note = (f"CURRENT BUSINESS HOURS STATUS: Office CLOSED ({bh['closed_reason']}). "
                    f"Phone and WhatsApp will NOT be answered until the office reopens {bh['reopens_label']}.")
     content_blocks.append({"type": "text", "text": f"[{bh_note}]"})
+
+    if location_context and location_context.get("parish"):
+        age_minutes = location_context.get("age_minutes")
+        parish = location_context["parish"]
+        if age_minutes is None:
+            loc_note = f"[CUSTOMER LOCATION CONTEXT: known parish is {parish}. Freshness unknown — treat as possibly stale.]"
+        elif age_minutes <= 60:
+            loc_note = f"[CUSTOMER LOCATION CONTEXT: known parish is {parish}, confirmed moments ago in this session — safe to use directly.]"
+        elif age_minutes <= 12 * 60:
+            loc_note = (f"[CUSTOMER LOCATION CONTEXT: known parish is {parish}, confirmed about "
+                        f"{age_minutes // 60} hour(s) ago — reasonably fresh, safe to use directly.]")
+        else:
+            days = age_minutes // (60 * 24)
+            loc_note = (f"[CUSTOMER LOCATION CONTEXT: known parish is {parish}, but this was last confirmed "
+                        f"roughly {days} day(s) ago from an earlier visit — this is STALE. Do not silently "
+                        f"assume the customer is still there for anything location-specific (a new report, "
+                        f"an outage check); briefly confirm their current parish first.]")
+        content_blocks.append({"type": "text", "text": loc_note})
 
     CURRENT_ATTACHMENT.pop(session_id, None)
     has_media = False
@@ -921,7 +972,7 @@ def api_list_reports():
 
 
 @app.route("/api/reports/<reference>", methods=["PATCH"])
-@require_permission("change_report_status")
+@require_permission("view_reports")
 def api_update_report(reference):
     body = request.get_json(force=True)
     new_status = body.get("status")
@@ -934,7 +985,7 @@ def api_update_report(reference):
 
 
 @app.route("/api/reports/<reference>", methods=["DELETE"])
-@require_permission("edit_reports")
+@require_permission("view_reports")
 def api_delete_report(reference):
     if not delete_report(reference):
         return jsonify({"error": "Reference not found."}), 404
@@ -949,7 +1000,7 @@ def api_report_notes_list(reference):
 
 
 @app.route("/api/reports/<reference>/notes", methods=["POST"])
-@require_permission("add_internal_notes")
+@require_permission("view_reports")
 def api_report_notes_create(reference):
     body = request.get_json(force=True) or {}
     note = (body.get("note") or "").strip()
@@ -991,8 +1042,7 @@ def api_notify():
     if request.method == "GET":
         token = request.headers.get("X-Staff-Token", "")
         account = db.get_account_for_token(token)
-        if account is None or not (db.account_has_permission(account, "view_reports")
-                                    or db.account_has_permission(account, "manage_subscribers")):
+        if account is None or not db.account_has_permission(account, "manage_subscribers"):
             return jsonify({"error": "Invalid session or missing permission."}), 401
         return jsonify(load_notifications())
     body = request.get_json(force=True)
@@ -1160,7 +1210,7 @@ def api_staff_accounts_list():
 
 
 @app.route("/api/staff/accounts", methods=["POST"])
-@require_permission("create_accounts")
+@require_permission("manage_staff_accounts")
 def api_staff_accounts_create():
     body = request.get_json(force=True) or {}
     full_name = (body.get("full_name") or "").strip()
@@ -1177,11 +1227,6 @@ def api_staff_accounts_create():
     if username.lower() == db.SUPER_ADMIN_USERNAME.lower():
         return jsonify({"error": "That username is reserved for the Super Administrator."}), 400
 
-    if permissions and not db.account_has_permission(request.staff_account, "manage_permissions"):
-        return jsonify({"error": "You don't have permission to assign permissions. "
-                                  "Create the account first, then ask a Super Administrator "
-                                  "to grant access."}), 403
-
     account, error = db.create_staff_account(
         full_name, username, password, role, permissions, avatar,
         created_by=_actor_label(),
@@ -1194,7 +1239,7 @@ def api_staff_accounts_create():
 
 
 @app.route("/api/staff/accounts/<account_id>", methods=["PATCH"])
-@require_permission("edit_accounts")
+@require_permission("manage_staff_accounts")
 def api_staff_accounts_update(account_id):
     target = db.get_account_by_id(account_id)
     if target is None:
@@ -1220,7 +1265,7 @@ def api_staff_accounts_update(account_id):
 
 
 @app.route("/api/staff/accounts/<account_id>/permissions", methods=["PATCH"])
-@require_permission("manage_permissions")
+@require_permission("manage_staff_accounts")
 def api_staff_accounts_permissions(account_id):
     target = db.get_account_by_id(account_id)
     if target is None:
@@ -1237,7 +1282,7 @@ def api_staff_accounts_permissions(account_id):
 
 
 @app.route("/api/staff/accounts/<account_id>/status", methods=["PATCH"])
-@require_permission("disable_accounts")
+@require_permission("manage_staff_accounts")
 def api_staff_accounts_status(account_id):
     target = db.get_account_by_id(account_id)
     if target is None:
@@ -1282,7 +1327,7 @@ def api_staff_accounts_reset_password(account_id):
 
 
 @app.route("/api/staff/accounts/<account_id>", methods=["DELETE"])
-@require_permission("delete_accounts")
+@require_permission("manage_staff_accounts")
 def api_staff_accounts_delete(account_id):
     target = db.get_account_by_id(account_id)
     if target is None:
@@ -1298,7 +1343,7 @@ def api_staff_accounts_delete(account_id):
 
 
 @app.route("/api/audit-log")
-@require_any_permission("system_settings", "manage_staff_accounts")
+@require_permission("view_audit_log")
 def api_audit_log():
     return jsonify(db.load_audit_log())
 
@@ -1341,13 +1386,13 @@ def api_tts():
 
 
 @app.route("/api/faqs", methods=["GET"])
-@require_any_permission("manage_faqs", "manage_knowledge_base")
+@require_permission("manage_knowledge_base")
 def api_faqs_list():
     return jsonify(db.load_faqs(include_disabled=True))
 
 
 @app.route("/api/faqs", methods=["POST"])
-@require_any_permission("manage_faqs", "manage_knowledge_base")
+@require_permission("manage_knowledge_base")
 def api_faqs_create():
     body = request.get_json(force=True)
     category = (body.get("category") or "").strip()
@@ -1362,7 +1407,7 @@ def api_faqs_create():
 
 
 @app.route("/api/faqs/<faq_id>", methods=["PATCH"])
-@require_any_permission("manage_faqs", "manage_knowledge_base")
+@require_permission("manage_knowledge_base")
 def api_faqs_update(faq_id):
     body = request.get_json(force=True) or {}
     row = db.update_faq(faq_id, category=body.get("category"), question=body.get("q"),
@@ -1375,7 +1420,7 @@ def api_faqs_update(faq_id):
 
 
 @app.route("/api/faqs/<faq_id>", methods=["DELETE"])
-@require_any_permission("manage_faqs", "manage_knowledge_base")
+@require_permission("manage_knowledge_base")
 def api_faqs_delete(faq_id):
     if not db.delete_faq(faq_id):
         return jsonify({"error": "FAQ not found."}), 404
@@ -1386,9 +1431,11 @@ def api_faqs_delete(faq_id):
 
 # =======================================================================
 # NAWASA official forms — public read-only list for the customer-facing
-# Forms panel, plus staff view-all/update. No create/delete route: the
-# set of five official forms is a deliberate code change (DEFAULT_FORMS
-# above), only their name/description/url/enabled state are staff-editable.
+# Forms panel, plus staff view-all/create/update/delete. The five official
+# forms are seeded once (DEFAULT_FORMS above) and can't be deleted (only
+# disabled) — see db.delete_form — but staff CAN add additional forms
+# here, which show up in the same customer-facing Forms panel and can be
+# recommended by the chatbot's recommend_form tool.
 # =======================================================================
 @app.route("/api/forms", methods=["GET"])
 def api_forms_list():
@@ -1396,14 +1443,31 @@ def api_forms_list():
     return jsonify([{"id": f["id"], "name": f["name"], "description": f["description"], "url": f["url"]} for f in forms])
 
 
+@app.route("/api/forms", methods=["POST"])
+@require_permission("manage_forms")
+def api_forms_create():
+    body = request.get_json(force=True) or {}
+    name = (body.get("name") or "").strip()
+    description = (body.get("description") or "").strip()
+    url = (body.get("url") or "").strip()
+    if not name or not description or not url:
+        return jsonify({"error": "name, description, and url are required."}), 400
+    if not url.lower().startswith(("http://", "https://")):
+        return jsonify({"error": "URL must be a valid http(s) link."}), 400
+    row = db.create_form(name, description, url, source="manual")
+    _reseed_knowledge_base()
+    db.log_audit(_actor_label(), "Form added", item=row["name"])
+    return jsonify(row)
+
+
 @app.route("/api/forms/all", methods=["GET"])
-@require_any_permission("manage_forms", "manage_knowledge_base")
+@require_permission("manage_forms")
 def api_forms_list_all():
     return jsonify(db.load_forms(include_disabled=True))
 
 
 @app.route("/api/forms/<form_id>", methods=["PATCH"])
-@require_any_permission("manage_forms", "manage_knowledge_base")
+@require_permission("manage_forms")
 def api_forms_update(form_id):
     body = request.get_json(force=True) or {}
     name = body.get("name")
@@ -1426,8 +1490,128 @@ def api_forms_update(form_id):
     return jsonify(row)
 
 
+@app.route("/api/forms/<form_id>", methods=["DELETE"])
+@require_permission("manage_forms")
+def api_forms_delete(form_id):
+    existing = db.get_form(form_id)
+    if existing is None:
+        return jsonify({"error": "Form not found."}), 404
+    deleted, error = db.delete_form(form_id)
+    if error:
+        return jsonify({"error": error}), 403
+    _reseed_knowledge_base()
+    db.log_audit(_actor_label(), "Form deleted", item=existing["name"])
+    return jsonify({"deleted": form_id})
+
+
+# =======================================================================
+# "Fill It Out With Me" guided form wizard (see form_wizard.py). Additive
+# to the existing Forms feature above — a customer can still just tap
+# "Open Official Form" and never touch any of this. These routes are
+# intentionally NOT staff-permission-gated: they're customer-facing, keyed
+# by the same chat session_id already used for /api/chat, exactly like
+# /api/report and /api/chat/<session_id>/updates are public today.
+# =======================================================================
+@app.route("/api/formwizard/start", methods=["POST"])
+def api_formwizard_start():
+    body = request.get_json(force=True) or {}
+    session_id = (body.get("session_id") or "").strip()
+    form_id = (body.get("form_id") or "").strip()
+    if not session_id or not form_id:
+        return jsonify({"error": "session_id and form_id are required."}), 400
+    form_row = db.get_form(form_id)
+    if form_row is None:
+        return jsonify({"error": "That form doesn't exist."}), 404
+    step, error = form_wizard.start(session_id, form_id)
+    if error:
+        return jsonify({"error": error}), 400
+    form_wizard.set_pdf_url(session_id, form_row["url"])
+    return jsonify(step)
+
+
+@app.route("/api/formwizard/current/<session_id>")
+def api_formwizard_current(session_id):
+    step, error = form_wizard.get_current(session_id)
+    if error:
+        return jsonify({"error": error}), 404
+    return jsonify(step)
+
+
+@app.route("/api/formwizard/answer", methods=["POST"])
+def api_formwizard_answer():
+    body = request.get_json(force=True) or {}
+    session_id = (body.get("session_id") or "").strip()
+    question_id = (body.get("question_id") or "").strip()
+    value = body.get("value")
+    step, error = form_wizard.answer(session_id, question_id, value)
+    if error:
+        return jsonify({"error": error}), 400
+    return jsonify(step)
+
+
+@app.route("/api/formwizard/skip", methods=["POST"])
+def api_formwizard_skip():
+    body = request.get_json(force=True) or {}
+    session_id = (body.get("session_id") or "").strip()
+    step, error = form_wizard.skip(session_id)
+    if error:
+        return jsonify({"error": error}), 400
+    return jsonify(step)
+
+
+@app.route("/api/formwizard/back", methods=["POST"])
+def api_formwizard_back():
+    body = request.get_json(force=True) or {}
+    session_id = (body.get("session_id") or "").strip()
+    step, error = form_wizard.go_back(session_id)
+    if error:
+        return jsonify({"error": error}), 400
+    return jsonify(step)
+
+
+@app.route("/api/formwizard/edit", methods=["POST"])
+def api_formwizard_edit():
+    body = request.get_json(force=True) or {}
+    session_id = (body.get("session_id") or "").strip()
+    question_id = (body.get("question_id") or "").strip()
+    step, error = form_wizard.edit_field(session_id, question_id)
+    if error:
+        return jsonify({"error": error}), 400
+    return jsonify(step)
+
+
+@app.route("/api/formwizard/cancel", methods=["POST"])
+def api_formwizard_cancel():
+    body = request.get_json(force=True) or {}
+    session_id = (body.get("session_id") or "").strip()
+    return jsonify(form_wizard.cancel(session_id))
+
+
+@app.route("/api/formwizard/generate", methods=["POST"])
+def api_formwizard_generate():
+    body = request.get_json(force=True) or {}
+    session_id = (body.get("session_id") or "").strip()
+    token, filename, warnings, error = form_wizard.generate_pdf(session_id)
+    if error:
+        return jsonify({"error": error}), 400
+    schema = form_wizard.get_schema(form_wizard._SESSIONS[session_id].form_id) if session_id in form_wizard._SESSIONS else None
+    signature_note = schema["signature_note"] if schema else "Remember to sign the form before submitting it."
+    return jsonify({
+        "download_token": token, "filename": filename, "warnings": warnings,
+        "signature_note": signature_note,
+    })
+
+
+@app.route("/api/formwizard/download/<token>")
+def api_formwizard_download(token):
+    path, filename = form_wizard.get_download(token)
+    if path is None or not path.exists():
+        return jsonify({"error": "This download link has expired. Please regenerate the form."}), 404
+    return send_from_directory(path.parent, path.name, as_attachment=True, download_name=filename)
+
+
 @app.route("/api/website-content", methods=["GET"])
-@require_any_permission("sync_website_content", "manage_faqs", "manage_knowledge_base")
+@require_permission("manage_knowledge_base")
 def api_website_content_list():
     pages = db.load_website_pages()
     return jsonify([
@@ -1443,8 +1627,25 @@ def api_website_content_list():
     ])
 
 
+@app.route("/api/website-content/page", methods=["GET"])
+def api_website_content_page():
+    """Public (no staff auth) — powers the customer-facing in-app info
+    panel (see app.js's openInfoPanel), which shows synced nawasa.gd page
+    content INSIDE AquaAssist instead of redirecting the customer out to
+    the real site. Only returns content for pages that synced OK; the
+    frontend falls back to a real external link when this 404s."""
+    url = (request.args.get("url") or "").strip()
+    if not url:
+        return jsonify({"error": "url parameter is required."}), 400
+    pages = db.load_website_pages()
+    match = next((p for p in pages if p["url"] == url and p.get("status") == "ok" and (p.get("content") or "").strip()), None)
+    if match is None:
+        return jsonify({"error": "No synced content available for this page yet."}), 404
+    return jsonify({"url": match["url"], "title": match["title"], "content": match["content"], "fetched_at": match["fetched_at"]})
+
+
 @app.route("/api/website-content/sync", methods=["POST"])
-@require_permission("sync_website_content")
+@require_permission("manage_knowledge_base")
 def api_website_content_sync():
     summary = _sync_website_and_reseed()
     detail = f"{summary.get('ok', 0)}/{summary.get('total', 0)} pages fetched"
@@ -1457,7 +1658,7 @@ def api_website_content_sync():
 
 
 @app.route("/api/website-content/manual", methods=["POST"])
-@require_any_permission("sync_website_content", "manage_faqs", "manage_knowledge_base")
+@require_permission("manage_knowledge_base")
 def api_website_content_manual():
     body = request.get_json(force=True) or {}
     url = (body.get("url") or "").strip()
@@ -1505,25 +1706,25 @@ def api_unanswered_delete(q_id):
 
 
 @app.route("/api/chat-stats")
-@require_permission("view_chat_analytics")
+@require_permission("view_dashboard")
 def api_chat_stats():
     return jsonify(db.get_chat_stats_today())
 
 
 @app.route("/api/sessions")
-@require_any_permission("access_live_chat", "view_aquaassist_dashboard")
+@require_permission("access_live_chat")
 def api_sessions_list():
     return jsonify(db.load_recent_sessions())
 
 
 @app.route("/api/sessions/<session_id>/messages")
-@require_any_permission("access_live_chat", "view_aquaassist_dashboard")
+@require_permission("access_live_chat")
 def api_session_messages(session_id):
     return jsonify(db.load_session_messages(session_id))
 
 
 @app.route("/api/sessions/<session_id>/suggestions")
-@require_any_permission("access_live_chat", "view_aquaassist_dashboard")
+@require_permission("access_live_chat")
 def api_session_suggestions(session_id):
     messages = db.load_session_messages(session_id)
     suggestions = agent.suggest_staff_replies(messages)
@@ -1531,7 +1732,7 @@ def api_session_suggestions(session_id):
 
 
 @app.route("/api/sessions/<session_id>/staff-message", methods=["POST"])
-@require_any_permission("access_live_chat", "manage_chatbot_settings")
+@require_permission("access_live_chat")
 def api_session_staff_message(session_id):
     body = request.get_json(force=True) or {}
     text = (body.get("message") or "").strip()
@@ -1557,7 +1758,7 @@ def api_session_staff_message(session_id):
 
 
 @app.route("/api/sessions/<session_id>/pause", methods=["POST"])
-@require_any_permission("access_live_chat", "manage_chatbot_settings")
+@require_permission("access_live_chat")
 def api_session_pause(session_id):
     db.pause_session(session_id)
     db.resolve_handoff_for_session(session_id)
@@ -1565,20 +1766,20 @@ def api_session_pause(session_id):
 
 
 @app.route("/api/sessions/<session_id>/resume", methods=["POST"])
-@require_any_permission("access_live_chat", "manage_chatbot_settings")
+@require_permission("access_live_chat")
 def api_session_resume(session_id):
     db.resume_session(session_id)
     return jsonify({"session_id": session_id, "paused": False})
 
 
 @app.route("/api/sessions/<session_id>/status")
-@require_any_permission("access_live_chat", "view_aquaassist_dashboard")
+@require_permission("access_live_chat")
 def api_session_status(session_id):
     return jsonify({"session_id": session_id, "paused": db.is_session_paused(session_id)})
 
 
 @app.route("/api/sessions/<session_id>", methods=["DELETE"])
-@require_any_permission("access_live_chat", "manage_chatbot_settings")
+@require_permission("access_live_chat")
 def api_session_delete(session_id):
     db.delete_session_messages(session_id)
     SESSIONS.pop(session_id, None)
@@ -1589,7 +1790,7 @@ def api_session_delete(session_id):
 
 
 @app.route("/api/sessions", methods=["DELETE"])
-@require_any_permission("access_live_chat", "manage_chatbot_settings")
+@require_permission("access_live_chat")
 def api_sessions_delete_all():
     db.delete_all_sessions()
     SESSIONS.clear()
@@ -1609,7 +1810,7 @@ def api_chat_updates(session_id):
 
 
 @app.route("/api/handoffs")
-@require_any_permission("access_live_chat", "view_aquaassist_dashboard")
+@require_permission("access_live_chat")
 def api_handoffs_list():
     return jsonify(db.load_open_handoffs())
 
