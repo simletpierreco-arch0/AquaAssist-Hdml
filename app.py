@@ -374,7 +374,8 @@ WATER CONNECTION QUESTIONS SPECIFICALLY:
 Questions about applying for a new water connection (what's required, what it costs, how long it takes, what happens without proof of ownership) are common and important — always answer them with real substance from search_knowledge_base first, and pair that with recommend_form so the customer gets both the explanation AND the correct specific form to act on, in the same reply. Never respond to a connection question with just a link to the NAWASA homepage.
 
 LIVE STAFF HANDOFF — use the request_human_handoff tool when you can't help:
-Use the request_human_handoff tool whenever a customer explicitly asks to speak with a person, representative, or agent, or whenever you genuinely cannot resolve what they need (e.g. the knowledge base has no matching entry and the customer is still stuck after you've said so, a billing dispute needs a manual account review, or the situation calls for judgment you don't have). Calling this tool alerts NAWASA staff in the Live Chat monitor and flags the conversation so a person can step in and reply directly in this same chat — you do not need to end the conversation or stop responding, staff will simply join in. After calling it, tell the customer plainly (in your own words, matching the current business-hours status) that a NAWASA representative has been notified and will follow up here, or call/WhatsApp them directly if that's more urgent. Don't call this tool for questions you can actually answer yourself — it's for genuine dead ends or explicit requests for a human, not a substitute for trying the knowledge base first.
+Use the request_human_handoff tool whenever a customer explicitly asks to speak with a person, representative, or agent, or whenever you genuinely cannot resolve what they need (e.g. the knowledge base has no matching entry and the customer is still stuck after you've said so, a billing dispute needs a manual account review, or the situation calls for judgment you don't have). Calling this tool alerts NAWASA staff in the Live Chat monitor and flags the conversation so a person can step in and reply directly in this same chat — you do not need to end the conversation or stop responding, staff will simply join in.
+IMPORTANT — staff only monitor Live Chat during business hours (8:00 AM–4:00 PM, Monday to Friday, Grenada time), never on weekends or outside those hours, regardless of how urgent the customer's issue is. Each message includes a CURRENT BUSINESS HOURS STATUS note — use it here specifically: if the office is OPEN, you can tell the customer a representative has been notified and should follow up here shortly, or that they can call/WhatsApp directly if it's more urgent. If the office is CLOSED, you MUST make clear that Live Chat is only actively monitored Monday–Friday, 8:00 AM–4:00 PM Grenada time — say plainly that their request has been logged and a representative will follow up here once the office reopens (use the reopening info from the business-hours note), rather than implying someone may respond soon. Never leave the customer thinking a person might reply within minutes when the office is closed. Don't call this tool for questions you can actually answer yourself — it's for genuine dead ends or explicit requests for a human, not a substitute for trying the knowledge base first.
 
 CUSTOMER/EMPLOYEE EDUCATION:
 Some questions aren't a specific personal request but a general "how does this work" question (e.g. "what is a private water service?", "how does cancellation work?", "what's the declaration of ownership for?"). Treat these as genuine requests to explain a NAWASA process clearly, the way you'd explain it to someone learning the ropes (a new customer or a new NAWASA employee) — walk through the relevant steps/purpose in plain language, grounded in what search_knowledge_base and recommend_form actually return, not general assumptions about how water utilities work elsewhere.
@@ -612,10 +613,17 @@ def _make_request_handoff_tool(session_id, territory):
             the customer in your own words.
         """
         db.create_handoff_request(session_id, territory, reason)
-        return ("Staff have been notified in the Live Chat monitor and will join this "
-                "conversation as soon as possible. Tell the customer a NAWASA representative "
-                "has been alerted and will follow up here — and if it sounds urgent and the "
-                "office is currently open, you can also suggest they call or WhatsApp directly.")
+        bh = get_business_hours_status()
+        if bh["is_open"]:
+            return ("Staff have been notified in the Live Chat monitor and will join this "
+                    "conversation as soon as possible. Tell the customer a NAWASA representative "
+                    "has been alerted and will follow up here — and if it sounds urgent, you can "
+                    "also suggest they call or WhatsApp directly since the office is open right now.")
+        return (f"Staff have been notified, but Live Chat is only actively monitored Monday–Friday, "
+                f"8:00 AM–4:00 PM Grenada time ({bh['closed_reason']} right now). Tell the customer "
+                f"plainly that their request has been logged and a NAWASA representative will follow "
+                f"up here once the office reopens {bh['reopens_label']} — do NOT imply anyone may "
+                f"reply within minutes, since no one is monitoring this outside those hours.")
     return tool(request_human_handoff, parse_docstring=True)
 
 
