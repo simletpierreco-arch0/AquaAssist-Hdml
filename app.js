@@ -8,6 +8,13 @@ const TERRITORY_TO_PARISH = {
   "Petit Martinique": "Carriacou and Petite Martinique",
 };
 
+// How long a previously-shared/selected parish is treated as "fresh"
+// before AquaAssist is told (via location_context in /api/chat) to treat
+// it as possibly stale and confirm with the customer before relying on
+// it for a new report/outage check. See sendMessage() and the backend's
+// LOCATION AWARENESS system-prompt section.
+const LOCATION_FRESH_MINUTES = 6 * 60; // 6 hours
+
 const state = {
   config: null,
   sessionId: localStorage.getItem("aqua_session_id") || null,
@@ -29,6 +36,7 @@ const state = {
   tipIndex: 0,
   tipTimer: null,
   chatbotName: "AquaAssist",
+  wizard: null, // active "Fill It Out With Me" session: {formId, formName}
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -94,6 +102,14 @@ function setupWidgetToggle() {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && widget.classList.contains("expanded")) closeWidget();
   });
+
+  window.__aquaOpenWidgetToTab = (tabName) => {
+    if (!widget.classList.contains("expanded")) openWidget();
+    setTimeout(() => {
+      const tabBtn = $(`.tab-btn[data-tab="${tabName}"]`);
+      if (tabBtn) tabBtn.click();
+    }, 320);
+  };
 }
 
 async function init() {
@@ -107,6 +123,7 @@ async function init() {
   $("#territorySelect").value = state.territory;
 
   setupSiteNav();
+  setupMockInfoLinks();
   await loadPermissionDefs();
   setupStaffPortal();
   setupVoiceTestButton();
@@ -132,7 +149,7 @@ async function init() {
     localStorage.setItem("aqua_territory", territory);
     localStorage.setItem("aqua_auth_done", "1");
     if (!localStorage.getItem("aqua_customer_parish") && TERRITORY_TO_PARISH[territory]) {
-      localStorage.setItem("aqua_customer_parish", TERRITORY_TO_PARISH[territory]);
+      setCustomerParish(TERRITORY_TO_PARISH[territory]);
     }
     startApp();
   });
@@ -170,6 +187,23 @@ function setupSiteNav() {
     if (!widget.classList.contains("expanded")) $("#widgetToggleBtn").click();
   });
 
+  // FIX (unwanted redirects): "Report a Leak" and "Make a Suggestion" used
+  // to link straight out to nawasa.gd/contact-us — but AquaAssist already
+  // HAS a full Report & Track tab and a chat channel for this. Route them
+  // into the widget instead of off the site.
+  const heroReportBtn = $("#heroReportLeakBtn");
+  if (heroReportBtn) heroReportBtn.addEventListener("click", () => window.__aquaOpenWidgetToTab("report"));
+  const footerReportBtn = $("#footerReportLeakBtn");
+  if (footerReportBtn) footerReportBtn.addEventListener("click", (e) => { e.preventDefault(); window.__aquaOpenWidgetToTab("report"); });
+  const footerSuggestionBtn = $("#footerSuggestionBtn");
+  if (footerSuggestionBtn) {
+    footerSuggestionBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      window.__aquaOpenWidgetToTab("chat");
+      setTimeout(() => sendMessage("I'd like to make a suggestion to NAWASA."), 600);
+    });
+  }
+
   window.addEventListener("popstate", () => {
     if (window.location.pathname === "/admin") showStaffPortal(false);
     else showSite(false);
@@ -178,6 +212,55 @@ function setupSiteNav() {
   if (window.location.pathname === "/admin") {
     showStaffPortal(false);
   }
+}
+
+// ---------------------------------------------------------------------
+// FIX (unwanted redirects): mock-site nav links (About Us, Customer Care,
+// Resources, Media Room, Contact Us) used to jump straight to nawasa.gd
+// in a new tab. Where AquaAssist has ALREADY synced that page's content,
+// show it in an in-app panel instead; only fall back to the real external
+// link when nothing's synced yet. "Open official form" / WhatsApp / phone
+// / social links are untouched — those are legitimate, intentional exits.
+// ---------------------------------------------------------------------
+function setupMockInfoLinks() {
+  $$(".mock-info-link").forEach((a) => {
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      openInfoPanel(a.dataset.infoUrl, a.dataset.infoTitle || a.textContent.trim());
+    });
+  });
+  const closeBtn = $("#infoModalCloseBtn");
+  if (closeBtn) closeBtn.addEventListener("click", closeInfoPanel);
+  const modal = $("#infoModal");
+  if (modal) modal.addEventListener("click", (e) => { if (e.target.id === "infoModal") closeInfoPanel(); });
+}
+
+async function openInfoPanel(url, title) {
+  const modal = $("#infoModal");
+  const body = $("#infoModalBody");
+  const titleEl = $("#infoModalTitle");
+  if (!modal || !body) return;
+  titleEl.textContent = title;
+  body.innerHTML = `<p class="hint-text">Loading…</p>`;
+  modal.style.display = "flex";
+  try {
+    const res = await fetch(`${API}/api/website-content/page?url=${encodeURIComponent(url)}`);
+    if (!res.ok) {
+      body.innerHTML = `<p class="hint-text">This isn't synced into AquaAssist yet.</p>
+        <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="btn-primary" style="display:inline-block;margin-top:.6rem;">Open on the official NAWASA website ↗</a>`;
+      return;
+    }
+    const data = await res.json();
+    const paragraphs = (data.content || "").split(/\n{2,}/).map((p) => `<p>${escapeHtml(p)}</p>`).join("");
+    body.innerHTML = `${paragraphs}<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="mock-card-link" style="display:inline-block;margin-top:.8rem;">View the original page on nawasa.gd ↗</a>`;
+  } catch (err) {
+    body.innerHTML = `<p class="hint-text">Couldn't load this right now.</p>
+      <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="btn-primary" style="display:inline-block;margin-top:.6rem;">Open on the official NAWASA website ↗</a>`;
+  }
+}
+function closeInfoPanel() {
+  const modal = $("#infoModal");
+  if (modal) modal.style.display = "none";
 }
 
 function applyPrefsFromStorage() {
@@ -583,7 +666,7 @@ function renderFAQ(query) {
 }
 
 // ---------------------------------------------------------------------
-// Forms (customer-facing)
+// Forms (customer-facing) — includes "Fill It Out With Me" per-form.
 // ---------------------------------------------------------------------
 function renderForms() {
   const list = $("#formsList");
@@ -600,8 +683,22 @@ function renderForms() {
     item.innerHTML = `
       <div class="form-item-name">${escapeHtml(f.name)}</div>
       <div class="form-item-desc">${escapeHtml(f.description)}</div>
-      <a class="btn-primary form-open-btn" href="${escapeHtml(f.url)}" target="_blank" rel="noopener noreferrer">Open Form</a>
+      <div class="form-item-actions">
+        <a class="btn-primary form-open-btn" href="${escapeHtml(f.url)}" target="_blank" rel="noopener noreferrer">Open Official Form ↗</a>
+        <button type="button" class="btn-secondary form-ask-btn">💬 Ask AquaAssist about this</button>
+        <button type="button" class="btn-secondary form-wizard-btn">📄 Fill It Out With Me</button>
+      </div>
     `;
+    item.querySelector(".form-ask-btn").addEventListener("click", () => {
+      const chatTab = $('.tab-btn[data-tab="chat"]');
+      if (chatTab) chatTab.click();
+      sendMessage(`Can you tell me about the "${f.name}" — what is it for and what do I need to complete it?`);
+    });
+    item.querySelector(".form-wizard-btn").addEventListener("click", () => {
+      const chatTab = $('.tab-btn[data-tab="chat"]');
+      if (chatTab) chatTab.click();
+      startFormWizard(f.id, f.name);
+    });
     list.appendChild(item);
   });
 }
@@ -615,8 +712,12 @@ function buildFormCardsEl(cards) {
     card.innerHTML = `
       <div class="form-card-name">📄 ${escapeHtml(f.name)}</div>
       <div class="form-card-desc">${escapeHtml(f.description)}</div>
-      <a class="btn-primary form-open-btn" href="${escapeHtml(f.url)}" target="_blank" rel="noopener noreferrer">Open Form</a>
+      <div class="form-item-actions">
+        <a class="btn-primary form-open-btn" href="${escapeHtml(f.url)}" target="_blank" rel="noopener noreferrer">Open Official Form ↗</a>
+        <button type="button" class="btn-secondary form-wizard-btn">📄 Fill It Out With Me</button>
+      </div>
     `;
+    card.querySelector(".form-wizard-btn").addEventListener("click", () => startFormWizard(f.id, f.name));
     wrap.appendChild(card);
   });
   return wrap;
@@ -687,6 +788,7 @@ function appendBubble(role, content, attachmentName, reportCard, attachmentMime,
   if (isLive && role === "assistant" && featureEnabled("read_aloud") && localStorage.getItem("aqua_read_aloud") === "1") {
     speakText(content, speakBtn);
   }
+  return row;
 }
 
 let availableVoices = [];
@@ -937,6 +1039,7 @@ function buildLocationCardEl(loc) {
 function renderFollowupChips() {
   const wrap = $("#followupChips");
   wrap.innerHTML = "";
+  if (state.wizard) return; // don't clutter the wizard flow with unrelated chips
   if (!state.messages.length || state.messages[state.messages.length - 1].role !== "assistant") return;
   const chips = suggestFollowupChips();
   if (!chips) return;
@@ -979,6 +1082,27 @@ function fileToBase64(file) {
   });
 }
 
+// ---------------------------------------------------------------------
+// FIX (location staleness): a parish is now stored WITH a timestamp, and
+// that age is sent to the backend on every chat turn as `location_context`
+// so Gemini can tell "just shared" apart from "shared three days ago" and
+// confirm with the customer before reusing a stale one for something
+// location-specific (see build_system_instruction's LOCATION AWARENESS
+// section in app.py). This does not remove the existing parish feature —
+// it's the same localStorage value, just timestamped.
+// ---------------------------------------------------------------------
+function setCustomerParish(parish) {
+  localStorage.setItem("aqua_customer_parish", parish);
+  localStorage.setItem("aqua_customer_parish_ts", String(Date.now()));
+}
+function getLocationContext() {
+  const parish = localStorage.getItem("aqua_customer_parish");
+  if (!parish) return null;
+  const ts = parseInt(localStorage.getItem("aqua_customer_parish_ts") || "0", 10);
+  const age_minutes = ts ? Math.round((Date.now() - ts) / 60000) : null;
+  return { parish, age_minutes };
+}
+
 async function sendMessage(text, directAttachment, locationCard) {
   const attachment = directAttachment || pendingAttachment;
   const displayText = text || (attachment ? (attachment.mime && attachment.mime.startsWith("audio") ? `🎤 Voice note${attachment.durationLabel ? ` (${attachment.durationLabel})` : ""}` : "📎 Sent an attachment") : "");
@@ -1004,7 +1128,10 @@ async function sendMessage(text, directAttachment, locationCard) {
     const res = await fetch(`${API}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: state.sessionId, territory: state.territory, message: text || "", attachments }),
+      body: JSON.stringify({
+        session_id: state.sessionId, territory: state.territory, message: text || "",
+        attachments, location_context: getLocationContext(),
+      }),
     });
     const data = await res.json();
     typingRow.remove();
@@ -1081,9 +1208,20 @@ async function renderOutageBanners() {
     }
     return;
   }
+  const loc = getLocationContext();
+  const isStale = loc && loc.age_minutes !== null && loc.age_minutes > LOCATION_FRESH_MINUTES;
   const res = await fetch(`${API}/api/outages`);
   const outages = await res.json();
   const today = grenadaTodayISO();
+  if (isStale) {
+    const staleDiv = document.createElement("div");
+    staleDiv.className = "card";
+    staleDiv.style.fontSize = ".8rem";
+    staleDiv.innerHTML = `📍 Showing notices for <b>${escapeHtml(parish)}</b> (last confirmed a while ago). <a href="#" id="refreshParishLink">Still there? Refresh my location</a>.`;
+    wrap.appendChild(staleDiv);
+    const refreshLink = staleDiv.querySelector("#refreshParishLink");
+    if (refreshLink) refreshLink.addEventListener("click", (e) => { e.preventDefault(); const btn = $("#chatLocationBtn"); if (btn) { $('.tab-btn[data-tab="chat"]').click(); btn.click(); } });
+  }
   outages.filter((o) => o.parish === parish && o.start_date <= today && o.end_date >= today).forEach((o) => {
     const div = document.createElement("div");
     div.className = "card";
@@ -1538,7 +1676,7 @@ function setupLocationShare() {
 function sendLocationMessage(lat, lng, accuracy, parish) {
   const gpsText = `📍 My current location is ${parish}, Grenada (GPS: ${lat.toFixed(5)}, ${lng.toFixed(5)}).`;
   sendMessage(gpsText, null, { parish, lat, lng, accuracy: accuracy ? Math.round(accuracy) : null });
-  localStorage.setItem("aqua_customer_parish", parish);
+  setCustomerParish(parish);
   const parishSelect = $("#customerParishSelect");
   if (parishSelect) parishSelect.value = parish;
   renderOutageBanners();
@@ -1641,7 +1779,7 @@ function setupSettings() {
   const parishSelect = $("#customerParishSelect");
   parishSelect.value = localStorage.getItem("aqua_customer_parish") || "";
   parishSelect.addEventListener("change", () => {
-    localStorage.setItem("aqua_customer_parish", parishSelect.value);
+    setCustomerParish(parishSelect.value);
     renderOutageBanners();
   });
 
@@ -1652,7 +1790,7 @@ function setupSettings() {
     state.territory = territorySelect.value;
     localStorage.setItem("aqua_territory", state.territory);
     if (TERRITORY_TO_PARISH[state.territory]) {
-      localStorage.setItem("aqua_customer_parish", TERRITORY_TO_PARISH[state.territory]);
+      setCustomerParish(TERRITORY_TO_PARISH[state.territory]);
       if (parishSelect) parishSelect.value = TERRITORY_TO_PARISH[state.territory];
     }
     renderContactRow();
@@ -1669,22 +1807,28 @@ function setupSettings() {
   });
 }
 
+// One permission per Staff Portal sidebar section — 1:1, no OR-lists.
+// "chatbot-name" is still additionally hard-enforced server-side to the
+// Super Administrator account regardless of this permission (see
+// api_settings_chatbot_name in app.py) — granting manage_chatbot_identity
+// lets someone SEE that section, not actually rename the bot unless
+// they're also the Super Administrator.
 const SECTION_PERMISSIONS = {
-  "overview": null,
-  "website-alerts": ["manage_service_alerts", "view_website_management"],
-  "website-tips": ["manage_water_tips", "view_website_management"],
-  "website-preview": ["view_website_management"],
-  "aqua-livechat": ["access_live_chat", "view_aquaassist_dashboard"],
-  "aqua-kb": ["manage_faqs", "manage_knowledge_base", "sync_website_content"],
+  "overview": ["view_dashboard"],
+  "website-alerts": ["manage_service_alerts"],
+  "website-tips": ["manage_water_tips"],
+  "website-preview": ["view_website_preview"],
+  "aqua-livechat": ["access_live_chat"],
+  "aqua-kb": ["manage_knowledge_base"],
   "aqua-unanswered": ["review_unanswered_questions"],
-  "aqua-forms": ["manage_forms", "manage_knowledge_base"],
+  "aqua-forms": ["manage_forms"],
   "aqua-settings": ["manage_chatbot_settings"],
   "reports-map": ["view_reporting_map"],
   "reports-table": ["view_reports"],
-  "reports-notify": ["view_reports", "manage_subscribers"],
+  "reports-notify": ["manage_subscribers"],
   "staff-accounts": ["manage_staff_accounts"],
-  "audit-log": ["system_settings", "manage_staff_accounts"],
-  "chatbot-name": "SUPER_ADMIN_ONLY",
+  "audit-log": ["view_audit_log"],
+  "chatbot-name": ["manage_chatbot_identity"],
 };
 
 function hasPerm(key) {
@@ -1731,9 +1875,7 @@ function setupStaffSidebar() {
 function applyStaffRoleVisibility() {
   $$(".staff-nav-btn[data-staff-section]").forEach((btn) => {
     const perms = SECTION_PERMISSIONS[btn.dataset.staffSection];
-    const visible = perms === "SUPER_ADMIN_ONLY"
-      ? !!(state.staffAccount && state.staffAccount.is_super_admin)
-      : hasAnyPerm(perms);
+    const visible = hasAnyPerm(perms);
     btn.style.display = visible ? "" : "none";
   });
   $$(".staff-nav-group").forEach((g) => {
@@ -1925,7 +2067,9 @@ function renderUnansweredList(items) {
 }
 
 // ---------------------------------------------------------------------
-// Forms admin (Staff Portal — view/edit/enable-disable only, no add/delete)
+// Forms admin (Staff Portal) — view/edit/enable-disable + ADD/REMOVE.
+// The five official NAWASA forms can be edited/disabled but not deleted;
+// staff-added forms can be fully removed. See db.create_form/delete_form.
 // ---------------------------------------------------------------------
 async function loadFormsAdmin() {
   const res = await staffFetch("/api/forms/all");
@@ -1944,7 +2088,7 @@ function renderFormManageList(forms) {
     row.className = "tip-manage-row";
     const textSpan = document.createElement("span");
     textSpan.className = "tip-manage-text" + (f.enabled ? "" : " tip-disabled");
-    textSpan.innerHTML = `<b>${escapeHtml(f.name)}</b><br><span class="hint-text">${escapeHtml(f.description)}</span><br><span class="hint-text">${escapeHtml(f.url)}</span>`;
+    textSpan.innerHTML = `<b>${escapeHtml(f.name)}</b>${f.source === "manual" ? ' <span class="hint-text">(added by staff)</span>' : ""}<br><span class="hint-text">${escapeHtml(f.description)}</span><br><span class="hint-text">${escapeHtml(f.url)}</span>`;
     row.appendChild(textSpan);
 
     const actions = document.createElement("div");
@@ -1978,8 +2122,41 @@ function renderFormManageList(forms) {
     });
 
     actions.appendChild(editBtn); actions.appendChild(toggleBtn);
+
+    if (f.source === "manual") {
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button"; deleteBtn.className = "btn-secondary tip-delete-btn"; deleteBtn.textContent = "Remove";
+      deleteBtn.addEventListener("click", async () => {
+        if (!confirm(`Permanently remove "${f.name}"?`)) return;
+        const res2 = await staffFetch(`/api/forms/${f.id}`, { method: "DELETE" });
+        const data = await res2.json();
+        if (data.error) { alert(data.error); return; }
+        loadFormsAdmin();
+      });
+      actions.appendChild(deleteBtn);
+    }
+
     row.appendChild(actions);
     wrap.appendChild(row);
+  });
+}
+
+function setupFormsAdminCreate() {
+  const form = $("#formCreateForm");
+  if (!form) return;
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = $("#formCreateName").value.trim();
+    const description = $("#formCreateDescription").value.trim();
+    const url = $("#formCreateUrl").value.trim();
+    const errEl = $("#formCreateError");
+    errEl.style.display = "none";
+    if (!name || !description || !url) return;
+    const res = await staffFetch("/api/forms", { method: "POST", body: JSON.stringify({ name, description, url }) });
+    const data = await res.json();
+    if (data.error) { errEl.textContent = data.error; errEl.style.display = "block"; return; }
+    form.reset();
+    loadFormsAdmin();
   });
 }
 
@@ -2327,7 +2504,7 @@ function renderStaffAccountsTable(accounts) {
     const actionsTd = tr.lastElementChild;
     const canManage = accountCanBeManagedByMe(a);
 
-    if (hasPerm("edit_accounts") && canManage) {
+    if (hasPerm("manage_staff_accounts") && canManage) {
       const editBtn = document.createElement("button");
       editBtn.type = "button"; editBtn.className = "btn-secondary"; editBtn.textContent = "Edit";
       editBtn.style.marginRight = ".3rem";
@@ -2335,7 +2512,7 @@ function renderStaffAccountsTable(accounts) {
       actionsTd.appendChild(editBtn);
     }
 
-    if (hasPerm("manage_permissions") && !a.is_super_admin) {
+    if (hasPerm("manage_staff_accounts") && !a.is_super_admin) {
       const permBtn = document.createElement("button");
       permBtn.type = "button"; permBtn.className = "btn-secondary"; permBtn.textContent = "Permissions";
       permBtn.style.marginRight = ".3rem";
@@ -2360,7 +2537,7 @@ function renderStaffAccountsTable(accounts) {
       actionsTd.appendChild(resetBtn);
     }
 
-    if (hasPerm("disable_accounts") && !a.is_super_admin) {
+    if (hasPerm("manage_staff_accounts") && !a.is_super_admin) {
       const toggleBtn = document.createElement("button");
       toggleBtn.type = "button"; toggleBtn.className = "btn-secondary"; toggleBtn.style.marginRight = ".3rem";
       toggleBtn.textContent = a.status === "Active" ? "Disable" : "Enable";
@@ -2373,7 +2550,7 @@ function renderStaffAccountsTable(accounts) {
       actionsTd.appendChild(toggleBtn);
     }
 
-    if (hasPerm("delete_accounts") && !a.is_super_admin && (!state.staffAccount || a.id !== state.staffAccount.id)) {
+    if (hasPerm("manage_staff_accounts") && !a.is_super_admin && (!state.staffAccount || a.id !== state.staffAccount.id)) {
       const delBtn = document.createElement("button");
       delBtn.type = "button"; delBtn.className = "btn-secondary tip-delete-btn"; delBtn.textContent = "Delete";
       delBtn.addEventListener("click", async () => {
@@ -2408,7 +2585,7 @@ function openAccountEditor(account) {
   $("#accountPassword").required = !account;
 
   const permsWrap = $("#accountFormPermissions");
-  const canAssignPerms = hasPerm("manage_permissions");
+  const canAssignPerms = hasPerm("manage_staff_accounts");
   if (!account && canAssignPerms) {
     permsWrap.innerHTML = permissionCheckboxesHTML("newacct", []);
     permsWrap.style.display = "block";
@@ -2676,6 +2853,7 @@ function setupStaffPortal() {
   setupStaffNotifySetting();
   setupStaffAccountsUI();
   setupWebsiteSync();
+  setupFormsAdminCreate();
 
   $("#staffLoginBtn").addEventListener("click", async () => {
     const username = $("#staffUsernameInput").value.trim();
@@ -2970,7 +3148,7 @@ function renderReportsTable(reports) {
     tr.innerHTML = cols.map((c) => {
       if (c === "attachment") return `<td>${buildAttachmentCell(r)}</td>`;
       if (c === "notes") return `<td><button type="button" class="report-notes-btn btn-secondary" data-ref="${escapeHtml(r.reference)}" title="Internal notes" style="padding:.3rem .5rem;font-size:.78rem;">📝</button></td>`;
-      if (c === "delete") return `<td>${hasPerm("edit_reports") ? `<button type="button" class="delete-report-btn" data-ref="${escapeHtml(r.reference)}" title="Delete this report">🗑️</button>` : ""}</td>`;
+      if (c === "delete") return `<td>${hasPerm("view_reports") ? `<button type="button" class="delete-report-btn" data-ref="${escapeHtml(r.reference)}" title="Delete this report">🗑️</button>` : ""}</td>`;
       return `<td>${escapeHtml(String(r[c] ?? ""))}</td>`;
     }).join("");
     tbody.appendChild(tr);
@@ -3048,7 +3226,7 @@ async function openReportNotes(reference) {
   $("#reportNotesTitle").textContent = `Internal notes — ${reference}`;
   $("#reportNotesInput").value = "";
   const form = $("#reportNotesForm");
-  form.style.display = hasPerm("add_internal_notes") ? "" : "none";
+  form.style.display = hasPerm("view_reports") ? "" : "none";
   $("#reportNotesModal").style.display = "flex";
   await loadReportNotes(reference);
 }
@@ -3208,6 +3386,288 @@ function renderSubscribersTable(subs) {
     }
     tbody.appendChild(tr);
   });
+}
+
+// =======================================================================
+// "Fill It Out With Me" — guided form wizard, rendered as special chat
+// bubbles inside the existing chat stream (per spec: "should look like a
+// natural part of AquaAssist", not a separate app). Talks to the new
+// /api/formwizard/* routes; see form_wizard.py for the state machine.
+// =======================================================================
+async function startFormWizard(formId, formName) {
+  if (!state.sessionId) {
+    // The chat needs a session id before the wizard can attach to it —
+    // send a tiny opening ping through the normal chat pipeline first.
+    await sendMessage(`I'd like to fill out the "${formName}" form.`);
+  }
+  state.wizard = { formId, formName };
+  appendBubble("assistant",
+    `Great! I'll help you complete the **${formName}** step-by-step. I'll ask for the information ` +
+    `this form requires and let you review everything before the completed document is generated.`
+  );
+  try {
+    const res = await fetch(`${API}/api/formwizard/start`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: state.sessionId, form_id: formId }),
+    });
+    const step = await res.json();
+    if (step.error) {
+      appendBubble("assistant", `⚠️ ${step.error}`);
+      state.wizard = null;
+      return;
+    }
+    renderWizardStep(step);
+  } catch (err) {
+    appendBubble("assistant", "⚠️ Couldn't start the form wizard right now. Please try again in a moment.");
+    state.wizard = null;
+  }
+}
+
+function wizardProgressHtml(stepNumber, stepTotal) {
+  const pct = stepTotal ? Math.round((stepNumber / stepTotal) * 100) : 0;
+  return `
+    <div class="wizard-progress">
+      <div class="wizard-progress-label">Step ${stepNumber} of ${stepTotal}</div>
+      <div class="wizard-progress-bar"><div class="wizard-progress-fill" style="width:${pct}%;"></div></div>
+    </div>
+  `;
+}
+
+function renderWizardStep(step) {
+  if (!step || step.status === "cancelled") {
+    state.wizard = null;
+    return;
+  }
+  if (step.status === "review") {
+    renderWizardReview(step);
+    return;
+  }
+  if (step.status !== "question") return;
+
+  const q = step.question;
+  const row = document.createElement("div");
+  row.className = "msg-row assistant";
+  const bubble = document.createElement("div");
+  bubble.className = "msg-bubble wizard-bubble";
+
+  let controlsHtml = "";
+  if (q.type === "checkbox") {
+    controlsHtml = `<div class="wizard-options">${(q.options || []).map((opt, i) => `
+      <label class="wizard-checkbox-row">
+        <input type="checkbox" class="wizard-checkbox-input" value="${escapeHtml(opt)}" ${(step.current_value || []).includes(opt) ? "checked" : ""} />
+        ${escapeHtml(opt)}
+      </label>`).join("")}</div>`;
+  } else if (q.type === "radio") {
+    controlsHtml = `<div class="wizard-options">${(q.options || []).map((opt) => `
+      <label class="wizard-radio-row">
+        <input type="radio" name="wizard-radio" class="wizard-radio-input" value="${escapeHtml(opt)}" ${step.current_value === opt ? "checked" : ""} />
+        ${escapeHtml(opt)}
+      </label>`).join("")}</div>`;
+  } else if (q.type === "textarea") {
+    controlsHtml = `<textarea class="wizard-textarea" rows="3" placeholder="Type your answer...">${escapeHtml(step.current_value || "")}</textarea>`;
+  } else {
+    const inputType = q.type === "email" ? "email" : q.type === "phone" ? "tel" : q.type === "date" ? "date" : "text";
+    controlsHtml = `
+      <div class="wizard-text-row">
+        <input type="${inputType}" class="wizard-text-input" value="${escapeHtml(step.current_value || "")}" placeholder="${q.type === "date" ? "" : "Type your answer..."}" />
+        <button type="button" class="wizard-send-btn" title="Submit">➤</button>
+      </div>`;
+  }
+
+  bubble.innerHTML = `
+    ${wizardProgressHtml(step.step_number, step.step_total)}
+    <p class="wizard-question">${escapeHtml(q.prompt)}</p>
+    ${step.error ? `<p class="error-text wizard-error">${escapeHtml(step.error)}</p>` : ""}
+    ${controlsHtml}
+    <div class="wizard-controls-row">
+      ${step.can_go_back ? `<button type="button" class="btn-secondary wizard-back-btn">← Back</button>` : ""}
+      ${!q.required ? `<button type="button" class="btn-secondary wizard-skip-btn">Skip</button>` : ""}
+      ${(q.type === "checkbox" || q.type === "radio" || q.type === "textarea") ? `<button type="button" class="btn-primary wizard-continue-btn">Continue</button>` : ""}
+      <button type="button" class="btn-secondary wizard-cancel-btn">❌ Cancel</button>
+    </div>
+  `;
+  row.appendChild(document.createElement("div")).outerHTML =
+    `<div class="msg-avatar"><span>💧</span></div>`;
+  row.appendChild(bubble);
+  $("#chatMessages").appendChild(row);
+  $("#chatMessages").scrollTop = $("#chatMessages").scrollHeight;
+
+  const submit = async (value) => {
+    bubble.querySelectorAll("button, input, textarea").forEach((el) => (el.disabled = true));
+    try {
+      const res = await fetch(`${API}/api/formwizard/answer`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: state.sessionId, question_id: q.id, value }),
+      });
+      const next = await res.json();
+      if (next.error) { appendBubble("assistant", `⚠️ ${next.error}`); return; }
+      if (next.status === "question" && next.error) {
+        // validation failure — re-render the SAME question with the error shown
+        renderWizardStep(next);
+        return;
+      }
+      renderWizardStep(next);
+    } catch (err) {
+      appendBubble("assistant", "⚠️ Couldn't save that answer — please try again.");
+      bubble.querySelectorAll("button, input, textarea").forEach((el) => (el.disabled = false));
+    }
+  };
+
+  if (q.type === "checkbox") {
+    bubble.querySelector(".wizard-continue-btn").addEventListener("click", () => {
+      const values = Array.from(bubble.querySelectorAll(".wizard-checkbox-input:checked")).map((el) => el.value);
+      submit(values);
+    });
+  } else if (q.type === "radio") {
+    bubble.querySelector(".wizard-continue-btn").addEventListener("click", () => {
+      const checked = bubble.querySelector(".wizard-radio-input:checked");
+      submit(checked ? checked.value : "");
+    });
+  } else if (q.type === "textarea") {
+    bubble.querySelector(".wizard-continue-btn").addEventListener("click", () => {
+      submit(bubble.querySelector(".wizard-textarea").value);
+    });
+  } else {
+    const input = bubble.querySelector(".wizard-text-input");
+    const send = () => submit(input.value);
+    bubble.querySelector(".wizard-send-btn").addEventListener("click", send);
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); send(); } });
+  }
+
+  const backBtn = bubble.querySelector(".wizard-back-btn");
+  if (backBtn) backBtn.addEventListener("click", async () => {
+    const res = await fetch(`${API}/api/formwizard/back`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: state.sessionId }),
+    });
+    renderWizardStep(await res.json());
+  });
+
+  const skipBtn = bubble.querySelector(".wizard-skip-btn");
+  if (skipBtn) skipBtn.addEventListener("click", async () => {
+    const res = await fetch(`${API}/api/formwizard/skip`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: state.sessionId }),
+    });
+    const data = await res.json();
+    if (data.error) { appendBubble("assistant", `⚠️ ${data.error}`); return; }
+    renderWizardStep(data);
+  });
+
+  bubble.querySelector(".wizard-cancel-btn").addEventListener("click", () => confirmCancelWizard());
+}
+
+function confirmCancelWizard() {
+  const row = appendBubble("assistant",
+    "Are you sure you want to cancel filling out this form? Your current progress will be discarded."
+  );
+  const bubble = row.querySelector(".msg-bubble");
+  const controls = document.createElement("div");
+  controls.className = "wizard-controls-row";
+  controls.innerHTML = `
+    <button type="button" class="btn-secondary wizard-keep-going-btn">Continue Filling</button>
+    <button type="button" class="btn-secondary tip-delete-btn wizard-confirm-cancel-btn">Cancel Form</button>
+  `;
+  bubble.appendChild(controls);
+  controls.querySelector(".wizard-keep-going-btn").addEventListener("click", () => {
+    controls.remove();
+  });
+  controls.querySelector(".wizard-confirm-cancel-btn").addEventListener("click", async () => {
+    await fetch(`${API}/api/formwizard/cancel`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: state.sessionId }),
+    });
+    state.wizard = null;
+    controls.remove();
+    appendBubble("assistant", "No problem — the form has been cancelled. Let me know if you'd like to start it again anytime.");
+  });
+}
+
+function renderWizardReview(step) {
+  const row = document.createElement("div");
+  row.className = "msg-row assistant";
+  const bubble = document.createElement("div");
+  bubble.className = "msg-bubble wizard-bubble wizard-review-bubble";
+  bubble.innerHTML = `
+    <p class="wizard-question">Review Your Application — ${escapeHtml(step.form_display_name)}</p>
+    <div class="wizard-review-list">
+      ${step.items.map((item) => `
+        <div class="wizard-review-item" data-question-id="${escapeHtml(item.id)}">
+          <div class="wizard-review-label">${escapeHtml(item.label)}</div>
+          <div class="wizard-review-value">${escapeHtml(item.value)}</div>
+          <button type="button" class="wizard-edit-link" data-question-id="${escapeHtml(item.id)}">Change</button>
+        </div>
+      `).join("")}
+    </div>
+    <div class="wizard-controls-row">
+      <button type="button" class="btn-secondary wizard-cancel-btn">❌ Cancel</button>
+      <button type="button" class="btn-primary wizard-generate-btn">Generate Completed Form</button>
+    </div>
+  `;
+  row.innerHTML = `<div class="msg-avatar"><span>💧</span></div>`;
+  row.appendChild(bubble);
+  $("#chatMessages").appendChild(row);
+  $("#chatMessages").scrollTop = $("#chatMessages").scrollHeight;
+
+  bubble.querySelectorAll(".wizard-edit-link").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const res = await fetch(`${API}/api/formwizard/edit`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: state.sessionId, question_id: btn.dataset.questionId }),
+      });
+      renderWizardStep(await res.json());
+    });
+  });
+
+  bubble.querySelector(".wizard-cancel-btn").addEventListener("click", () => confirmCancelWizard());
+
+  bubble.querySelector(".wizard-generate-btn").addEventListener("click", async () => {
+    const genBtn = bubble.querySelector(".wizard-generate-btn");
+    genBtn.disabled = true;
+    genBtn.textContent = "Generating…";
+    try {
+      const res = await fetch(`${API}/api/formwizard/generate`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: state.sessionId }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        appendBubble("assistant", `⚠️ ${data.error}`);
+        genBtn.disabled = false;
+        genBtn.textContent = "Generate Completed Form";
+        return;
+      }
+      renderWizardDone(data);
+      state.wizard = null;
+    } catch (err) {
+      appendBubble("assistant", "⚠️ Couldn't generate the form right now. Please try again in a moment.");
+      genBtn.disabled = false;
+      genBtn.textContent = "Generate Completed Form";
+    }
+  });
+}
+
+function renderWizardDone(data) {
+  const downloadUrl = `${API}/api/formwizard/download/${data.download_token}`;
+  const warningsHtml = (data.warnings || []).length
+    ? `<p class="hint-text wizard-warning">${data.warnings.map(escapeHtml).join(" ")}</p>` : "";
+  const row = document.createElement("div");
+  row.className = "msg-row assistant";
+  row.innerHTML = `<div class="msg-avatar"><span>💧</span></div>`;
+  const bubble = document.createElement("div");
+  bubble.className = "msg-bubble wizard-bubble";
+  bubble.innerHTML = `
+    <p class="wizard-question">✅ Your pre-filled form is ready.</p>
+    <p>Please download and review the document carefully. <b>${escapeHtml(data.signature_note)}</b></p>
+    <p>You can then either <b>email</b> the signed form along with your supporting documents to
+       <b>communications@nawasa.gd</b>, or print it, sign it, and drop it off at a NAWASA office.</p>
+    <p class="hint-text">⚠️ AquaAssist only pre-fills the information you provided — your signature must be added by you before the form is submitted.</p>
+    ${warningsHtml}
+    <a href="${downloadUrl}" target="_blank" rel="noopener noreferrer" class="btn-primary" style="display:inline-block;margin-top:.6rem;text-decoration:none;">📄 Open Completed Form</a>
+  `;
+  row.appendChild(bubble);
+  $("#chatMessages").appendChild(row);
+  $("#chatMessages").scrollTop = $("#chatMessages").scrollHeight;
 }
 
 init();
