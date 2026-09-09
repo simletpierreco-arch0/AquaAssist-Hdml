@@ -608,7 +608,7 @@ body.dark .ocean-caustics { opacity: 0.14; }
 .mock-hero h1 { font-size: 2.4rem; font-weight: 800; line-height:1.15; margin: 0 0 .8rem; letter-spacing:-.02em; }
 .mock-hero p { font-size: 1.02rem; opacity: .92; margin: 0 0 1.6rem; }
 .mock-hero-actions { display:flex; gap: .8rem; justify-content: center; flex-wrap: wrap; }
-.mock-btn { text-decoration:none; font-weight:700; font-size:.9rem; padding:.75rem 1.4rem; border-radius:12px; display:inline-block; }
+.mock-btn { text-decoration:none; font-weight:700; font-size:.9rem; padding:.75rem 1.4rem; border-radius:12px; display:inline-block; border: none; cursor: pointer; }
 .mock-btn-primary { background:#fff; color: var(--hover); }
 .mock-btn-ghost { background: rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.5); }
 
