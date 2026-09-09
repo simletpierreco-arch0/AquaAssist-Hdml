@@ -80,6 +80,9 @@ class Question:
     options: Optional[list] = None          # for checkbox/radio
     required: bool = True
     skip_reason: str = ""                   # shown if customer tries to skip a required question
+    help: str = ""                          # optional plain-language hint shown under the prompt —
+                                             # for anything a customer might not immediately understand
+                                             # (technical terms, form jargon, ambiguous choices)
     condition: Optional[Callable[[dict], bool]] = None   # answers -> bool; None = always shown
 
 
@@ -137,6 +140,11 @@ FORM_SCHEMAS = {
             Question(
                 id="connection_size", type="radio", required=True,
                 prompt="What size connection do you need?",
+                help=("This is the diameter of the pipe connecting your property to NAWASA's main line — "
+                      "not something most customers know off-hand. Most residential homes use ½\" or ¾\". "
+                      "Larger sizes (1\" and up) are typically for commercial properties or high-volume use. "
+                      "If you're not sure, choose ½\" — NAWASA confirms the correct size during their site "
+                      "assessment, so an early guess here won't lock you into anything or affect your cost."),
                 options=["½\"", "¾\"", "1\"", "1¼\"/1½\"/2\"", "4\""],
                 condition=lambda a: _selected(a, "services", "New Water Connection") or _selected(a, "services", "Additional Meter"),
             ),
@@ -310,7 +318,7 @@ def _current_step(session_id):
         "form_display_name": schema["display_name"],
         "question": {
             "id": q.id, "prompt": q.prompt, "type": q.type,
-            "options": q.options, "required": q.required,
+            "options": q.options, "required": q.required, "help": q.help,
         },
         "can_go_back": len(sess.history) > 0,
         "step_number": step_number,
