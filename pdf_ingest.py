@@ -32,6 +32,7 @@ website_sync.py).
 import io
 import logging
 import re
+import time
 
 import requests
 
@@ -40,15 +41,58 @@ logger = logging.getLogger("aquaassist.pdf_ingest")
 REQUEST_TIMEOUT_SECONDS = 30
 MAX_CHUNK_CHARS = 1400
 MIN_CHUNK_CHARS = 200
+DOWNLOAD_RETRY_ATTEMPTS = 3
+DOWNLOAD_RETRY_BACKOFF_SECONDS = 2.5
 
 _WHITESPACE_RE = re.compile(r"[ \t]+")
 _BLANKLINES_RE = re.compile(r"\n{3,}")
 
+# Same full browser-fingerprint header set website_sync.py already had to
+# adopt to get past nawasa.gd's WAF for HTML pages — a PDF download from
+# the same host is just as likely to be challenged, so it needs the same
+# treatment: a realistic header set, a shared cookie-persisting session,
+# and a homepage visit first to pick up whatever clearance cookie the WAF
+# hands out before requesting the actual file.
 _DOWNLOAD_HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                     "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"),
-    "Accept": "application/pdf,*/*;q=0.8",
+    "Accept": "application/pdf,text/html,application/xhtml+xml,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
 }
+
+_download_session = None
+
+
+def _get_download_session():
+    global _download_session
+    if _download_session is None:
+        _download_session = requests.Session()
+        _download_session.headers.update(_DOWNLOAD_HEADERS)
+    return _download_session
+
+
+def _looks_like_challenge_page(content, content_type):
+    """Cheap check for a WAF/anti-bot challenge page served with a 200
+    status instead of the real file — the exact failure mode that made
+    pypdf choke with 'Stream has ended unexpectedly' when the wizard's
+    PDF download silently accepted whatever bytes came back without
+    checking they were actually a PDF."""
+    if content[:4] == b"%PDF":
+        return False
+    if "pdf" in (content_type or "").lower() and content[:4] != b"%PDF":
+        return True
+    lowered = content[:2000].lower()
+    return any(p in lowered for p in (b"just a moment", b"checking your browser",
+                                        b"enable javascript and cookies", b"<html", b"captcha"))
 
 
 def _clean_pdf_text(text):
@@ -108,20 +152,47 @@ def _chunk_page_text(text, max_chars=MAX_CHUNK_CHARS, min_chars=MIN_CHUNK_CHARS)
 
 
 def download_pdf(url):
-    """Returns (bytes, error). error is None on success."""
-    try:
-        resp = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS, headers=_DOWNLOAD_HEADERS)
-    except requests.RequestException as e:
-        return None, f"request failed: {e}"
-    if not (200 <= resp.status_code < 300):
-        return None, f"HTTP {resp.status_code}"
-    content_type = (resp.headers.get("Content-Type") or "").lower()
-    if resp.content[:4] != b"%PDF" and "pdf" not in content_type:
-        preview = resp.content[:120]
-        return None, (f"response doesn't look like a PDF (Content-Type: "
-                       f"{content_type or 'unknown'}, first bytes: {preview!r}) — "
-                       f"the URL may be returning an HTML error/redirect page instead")
-    return resp.content, None
+    """Returns (bytes, error). error is None on success. Retries a few
+    times with backoff, using a shared cookie-persisting session warmed up
+    against nawasa.gd's homepage first — the same pattern website_sync.py
+    already needed to get past the site's WAF for HTML pages. Explicitly
+    checks the response actually looks like a PDF (magic bytes / content-
+    type / not a challenge page) BEFORE returning it, so a blocked request
+    is reported clearly here instead of surfacing later as a confusing
+    pypdf parse error like 'Stream has ended unexpectedly'."""
+    session = _get_download_session()
+    last_error = None
+    for attempt in range(1, DOWNLOAD_RETRY_ATTEMPTS + 1):
+        if attempt == 1:
+            try:
+                session.get("https://www.nawasa.gd/", timeout=REQUEST_TIMEOUT_SECONDS, allow_redirects=True)
+            except requests.RequestException:
+                pass  # warmup is best-effort; proceed to the real request regardless
+        try:
+            resp = session.get(url, timeout=REQUEST_TIMEOUT_SECONDS,
+                                headers={"Referer": "https://www.nawasa.gd/"}, allow_redirects=True)
+        except requests.RequestException as e:
+            last_error = f"request failed: {e}"
+            time.sleep(DOWNLOAD_RETRY_BACKOFF_SECONDS * attempt)
+            continue
+
+        if not (200 <= resp.status_code < 300):
+            last_error = f"HTTP {resp.status_code}"
+            time.sleep(DOWNLOAD_RETRY_BACKOFF_SECONDS * attempt)
+            continue
+
+        content_type = (resp.headers.get("Content-Type") or "").lower()
+        if _looks_like_challenge_page(resp.content, content_type):
+            last_error = ("nawasa.gd returned an anti-bot/CAPTCHA challenge page instead of the real PDF "
+                          "— this can't be fetched automatically from this server right now. It needs "
+                          "NAWASA's IT team to allowlist this server's IP, or the form needs to be "
+                          "downloaded manually and hosted elsewhere for the wizard to fetch.")
+            time.sleep(DOWNLOAD_RETRY_BACKOFF_SECONDS * attempt)
+            continue
+
+        return resp.content, None
+
+    return None, last_error
 
 
 def extract_pages(pdf_bytes):
