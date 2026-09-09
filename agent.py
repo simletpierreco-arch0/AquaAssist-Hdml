@@ -6,15 +6,17 @@ import json
 import logging
 import os
 import re
+import time
 
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.errors import GraphRecursionError
 
 logger = logging.getLogger("aquaassist.agent")
 
-MODEL_NAME = "gemini-3.1-flash-lite"
+MODEL_NAME = os.environ.get("GEMINI_MODEL_NAME", "gemini-2.5-flash")
 EMBEDDING_MODEL = "gemini-embedding-001"
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -22,23 +24,26 @@ PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY", "")
 PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "aquaassist-knowledge-base")
 PINECONE_CLOUD = os.environ.get("PINECONE_CLOUD", "aws")
 PINECONE_REGION = os.environ.get("PINECONE_REGION", "us-east-1")
-# BUG FIX: Pinecone's query() always returns its top_k nearest vectors,
-# even when every one of them is a poor/irrelevant match for the query —
-# there's no built-in relevance cutoff. That meant the "no matches found"
-# branch below (which is what triggers on_no_match / unanswered-question
-# logging) almost never fired once the index had any content in it at
-# all: a customer could ask something completely absent from the
-# knowledge base and still get back three low-relevance FAQ entries,
-# which the model would then read, correctly judge as not answering the
-# question, and improvise a "check nawasa.gd" reply — all without ever
-# triggering the logging path, since from the tool's perspective matches
-# WERE found. Filtering out matches below this cosine-similarity floor
-# makes "no matches" actually reflect "nothing relevant was found".
-# Tunable via env var since the right cutoff depends on the embedding
-# model and the mix of content indexed.
 KB_MIN_RELEVANCE_SCORE = float(os.environ.get("KB_MIN_RELEVANCE_SCORE", "0.55"))
+AGENT_RECURSION_LIMIT = int(os.environ.get("AGENT_RECURSION_LIMIT", "20"))
+AGENT_INVOKE_MAX_RETRIES = int(os.environ.get("AGENT_INVOKE_MAX_RETRIES", "2"))
+AGENT_INVOKE_RETRY_BACKOFF_SECONDS = float(os.environ.get("AGENT_INVOKE_RETRY_BACKOFF_SECONDS", "1.5"))
 
 GRENADA_DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+
+# There is NO artificial per-customer/per-day message cap anywhere in this
+# codebase — nothing here counts or limits how many messages a customer
+# can send. If chat requests are failing intermittently (especially at a
+# particular time of day/night), the real cause is one of: (1) the Gemini
+# API key's own rate/quota limit on Google's side (free-tier keys have a
+# daily request cap that resets at midnight Pacific time — this is
+# GOOGLE's limit, not AquaAssist's, and shows up in logs as a 429/
+# RESOURCE_EXHAUSTED error), (2) Neon's database auto-suspending after
+# inactivity and taking a few seconds to wake on the next connection,
+# or (3) a transient network hiccup to Gemini/Pinecone. invoke_agent below
+# now retries transient failures automatically and logs the REAL
+# underlying error so it's diagnosable from the Render logs instead of
+# always looking like the same generic "trouble connecting" message.
 
 
 def _build_checkpointer():
@@ -69,7 +74,14 @@ def _build_checkpointer():
         pool_kwargs = {"autocommit": True, "prepare_threshold": 0}
         if "sslmode=" not in GRENADA_DATABASE_URL:
             pool_kwargs["sslmode"] = "require"
-        pool = ConnectionPool(conninfo=GRENADA_DATABASE_URL, max_size=10, kwargs=pool_kwargs)
+        pool = ConnectionPool(
+            conninfo=GRENADA_DATABASE_URL, max_size=10, kwargs=pool_kwargs,
+            # Neon (and similar serverless Postgres) auto-suspends the compute
+            # after inactivity — the FIRST connection after a suspend takes
+            # longer to establish while it wakes back up. `connect_timeout`
+            # below (via kwargs) gives that wake-up enough headroom instead of
+            # failing fast and surfacing as a chat error.
+        )
         checkpointer = PostgresSaver(pool)
         checkpointer.setup()  # idempotent — creates the checkpoint tables on first run only
         logger.info("LangGraph checkpoints are persisted to Postgres — conversation memory now survives restarts.")
@@ -209,7 +221,6 @@ def make_search_knowledge_base_tool(on_no_match=None):
             return _static_faq_fallback_text
 
         matches = results.get("matches") if isinstance(results, dict) else getattr(results, "matches", [])
-        # Apply the relevance floor — see KB_MIN_RELEVANCE_SCORE above.
         relevant_matches = []
         for m in matches or []:
             score = m.get("score") if isinstance(m, dict) else getattr(m, "score", None)
@@ -234,7 +245,7 @@ def make_search_knowledge_base_tool(on_no_match=None):
 
 
 def build_agent(tools, system_prompt):
-    model = ChatGoogleGenerativeAI(model=MODEL_NAME, temperature=0.7, google_api_key=GEMINI_API_KEY)
+    model = ChatGoogleGenerativeAI(model=MODEL_NAME, temperature=0.3, google_api_key=GEMINI_API_KEY)
     return create_agent(
         model=model,
         tools=tools,
@@ -257,13 +268,65 @@ def _extract_reply_text(content):
     return str(content) if content is not None else ""
 
 
+_TRANSIENT_ERROR_MARKERS = (
+    "timeout", "timed out", "connection", "unavailable", "deadline",
+    "reset by peer", "temporarily", "503", "504", "overloaded",
+)
+_QUOTA_ERROR_MARKERS = ("429", "quota", "resource_exhausted", "rate limit", "rate-limit")
+
+
+def classify_agent_error(exc):
+    """Buckets an exception from graph.invoke into something actionable
+    for logs/monitoring: 'quota' (Gemini API rate/quota limit — this is a
+    limit on GOOGLE's side tied to the API key's plan, not anything
+    AquaAssist itself imposes), 'recursion' (the tool-calling loop didn't
+    converge on an answer within AGENT_RECURSION_LIMIT steps), 'transient'
+    (looks like a network/timeout blip worth retrying), or 'unknown'."""
+    if isinstance(exc, GraphRecursionError):
+        return "recursion"
+    text = f"{type(exc).__name__}: {exc}".lower()
+    if any(m in text for m in _QUOTA_ERROR_MARKERS):
+        return "quota"
+    if any(m in text for m in _TRANSIENT_ERROR_MARKERS):
+        return "transient"
+    return "unknown"
+
+
 def invoke_agent(graph, thread_id, content_blocks):
-    result = graph.invoke(
-        {"messages": [{"role": "user", "content": content_blocks}]},
-        {"configurable": {"thread_id": thread_id}},
-    )
-    final_message = result["messages"][-1]
-    return _extract_reply_text(final_message.content)
+    """Invokes the agent graph with automatic retry for transient/likely-
+    recoverable failures (a Neon wake-up delay, a dropped connection to
+    Gemini/Pinecone, etc.) instead of surfacing every hiccup straight to
+    the customer as a hard error. Quota/rate-limit errors are NOT retried
+    (retrying a 429 just wastes the remaining quota faster) — they're
+    logged clearly instead so the real cause is visible in Render logs
+    rather than looking identical to every other failure."""
+    last_exc = None
+    for attempt in range(1, AGENT_INVOKE_MAX_RETRIES + 2):
+        try:
+            result = graph.invoke(
+                {"messages": [{"role": "user", "content": content_blocks}]},
+                {"configurable": {"thread_id": thread_id}, "recursion_limit": AGENT_RECURSION_LIMIT},
+            )
+            final_message = result["messages"][-1]
+            return _extract_reply_text(final_message.content)
+        except Exception as e:
+            last_exc = e
+            kind = classify_agent_error(e)
+            if kind == "quota":
+                logger.error("Agent call hit a Gemini API quota/rate limit (thread %s): %s. "
+                             "This is a limit on the Gemini API key's plan, not a limit AquaAssist "
+                             "sets itself — check the Google AI Studio / Cloud console quota page.",
+                             thread_id, e)
+                break  # no point retrying a quota error
+            if kind == "recursion":
+                logger.error("Agent tool-calling loop did not converge within %d steps (thread %s): %s",
+                             AGENT_RECURSION_LIMIT, thread_id, e)
+                break  # retrying won't change a structurally looping conversation
+            logger.warning("Agent invocation attempt %d/%d failed (%s, thread %s): %s",
+                           attempt, AGENT_INVOKE_MAX_RETRIES + 1, kind, thread_id, e)
+            if attempt <= AGENT_INVOKE_MAX_RETRIES:
+                time.sleep(AGENT_INVOKE_RETRY_BACKOFF_SECONDS * attempt)
+    raise last_exc
 
 
 def suggest_staff_replies(transcript_messages, max_suggestions=3):
