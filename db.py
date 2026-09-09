@@ -79,48 +79,65 @@ DEFAULT_TIPS = [
     "Regularly check your faucets and toilets for silent leaks — a toilet that keeps running after flushing can waste hundreds of gallons a month.",
 ]
 
+DEPRECATED_PERMISSION_ALIASES = {
+    # Old fine-grained keys -> the single new permission that now covers
+    # them, so accounts saved under the OLD permission list (see below)
+    # keep working access-wise the first time this runs against existing
+    # Neon data, instead of silently losing access. New grants always use
+    # the RIGHT-hand key; these aliases are read-only compatibility.
+    "view_website_management": "view_website_preview",
+    "edit_website_content": "manage_knowledge_base",
+    "create_edit_news": "manage_service_alerts",
+    "manage_events": "manage_service_alerts",
+    "publish_content": "manage_service_alerts",
+    "view_website_analytics": "view_dashboard",
+    "view_aquaassist_dashboard": "view_dashboard",
+    "manage_faqs": "manage_knowledge_base",
+    "manage_aquaassist_announcements": "manage_service_alerts",
+    "manage_quick_actions": "manage_chatbot_settings",
+    "view_chat_analytics": "view_dashboard",
+    "manage_voice_settings": "manage_chatbot_settings",
+    "sync_website_content": "manage_knowledge_base",
+    "create_reports": "view_reports",
+    "edit_reports": "view_reports",
+    "assign_reports": "view_reports",
+    "change_report_status": "view_reports",
+    "add_internal_notes": "view_reports",
+    "view_report_photos": "view_reports",
+    "view_report_statistics": "view_reports",
+    "create_accounts": "manage_staff_accounts",
+    "edit_accounts": "manage_staff_accounts",
+    "disable_accounts": "manage_staff_accounts",
+    "delete_accounts": "manage_staff_accounts",
+    "manage_permissions": "manage_staff_accounts",
+    "system_settings": "view_audit_log",
+    "api_integration_settings": "manage_staff_accounts",
+}
+
+# One permission per Staff Portal sidebar item, in sidebar order — this is
+# deliberately a flat, easy-to-scan list (not sub-divided further) so the
+# checkboxes shown when creating/editing a staff account map 1:1 onto
+# "what section of the sidebar can this person see", nothing more subtle.
 PERMISSION_DEFS = [
-    ("view_website_management", "Website", "View Website Management"),
-    ("edit_website_content", "Website", "Edit Website Content"),
-    ("create_edit_news", "Website", "Create/Edit News"),
-    ("manage_service_alerts", "Website", "Manage Service Alerts"),
-    ("manage_water_tips", "Website", "Manage Water Service Tips"),
-    ("manage_events", "Website", "Manage Events"),
-    ("publish_content", "Website", "Publish Content"),
-    ("view_website_analytics", "Website", "View Website Analytics"),
+    ("view_dashboard", "📊 Dashboard", "Dashboard"),
 
-    ("view_aquaassist_dashboard", "AquaAssist", "View AquaAssist Dashboard"),
-    ("access_live_chat", "AquaAssist", "Access Live Chat (view & reply)"),
-    ("manage_faqs", "AquaAssist", "Manage FAQs"),
-    ("manage_knowledge_base", "AquaAssist", "Manage Knowledge Base"),
-    ("review_unanswered_questions", "AquaAssist", "Review Unanswered Questions"),
-    ("manage_aquaassist_announcements", "AquaAssist", "Manage AquaAssist Announcements"),
-    ("manage_quick_actions", "AquaAssist", "Manage Quick Actions"),
-    ("manage_chatbot_settings", "AquaAssist", "Manage Chatbot Settings"),
-    ("view_chat_analytics", "AquaAssist", "View Chat Analytics"),
-    ("manage_voice_settings", "AquaAssist", "Manage Voice Settings"),
-    ("sync_website_content", "AquaAssist", "Sync Website Content (nawasa.gd)"),
-    ("manage_forms", "AquaAssist", "Manage Forms"),
+    ("manage_service_alerts", "🖥️ Website", "Service Alerts"),
+    ("manage_water_tips", "🖥️ Website", "Water Tips"),
+    ("view_website_preview", "🖥️ Website", "Website Preview"),
 
-    ("view_reports", "Reports & Operations", "View Reports"),
-    ("view_reporting_map", "Reports & Operations", "View Reporting Map"),
-    ("create_reports", "Reports & Operations", "Create Reports"),
-    ("edit_reports", "Reports & Operations", "Edit Reports"),
-    ("assign_reports", "Reports & Operations", "Assign Reports"),
-    ("change_report_status", "Reports & Operations", "Change Report Status"),
-    ("add_internal_notes", "Reports & Operations", "Add Internal Notes"),
-    ("view_report_photos", "Reports & Operations", "View Report Photos"),
-    ("view_report_statistics", "Reports & Operations", "View Report Statistics"),
-    ("manage_subscribers", "Reports & Operations", "Manage Subscribers"),
+    ("access_live_chat", "🤖 AquaAssist", "Live Chat"),
+    ("manage_knowledge_base", "🤖 AquaAssist", "Knowledge Base"),
+    ("review_unanswered_questions", "🤖 AquaAssist", "Unanswered Questions"),
+    ("manage_forms", "🤖 AquaAssist", "Forms"),
+    ("manage_chatbot_settings", "🤖 AquaAssist", "Settings"),
 
-    ("manage_staff_accounts", "Administration", "Manage Staff Accounts"),
-    ("create_accounts", "Administration", "Create Accounts"),
-    ("edit_accounts", "Administration", "Edit Accounts"),
-    ("disable_accounts", "Administration", "Disable Accounts"),
-    ("delete_accounts", "Administration", "Delete Accounts"),
-    ("manage_permissions", "Administration", "Manage Permissions"),
-    ("system_settings", "Administration", "System Settings"),
-    ("api_integration_settings", "Administration", "API/Integration Settings"),
+    ("view_reporting_map", "📍 Reports & Operations", "Reporting Map"),
+    ("view_reports", "📍 Reports & Operations", "All Reports"),
+    ("manage_subscribers", "📍 Reports & Operations", "Subscribers"),
+
+    ("manage_staff_accounts", "👑 Administration", "Staff Accounts"),
+    ("view_audit_log", "👑 Administration", "Audit Log"),
+    ("manage_chatbot_identity", "👑 Administration", "Chatbot Setting"),
 ]
 ALL_PERMISSION_KEYS = [p[0] for p in PERMISSION_DEFS]
 _VALID_PERMISSION_SET = set(ALL_PERMISSION_KEYS)
@@ -384,6 +401,61 @@ def init_db():
                 enabled TEXT, source TEXT, created_at TEXT, updated_at TEXT
             )
         """)
+        # =================================================================
+        # Knowledge-base document/chunk tracking — additive tables, never
+        # touched by any existing feature. These let the RAG sync pipeline
+        # (see agent.sync_documents_to_pinecone) do INCREMENTAL indexing:
+        # `kb_documents` holds one row per source (a website page, a PDF
+        # form, an FAQ, a form's metadata blurb) with a content_hash of its
+        # full text, so an unchanged document can be skipped entirely on
+        # the next sync without re-embedding anything. `kb_chunks` holds
+        # one row per chunk actually sent to Pinecone (deterministic
+        # chunk_id, its own content_hash, page_number for PDFs, etc.), so
+        # a changed document's sync can upsert only the chunks that
+        # actually changed and delete the ones that no longer exist,
+        # instead of wiping and rebuilding the whole index every time.
+        # This is purely a sync/diagnostics ledger — Pinecone remains the
+        # actual vector store; Neon just remembers what's already in it.
+        # =================================================================
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS kb_documents (
+                id TEXT PRIMARY KEY,
+                source_url TEXT,
+                source_type TEXT,
+                document_type TEXT,
+                title TEXT,
+                content_hash TEXT,
+                status TEXT,
+                error TEXT,
+                last_synced_at TEXT,
+                first_indexed_at TEXT
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS kb_chunks (
+                chunk_id TEXT PRIMARY KEY,
+                document_id TEXT,
+                source_url TEXT,
+                source_type TEXT,
+                document_type TEXT,
+                title TEXT,
+                section TEXT,
+                page_number INTEGER,
+                form_id TEXT,
+                content TEXT,
+                content_hash TEXT,
+                chunk_index INTEGER,
+                indexed_at TEXT
+            )
+        """)
+
+    try:
+        with _cursor(commit=True) as cur:
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS kb_documents_source_url_idx ON kb_documents (source_url)")
+            cur.execute("CREATE INDEX IF NOT EXISTS kb_chunks_document_id_idx ON kb_chunks (document_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS kb_chunks_source_type_idx ON kb_chunks (source_type)")
+    except Exception as e:
+        logger.warning("Could not create kb_documents/kb_chunks indexes (non-fatal): %s", e)
 
     migrate_legacy_storage()
     _add_column_if_missing("website_pages", "source", "TEXT")
@@ -896,12 +968,47 @@ def load_forms(include_disabled=True):
     return [_form_out(r) for r in rows]
 
 
+def create_form(name, description, url, source="manual"):
+    """Adds a new staff-created form alongside the five official seeded
+    NAWASA forms. Distinguished by source='manual' so delete_form can
+    refuse to remove the official five (they can still be disabled via
+    update_form, just not deleted) while allowing staff-added ones to be
+    removed freely."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    row = {"id": uuid.uuid4().hex[:10], "name": name, "description": description, "url": url,
+           "enabled": "1", "source": source, "created_at": now, "updated_at": now}
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"INSERT INTO forms (id, name, description, url, enabled, source, created_at, updated_at) "
+            f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (row["id"], row["name"], row["description"], row["url"], row["enabled"],
+             row["source"], row["created_at"], row["updated_at"]),
+        )
+    return _form_out(row)
+
+
+def delete_form(form_id):
+    """Returns (deleted: bool, error: str|None). Refuses to delete one of
+    the five official NAWASA forms — those can be disabled instead."""
+    existing = get_form(form_id)
+    if existing is None:
+        return False, "Form not found."
+    if existing.get("source") == "NAWASA":
+        return False, "The official NAWASA forms can't be deleted — disable it instead if it shouldn't be shown."
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"DELETE FROM forms WHERE id = {ph}", (form_id,))
+        deleted = cur.rowcount > 0
+    return deleted, None
+
+
 def get_form(form_id):
     ph = _ph()
     with _cursor() as cur:
         cur.execute(f"SELECT * FROM forms WHERE id = {ph}", (form_id,))
         row = cur.fetchone()
-    return _form_out(row) if row else None
+    return _form_out(dict(row)) if row else None
 
 
 def update_form(form_id, name=None, description=None, url=None, enabled=None):
@@ -996,6 +1103,146 @@ def deactivate_website_pages_not_in(urls_to_keep):
             ("removed", "No longer part of the synced page list", now, "manual", *urls_to_keep),
         )
         return cur.rowcount
+
+
+# =======================================================================
+# Knowledge-base document/chunk tracking (RAG sync ledger)
+#
+# See the CREATE TABLE comment above for the full rationale. Every
+# function here is additive/new — nothing existing calls into this
+# section, and nothing here touches any pre-existing table.
+# =======================================================================
+def get_kb_document(source_url):
+    ph = _ph()
+    with _cursor() as cur:
+        cur.execute(f"SELECT * FROM kb_documents WHERE source_url = {ph}", (source_url,))
+        row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def upsert_kb_document(source_url, source_type, document_type, title, content_hash, status="ok", error=""):
+    """Creates or updates the ledger row for one source document (a
+    website page, a PDF form, an FAQ, a form-metadata blurb). Returns the
+    document's stable id, which kb_chunks rows reference via
+    document_id. Safe to call every sync run — updates in place rather
+    than duplicating rows for the same source_url."""
+    ph = _ph()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    existing = get_kb_document(source_url)
+    if existing:
+        with _cursor(commit=True) as cur:
+            cur.execute(
+                f"UPDATE kb_documents SET source_type={ph}, document_type={ph}, title={ph}, "
+                f"content_hash={ph}, status={ph}, error={ph}, last_synced_at={ph} WHERE id={ph}",
+                (source_type, document_type, title, content_hash, status, error, now, existing["id"]),
+            )
+        return existing["id"]
+    doc_id = uuid.uuid4().hex[:16]
+    with _cursor(commit=True) as cur:
+        cur.execute(
+            f"INSERT INTO kb_documents (id, source_url, source_type, document_type, title, "
+            f"content_hash, status, error, last_synced_at, first_indexed_at) "
+            f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (doc_id, source_url, source_type, document_type, title, content_hash, status, error, now, now),
+        )
+    return doc_id
+
+
+def load_kb_documents(source_type=None):
+    ph = _ph()
+    with _cursor() as cur:
+        if source_type:
+            cur.execute(f"SELECT * FROM kb_documents WHERE source_type = {ph} ORDER BY source_url ASC", (source_type,))
+        else:
+            cur.execute("SELECT * FROM kb_documents ORDER BY source_type ASC, source_url ASC")
+        rows = _rows(cur.fetchall())
+    return rows
+
+
+def mark_kb_document_removed(document_id):
+    """Marks a document as no longer part of the current sync set and
+    deletes its chunk ledger rows. Callers are expected to have already
+    deleted the matching vectors from Pinecone (see
+    agent.retire_missing_documents) before calling this, so Neon and
+    Pinecone never disagree about what's currently indexed."""
+    ph = _ph()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _cursor(commit=True) as cur:
+        cur.execute(f"UPDATE kb_documents SET status={ph}, last_synced_at={ph} WHERE id={ph}",
+                    ("removed", now, document_id))
+        cur.execute(f"DELETE FROM kb_chunks WHERE document_id={ph}", (document_id,))
+
+
+def load_kb_chunks(document_id=None, source_type=None):
+    ph = _ph()
+    with _cursor() as cur:
+        if document_id:
+            cur.execute(f"SELECT * FROM kb_chunks WHERE document_id = {ph} ORDER BY chunk_index ASC", (document_id,))
+        elif source_type:
+            cur.execute(f"SELECT * FROM kb_chunks WHERE source_type = {ph} ORDER BY source_url ASC, chunk_index ASC", (source_type,))
+        else:
+            cur.execute("SELECT * FROM kb_chunks ORDER BY source_url ASC, chunk_index ASC")
+        rows = _rows(cur.fetchall())
+    return rows
+
+
+def save_kb_chunks(document_id, chunk_records):
+    """Replaces the full chunk ledger for one document: upserts every
+    chunk in chunk_records (by chunk_id) and deletes any existing ledger
+    row for this document that ISN'T in the new set. Call this AFTER
+    Pinecone has already been updated to match (upserted the new/changed
+    vectors, deleted the obsolete ones) — see
+    agent.sync_documents_to_pinecone — so this ledger and Pinecone's
+    actual contents never drift apart."""
+    ph = _ph()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    new_ids = {r["chunk_id"] for r in chunk_records}
+    existing_ids = {c["chunk_id"] for c in load_kb_chunks(document_id=document_id)}
+    to_delete = existing_ids - new_ids
+    with _cursor(commit=True) as cur:
+        for r in chunk_records:
+            cur.execute(f"SELECT chunk_id FROM kb_chunks WHERE chunk_id = {ph}", (r["chunk_id"],))
+            exists = cur.fetchone() is not None
+            if exists:
+                cur.execute(
+                    f"UPDATE kb_chunks SET content={ph}, content_hash={ph}, section={ph}, "
+                    f"page_number={ph}, form_id={ph}, chunk_index={ph}, title={ph}, indexed_at={ph} "
+                    f"WHERE chunk_id={ph}",
+                    (r["content"], r["content_hash"], r.get("section", ""), r.get("page_number"),
+                     r.get("form_id", ""), r["chunk_index"], r.get("title", ""), now, r["chunk_id"]),
+                )
+            else:
+                cur.execute(
+                    f"INSERT INTO kb_chunks (chunk_id, document_id, source_url, source_type, "
+                    f"document_type, title, section, page_number, form_id, content, content_hash, "
+                    f"chunk_index, indexed_at) VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                    (r["chunk_id"], document_id, r["source_url"], r["source_type"], r["document_type"],
+                     r.get("title", ""), r.get("section", ""), r.get("page_number"), r.get("form_id", ""),
+                     r["content"], r["content_hash"], r["chunk_index"], now),
+                )
+        for old_id in to_delete:
+            cur.execute(f"DELETE FROM kb_chunks WHERE chunk_id = {ph}", (old_id,))
+
+
+def get_kb_stats():
+    """Powers a staff-facing 'is the RAG pipeline actually working' view:
+    how many documents/chunks exist per source type and status, and when
+    the most recent sync touched anything. Does NOT talk to Pinecone —
+    that's a separate live check (see agent.get_pinecone_index_stats),
+    kept separate so a Neon-only call never blocks on a Pinecone round
+    trip."""
+    with _cursor() as cur:
+        cur.execute("SELECT source_type, status, COUNT(*) AS c FROM kb_documents GROUP BY source_type, status")
+        doc_rows = _rows(cur.fetchall())
+        cur.execute("SELECT source_type, COUNT(*) AS c FROM kb_chunks GROUP BY source_type")
+        chunk_rows = _rows(cur.fetchall())
+        cur.execute("SELECT MAX(last_synced_at) AS m FROM kb_documents")
+        last_row = cur.fetchone()
+    return {
+        "documents_by_type_status": doc_rows,
+        "chunks_by_type": chunk_rows,
+        "last_synced_at": (dict(last_row) if last_row else {}).get("m") or "",
+    }
 
 
 # =======================================================================
@@ -1255,18 +1502,33 @@ def delete_all_sessions():
 # =======================================================================
 # Staff accounts, sessions (tokens), permissions, audit log
 # =======================================================================
+def _migrate_permission_keys(permissions):
+    """Translates any OLD fine-grained permission keys (from before the
+    Staff Portal permission list was simplified to mirror the sidebar
+    1:1) into their new equivalents. Applied both on save and on read, so
+    an existing Neon-stored account keeps the access it had even before
+    its permissions are next explicitly re-saved by a Super Administrator."""
+    if not permissions:
+        return []
+    migrated = set()
+    for p in permissions:
+        migrated.add(DEPRECATED_PERMISSION_ALIASES.get(p, p))
+    return migrated
+
+
 def _clean_permissions(permissions):
     if not permissions:
         return []
-    given = set(permissions) & _VALID_PERMISSION_SET
+    given = _migrate_permission_keys(permissions) & _VALID_PERMISSION_SET
     return [k for k in ALL_PERMISSION_KEYS if k in given]
 
 
 def _account_out(row, include_hash=False):
     try:
-        perms = json.loads(row.get("permissions") or "[]")
+        raw_perms = json.loads(row.get("permissions") or "[]")
     except Exception:
-        perms = []
+        raw_perms = []
+    perms = _clean_permissions(raw_perms)
     out = {
         "id": row["id"], "full_name": row["full_name"], "username": row["username"],
         "role": row.get("role") or "", "permissions": perms,
