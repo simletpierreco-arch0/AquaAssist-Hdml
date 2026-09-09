@@ -3477,6 +3477,7 @@ function renderWizardStep(step) {
   bubble.innerHTML = `
     ${wizardProgressHtml(step.step_number, step.step_total)}
     <p class="wizard-question">${escapeHtml(q.prompt)}</p>
+    ${q.help ? `<p class="hint-text wizard-help">${escapeHtml(q.help)}</p>` : ""}
     ${step.error ? `<p class="error-text wizard-error">${escapeHtml(step.error)}</p>` : ""}
     ${controlsHtml}
     <div class="wizard-controls-row">
