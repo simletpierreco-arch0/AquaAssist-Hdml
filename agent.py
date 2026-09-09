@@ -16,7 +16,7 @@ from langgraph.errors import GraphRecursionError
 
 logger = logging.getLogger("aquaassist.agent")
 
-MODEL_NAME = os.environ.get("GEMINI_MODEL_NAME", "gemini-2.5-flash")
+MODEL_NAME = os.environ.get("GEMINI_MODEL_NAME", "gemini-3.6-flash")
 EMBEDDING_MODEL = "gemini-embedding-001"
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -273,18 +273,24 @@ _TRANSIENT_ERROR_MARKERS = (
     "reset by peer", "temporarily", "503", "504", "overloaded",
 )
 _QUOTA_ERROR_MARKERS = ("429", "quota", "resource_exhausted", "rate limit", "rate-limit")
+_MODEL_NOT_FOUND_MARKERS = ("not_found", "404", "no longer available", "is not found for api version")
 
 
 def classify_agent_error(exc):
     """Buckets an exception from graph.invoke into something actionable
     for logs/monitoring: 'quota' (Gemini API rate/quota limit — this is a
     limit on GOOGLE's side tied to the API key's plan, not anything
-    AquaAssist itself imposes), 'recursion' (the tool-calling loop didn't
-    converge on an answer within AGENT_RECURSION_LIMIT steps), 'transient'
-    (looks like a network/timeout blip worth retrying), or 'unknown'."""
+    AquaAssist itself imposes), 'model_not_found' (the configured
+    GEMINI_MODEL_NAME/MODEL_NAME has been retired or isn't available to
+    this API key — retrying will never help, this needs a config change),
+    'recursion' (the tool-calling loop didn't converge on an answer within
+    AGENT_RECURSION_LIMIT steps), 'transient' (looks like a network/
+    timeout blip worth retrying), or 'unknown'."""
     if isinstance(exc, GraphRecursionError):
         return "recursion"
     text = f"{type(exc).__name__}: {exc}".lower()
+    if any(m in text for m in _MODEL_NOT_FOUND_MARKERS):
+        return "model_not_found"
     if any(m in text for m in _QUOTA_ERROR_MARKERS):
         return "quota"
     if any(m in text for m in _TRANSIENT_ERROR_MARKERS):
@@ -312,6 +318,12 @@ def invoke_agent(graph, thread_id, content_blocks):
         except Exception as e:
             last_exc = e
             kind = classify_agent_error(e)
+            if kind == "model_not_found":
+                logger.error("Agent call failed because the configured model (%s) is not available to this "
+                             "API key (thread %s): %s. This will not fix itself on retry — set the "
+                             "GEMINI_MODEL_NAME environment variable to a model your key currently has "
+                             "access to and restart the service.", MODEL_NAME, thread_id, e)
+                break  # a bad model name will never succeed on retry
             if kind == "quota":
                 logger.error("Agent call hit a Gemini API quota/rate limit (thread %s): %s. "
                              "This is a limit on the Gemini API key's plan, not a limit AquaAssist "
