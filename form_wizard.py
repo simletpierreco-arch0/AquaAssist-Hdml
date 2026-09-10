@@ -55,6 +55,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import pdf_ingest
+import db
 
 logger = logging.getLogger("aquaassist.form_wizard")
 
@@ -286,6 +287,15 @@ def start(session_id, form_id):
     schema = get_schema(form_id)
     if schema is None:
         return None, "That form isn't set up for guided filling yet."
+    # Pre-check per spec: detect a missing master template BEFORE the
+    # customer answers a single question, not after they've filled out
+    # the whole form. See generate_pdf for why a template must already
+    # be stored (never fetched live from nawasa.gd during a session).
+    template = db.get_form_template(form_id, include_data=False)
+    if template is None:
+        return None, ("Sorry, I'm unable to prepare this form for guided filling right now — "
+                       "the official template hasn't been loaded yet. Please open the official "
+                       "form directly, or check back shortly.")
     _SESSIONS[session_id] = WizardSession(form_id=form_id)
     return _current_step(session_id), None
 
@@ -548,25 +558,34 @@ def generate_pdf(session_id):
     """Returns (download_token, filename, warnings, error). error is None
     on success. warnings is a list of human-readable notes (e.g. "the
     official PDF doesn't appear to have fillable fields — your answers
-    are included as a summary page instead")."""
+    are included as a summary page instead").
+
+    ARCHITECTURE NOTE: this NEVER contacts nawasa.gd. It reads the
+    persistent master template already stored in Neon (see
+    db.get_form_template / save_form_template) — acquired ahead of time
+    via a staff upload or an admin-triggered sync attempt, both outside
+    any customer's session. If no template is stored, start() already
+    refused to begin the wizard at all (see the pre-check there), so
+    reaching this function with no template means the template was
+    deleted mid-session — handled below as a clear, non-crashing error.
+    """
     sess = _SESSIONS.get(session_id)
     if sess is None:
         return None, None, [], "No form is currently in progress."
     schema = get_schema(sess.form_id)
     warnings = []
 
-    pdf_url = sess.answers.get("__pdf_url__")
-    if not pdf_url:
-        return None, None, [], "This form session is missing its official PDF URL — please restart the wizard."
+    template = db.get_form_template(sess.form_id, include_data=True)
+    if template is None or not template.get("pdf_base64"):
+        return None, None, [], ("The official template for this form is no longer available. "
+                                 "Please contact NAWASA directly, or try again once it's been reloaded.")
 
     try:
-        pdf_bytes, error = pdf_ingest.download_pdf(pdf_url)
-        if error:
-            logger.error("Form wizard: could not download official PDF %s: %s", pdf_url, error)
-            return None, None, [], f"Couldn't download the official form to fill it in ({error})."
+        import base64
+        pdf_bytes = base64.b64decode(template["pdf_base64"])
     except Exception as e:
-        logger.error("Form wizard: could not download official PDF %s: %s", pdf_url, e)
-        return None, None, [], f"Couldn't download the official form to fill it in ({e}). Please try again shortly."
+        logger.error("Form wizard: stored template for %s is corrupted: %s", sess.form_id, e)
+        return None, None, [], "The stored official template appears to be corrupted. Please contact NAWASA directly."
 
     try:
         from pypdf import PdfReader
@@ -619,9 +638,3 @@ def _cleanup_expired_tokens():
                 entry["path"].unlink(missing_ok=True)
             except Exception:
                 pass
-
-
-def set_pdf_url(session_id, url):
-    sess = _SESSIONS.get(session_id)
-    if sess is not None:
-        sess.answers["__pdf_url__"] = url
