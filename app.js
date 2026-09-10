@@ -680,13 +680,16 @@ function renderForms() {
   forms.forEach((f) => {
     const item = document.createElement("div");
     item.className = "form-item";
+    const wizardBtnHtml = f.template_ready
+      ? `<button type="button" class="btn-secondary form-wizard-btn">📄 Fill It Out With Me</button>`
+      : `<button type="button" class="btn-secondary form-wizard-btn" disabled title="Guided filling isn't ready for this form yet">📄 Fill It Out With Me</button>`;
     item.innerHTML = `
       <div class="form-item-name">${escapeHtml(f.name)}</div>
       <div class="form-item-desc">${escapeHtml(f.description)}</div>
       <div class="form-item-actions">
         <a class="btn-primary form-open-btn" href="${escapeHtml(f.url)}" target="_blank" rel="noopener noreferrer">Open Official Form ↗</a>
         <button type="button" class="btn-secondary form-ask-btn">💬 Ask AquaAssist about this</button>
-        <button type="button" class="btn-secondary form-wizard-btn">📄 Fill It Out With Me</button>
+        ${wizardBtnHtml}
       </div>
     `;
     item.querySelector(".form-ask-btn").addEventListener("click", () => {
@@ -694,11 +697,14 @@ function renderForms() {
       if (chatTab) chatTab.click();
       sendMessage(`Can you tell me about the "${f.name}" — what is it for and what do I need to complete it?`);
     });
-    item.querySelector(".form-wizard-btn").addEventListener("click", () => {
-      const chatTab = $('.tab-btn[data-tab="chat"]');
-      if (chatTab) chatTab.click();
-      startFormWizard(f.id, f.name);
-    });
+    const wizardBtn = item.querySelector(".form-wizard-btn");
+    if (f.template_ready) {
+      wizardBtn.addEventListener("click", () => {
+        const chatTab = $('.tab-btn[data-tab="chat"]');
+        if (chatTab) chatTab.click();
+        startFormWizard(f.id, f.name);
+      });
+    }
     list.appendChild(item);
   });
 }
@@ -709,15 +715,20 @@ function buildFormCardsEl(cards) {
   cards.forEach((f) => {
     const card = document.createElement("div");
     card.className = "form-card";
+    const wizardBtnHtml = f.template_ready
+      ? `<button type="button" class="btn-secondary form-wizard-btn">📄 Fill It Out With Me</button>`
+      : `<button type="button" class="btn-secondary form-wizard-btn" disabled title="Guided filling isn't ready for this form yet">📄 Fill It Out With Me</button>`;
     card.innerHTML = `
       <div class="form-card-name">📄 ${escapeHtml(f.name)}</div>
       <div class="form-card-desc">${escapeHtml(f.description)}</div>
       <div class="form-item-actions">
         <a class="btn-primary form-open-btn" href="${escapeHtml(f.url)}" target="_blank" rel="noopener noreferrer">Open Official Form ↗</a>
-        <button type="button" class="btn-secondary form-wizard-btn">📄 Fill It Out With Me</button>
+        ${wizardBtnHtml}
       </div>
     `;
-    card.querySelector(".form-wizard-btn").addEventListener("click", () => startFormWizard(f.id, f.name));
+    if (f.template_ready) {
+      card.querySelector(".form-wizard-btn").addEventListener("click", () => startFormWizard(f.id, f.name));
+    }
     wrap.appendChild(card);
   });
   return wrap;
@@ -2076,6 +2087,99 @@ async function loadFormsAdmin() {
   if (res.status === 401) { staffLogout(); return; }
   if (res.status === 403) return;
   renderFormManageList(await res.json());
+  loadFormTemplateStatus();
+}
+
+// ---------------------------------------------------------------------
+// "Fill It Out With Me" master template management — staff upload a real
+// PDF (downloaded via their own browser, which nawasa.gd's WAF doesn't
+// block) or try an automatic server-side fetch. Either way, once a valid
+// template is stored, the wizard reads only from Neon — never nawasa.gd
+// live. See form_wizard.py / the /api/formwizard/admin/templates* routes.
+// ---------------------------------------------------------------------
+async function loadFormTemplateStatus() {
+  const wrap = $("#formTemplatesList");
+  if (!wrap) return;
+  const res = await staffFetch("/api/formwizard/admin/templates");
+  if (!res.ok) { wrap.innerHTML = `<p class="hint-text">Couldn't load template status.</p>`; return; }
+  renderFormTemplateList(await res.json());
+}
+
+function renderFormTemplateList(templates) {
+  const wrap = $("#formTemplatesList");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  templates.forEach((t) => {
+    const row = document.createElement("div");
+    row.className = "tip-manage-row template-manage-row";
+    const statusHtml = t.template_ready
+      ? `<span style="color:#2E9E5B;font-weight:700;">✅ Ready</span> — ${escapeHtml(t.filename)} (${Math.round(t.size_bytes / 1024)} KB, ${t.field_count} fillable field${t.field_count === 1 ? "" : "s"} detected, via ${escapeHtml(t.source)})`
+      : `<span style="color:#D64545;font-weight:700;">⚠️ Not loaded yet</span> — guided filling is hidden for customers until a template is added`;
+    row.innerHTML = `
+      <span class="tip-manage-text">
+        <b>${escapeHtml(t.form_name)}</b><br>
+        <span class="hint-text">${statusHtml}</span>
+      </span>
+    `;
+    const actions = document.createElement("div");
+    actions.className = "tip-manage-actions template-upload-actions";
+
+    const fileInput = document.createElement("input");
+    fileInput.type = "file"; fileInput.accept = "application/pdf";
+    fileInput.className = "template-file-input";
+
+    const uploadBtn = document.createElement("button");
+    uploadBtn.type = "button"; uploadBtn.className = "btn-primary"; uploadBtn.textContent = "Upload PDF";
+    uploadBtn.addEventListener("click", async () => {
+      const file = fileInput.files[0];
+      if (!file) { alert("Choose a PDF file first."); return; }
+      uploadBtn.disabled = true; uploadBtn.textContent = "Uploading...";
+      try {
+        const b64 = await fileToBase64(file);
+        const res = await staffFetch(`/api/formwizard/admin/templates/${t.form_id}/upload`, {
+          method: "POST", body: JSON.stringify({ filename: file.name, data_base64: b64 }),
+        });
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+        loadFormTemplateStatus();
+      } finally {
+        uploadBtn.disabled = false; uploadBtn.textContent = "Upload PDF";
+      }
+    });
+
+    const syncBtn = document.createElement("button");
+    syncBtn.type = "button"; syncBtn.className = "btn-secondary"; syncBtn.textContent = "Try Automatic Sync";
+    syncBtn.title = "Attempts to fetch the PDF directly from nawasa.gd — usually blocked by their anti-bot protection; upload is more reliable";
+    syncBtn.addEventListener("click", async () => {
+      syncBtn.disabled = true; syncBtn.textContent = "Trying...";
+      try {
+        const res = await staffFetch(`/api/formwizard/admin/templates/${t.form_id}/sync`, { method: "POST" });
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+        loadFormTemplateStatus();
+      } finally {
+        syncBtn.disabled = false; syncBtn.textContent = "Try Automatic Sync";
+      }
+    });
+
+    actions.appendChild(fileInput);
+    actions.appendChild(uploadBtn);
+    actions.appendChild(syncBtn);
+
+    if (t.template_ready) {
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button"; removeBtn.className = "btn-secondary tip-delete-btn"; removeBtn.textContent = "Remove template";
+      removeBtn.addEventListener("click", async () => {
+        if (!confirm(`Remove the stored template for "${t.form_name}"? Guided filling will be disabled for it until a new one is added.`)) return;
+        await staffFetch(`/api/formwizard/admin/templates/${t.form_id}`, { method: "DELETE" });
+        loadFormTemplateStatus();
+      });
+      actions.appendChild(removeBtn);
+    }
+
+    row.appendChild(actions);
+    wrap.appendChild(row);
+  });
 }
 
 function renderFormManageList(forms) {
@@ -3400,11 +3504,6 @@ async function startFormWizard(formId, formName) {
     // send a tiny opening ping through the normal chat pipeline first.
     await sendMessage(`I'd like to fill out the "${formName}" form.`);
   }
-  state.wizard = { formId, formName };
-  appendBubble("assistant",
-    `Great! I'll help you complete the **${formName}** step-by-step. I'll ask for the information ` +
-    `this form requires and let you review everything before the completed document is generated.`
-  );
   try {
     const res = await fetch(`${API}/api/formwizard/start`, {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -3412,10 +3511,27 @@ async function startFormWizard(formId, formName) {
     });
     const step = await res.json();
     if (step.error) {
-      appendBubble("assistant", `⚠️ ${step.error}`);
-      state.wizard = null;
+      // Pre-check failure (e.g. no master template loaded for this form
+      // yet) — show it plainly with a working fallback, BEFORE the
+      // customer answers a single question, per spec. Never enter the
+      // wizard flow only to fail later.
+      const row = appendBubble("assistant", `⚠️ ${step.error}`);
+      if (step.official_url) {
+        const bubble = row.querySelector(".msg-bubble");
+        const link = document.createElement("a");
+        link.href = step.official_url; link.target = "_blank"; link.rel = "noopener noreferrer";
+        link.className = "btn-primary form-open-btn";
+        link.style.cssText = "display:inline-block;margin-top:.6rem;text-decoration:none;";
+        link.textContent = "Open Official Form ↗";
+        bubble.appendChild(link);
+      }
       return;
     }
+    state.wizard = { formId, formName };
+    appendBubble("assistant",
+      `Great! I'll help you complete the **${formName}** step-by-step. I'll ask for the information ` +
+      `this form requires and let you review everything before the completed document is generated.`
+    );
     renderWizardStep(step);
   } catch (err) {
     appendBubble("assistant", "⚠️ Couldn't start the form wizard right now. Please try again in a moment.");
@@ -3423,12 +3539,15 @@ async function startFormWizard(formId, formName) {
   }
 }
 
-function wizardProgressHtml(stepNumber, stepTotal) {
+function wizardProgressHtml(formTitle, stepNumber, stepTotal) {
   const pct = stepTotal ? Math.round((stepNumber / stepTotal) * 100) : 0;
   return `
     <div class="wizard-progress">
-      <div class="wizard-progress-label">Step ${stepNumber} of ${stepTotal}</div>
-      <div class="wizard-progress-bar"><div class="wizard-progress-fill" style="width:${pct}%;"></div></div>
+      <div class="wizard-progress-title">${escapeHtml(formTitle || "")}</div>
+      <div class="wizard-progress-row">
+        <span class="wizard-progress-label">Step ${stepNumber} of ${stepTotal}</span>
+        <div class="wizard-progress-bar"><div class="wizard-progress-fill" style="width:${pct}%;"></div></div>
+      </div>
     </div>
   `;
 }
@@ -3455,13 +3574,13 @@ function renderWizardStep(step) {
     controlsHtml = `<div class="wizard-options">${(q.options || []).map((opt, i) => `
       <label class="wizard-checkbox-row">
         <input type="checkbox" class="wizard-checkbox-input" value="${escapeHtml(opt)}" ${(step.current_value || []).includes(opt) ? "checked" : ""} />
-        ${escapeHtml(opt)}
+        <span>${escapeHtml(opt)}</span>
       </label>`).join("")}</div>`;
   } else if (q.type === "radio") {
     controlsHtml = `<div class="wizard-options">${(q.options || []).map((opt) => `
       <label class="wizard-radio-row">
         <input type="radio" name="wizard-radio" class="wizard-radio-input" value="${escapeHtml(opt)}" ${step.current_value === opt ? "checked" : ""} />
-        ${escapeHtml(opt)}
+        <span>${escapeHtml(opt)}</span>
       </label>`).join("")}</div>`;
   } else if (q.type === "textarea") {
     controlsHtml = `<textarea class="wizard-textarea" rows="3" placeholder="Type your answer...">${escapeHtml(step.current_value || "")}</textarea>`;
@@ -3474,17 +3593,20 @@ function renderWizardStep(step) {
       </div>`;
   }
 
+  const needsContinueBtn = (q.type === "checkbox" || q.type === "radio" || q.type === "textarea");
   bubble.innerHTML = `
-    ${wizardProgressHtml(step.step_number, step.step_total)}
+    ${wizardProgressHtml(step.form_display_name, step.step_number, step.step_total)}
     <p class="wizard-question">${escapeHtml(q.prompt)}</p>
     ${q.help ? `<p class="hint-text wizard-help">${escapeHtml(q.help)}</p>` : ""}
     ${step.error ? `<p class="error-text wizard-error">${escapeHtml(step.error)}</p>` : ""}
     ${controlsHtml}
-    <div class="wizard-controls-row">
+    <div class="wizard-nav-row">
       ${step.can_go_back ? `<button type="button" class="btn-secondary wizard-back-btn">← Back</button>` : ""}
       ${!q.required ? `<button type="button" class="btn-secondary wizard-skip-btn">Skip</button>` : ""}
-      ${(q.type === "checkbox" || q.type === "radio" || q.type === "textarea") ? `<button type="button" class="btn-primary wizard-continue-btn">Continue</button>` : ""}
-      <button type="button" class="btn-secondary wizard-cancel-btn">❌ Cancel</button>
+      ${needsContinueBtn ? `<button type="button" class="btn-primary wizard-continue-btn">Continue →</button>` : ""}
+    </div>
+    <div class="wizard-cancel-row">
+      <button type="button" class="wizard-cancel-btn">❌ Cancel</button>
     </div>
   `;
   row.appendChild(document.createElement("div")).outerHTML =
@@ -3600,9 +3722,11 @@ function renderWizardReview(step) {
         </div>
       `).join("")}
     </div>
-    <div class="wizard-controls-row">
-      <button type="button" class="btn-secondary wizard-cancel-btn">❌ Cancel</button>
+    <div class="wizard-nav-row">
       <button type="button" class="btn-primary wizard-generate-btn">Generate Completed Form</button>
+    </div>
+    <div class="wizard-cancel-row">
+      <button type="button" class="wizard-cancel-btn">❌ Cancel</button>
     </div>
   `;
   row.innerHTML = `<div class="msg-avatar"><span>💧</span></div>`;
