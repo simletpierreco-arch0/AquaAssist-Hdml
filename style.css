@@ -1020,4 +1020,103 @@ img, svg, video, canvas { max-width: 100%; height: auto; }
   .form-item, .form-card { padding: .75rem .8rem; }
   .form-open-btn { width: 100%; text-align: center; }
 }
-.wizard-help { margin: -.3rem 0 .7rem; line-height: 1.45; }
+
+/* =========================================================================
+   "Fill It Out With Me" wizard + in-app info panel + forms-admin add form.
+   (Re-added — an earlier edit accidentally dropped this whole block when
+   restoring the base stylesheet, which is why the wizard rendered with no
+   styling at all. Not repeating that mistake: this is the complete set.)
+   ========================================================================= */
+.form-item-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .3rem; }
+.form-item-actions .btn-secondary:disabled { opacity: .45; cursor: not-allowed; }
+@media (max-width: 480px) { .form-item-actions .btn-primary, .form-item-actions .btn-secondary { flex: 1 1 auto; text-align: center; } }
+
+.info-modal-body { max-height: 60vh; overflow-y: auto; font-size: .88rem; line-height: 1.55; }
+.info-modal-body p { margin: 0 0 .8rem; }
+
+.wizard-bubble {
+  max-width: 94% !important;
+  padding: 1rem 1.1rem !important;
+}
+.wizard-progress { margin-bottom: .85rem; padding-bottom: .75rem; border-bottom: 1px solid color-mix(in srgb, var(--primary) 14%, transparent); }
+.wizard-progress-title { font-weight: 800; font-size: .82rem; color: var(--text); margin-bottom: .35rem; }
+.wizard-progress-row { display: flex; align-items: center; gap: .6rem; }
+.wizard-progress-label { font-size: .68rem; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; flex-shrink: 0; }
+.wizard-progress-bar { background: var(--bg-soft); border-radius: 999px; height: 6px; overflow: hidden; flex: 1; }
+.wizard-progress-fill { background: linear-gradient(90deg, var(--primary), var(--accent)); height: 100%; transition: width .3s ease; }
+
+.wizard-question { font-weight: 700; font-size: .96rem; margin: 0 0 .5rem; line-height: 1.45; }
+.wizard-help { font-size: .8rem; margin: -.15rem 0 .8rem; line-height: 1.5; }
+.wizard-error { margin: -.2rem 0 .7rem; font-weight: 600; }
+
+.wizard-options { display: flex; flex-direction: column; gap: .5rem; margin-bottom: 1rem; }
+.wizard-checkbox-row, .wizard-radio-row {
+  display: flex; align-items: center; gap: .7rem; font-size: .87rem; font-weight: 500;
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--primary) 16%, transparent);
+  border-radius: 12px; padding: .65rem .9rem; cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+.wizard-checkbox-row:hover, .wizard-radio-row:hover { border-color: color-mix(in srgb, var(--primary) 40%, transparent); }
+.wizard-checkbox-row:has(input:checked), .wizard-radio-row:has(input:checked) {
+  border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+.wizard-checkbox-row input, .wizard-radio-row input { width: 1.15rem; height: 1.15rem; flex-shrink: 0; }
+.wizard-checkbox-row span, .wizard-radio-row span { flex: 1; }
+
+.wizard-textarea {
+  width: 100%; min-height: 5rem; margin-bottom: 1rem; resize: vertical; font-size: .9rem;
+}
+
+.wizard-text-row { display: flex; align-items: center; gap: .6rem; margin-bottom: 1rem; }
+.wizard-text-input { margin-bottom: 0; flex: 1; font-size: .9rem; }
+.wizard-send-btn {
+  flex-shrink: 0; width: 2.4rem; height: 2.4rem; border-radius: 50%; border: none;
+  background: var(--primary); color: #fff; font-size: 1.05rem;
+  box-shadow: 0 2px 8px rgba(0,90,156,.25);
+}
+.wizard-send-btn:hover { background: var(--hover); }
+.wizard-send-btn:disabled { opacity: .5; }
+
+.wizard-nav-row { display: flex; gap: .6rem; flex-wrap: wrap; }
+.wizard-nav-row button { flex: 1 1 auto; padding: .65rem 1rem; font-size: .86rem; min-width: 110px; }
+.wizard-nav-row .wizard-back-btn { flex: 0 1 auto; min-width: 90px; }
+.wizard-nav-row .wizard-continue-btn, .wizard-nav-row .wizard-generate-btn { flex: 2 1 auto; }
+
+.wizard-cancel-row { margin-top: .7rem; padding-top: .6rem; border-top: 1px dashed color-mix(in srgb, var(--text) 15%, transparent); text-align: center; }
+.wizard-cancel-btn {
+  background: none; border: none; color: #D64545; font-weight: 600; font-size: .8rem;
+  padding: .3rem .6rem; opacity: .75;
+}
+.wizard-cancel-btn:hover { opacity: 1; text-decoration: underline; }
+
+.wizard-review-bubble .wizard-question { margin-bottom: .8rem; }
+.wizard-review-list { display: flex; flex-direction: column; gap: .5rem; margin-bottom: 1rem; }
+.wizard-review-item {
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 15%, transparent);
+  border-radius: 12px; padding: .65rem .9rem; padding-right: 4.2rem; position: relative;
+}
+.wizard-review-label { font-size: .68rem; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: .04em; margin-bottom: .2rem; }
+.wizard-review-value { font-size: .87rem; word-break: break-word; line-height: 1.4; }
+.wizard-edit-link {
+  position: absolute; top: .65rem; right: .7rem; background: none; border: none;
+  color: var(--primary); font-size: .72rem; font-weight: 700; text-decoration: underline; padding: 0;
+}
+.wizard-warning { margin: .5rem 0; padding: .5rem .7rem; background: #F5A62318; border-radius: 10px; border-left: 3px solid #C98A11; }
+
+@media (max-width: 480px) {
+  .wizard-bubble { max-width: 96% !important; padding: .85rem .9rem !important; }
+  .wizard-nav-row button { min-width: 0; }
+  .wizard-review-item { padding-right: .9rem; }
+  .wizard-edit-link { position: static; display: block; margin-top: .35rem; }
+}
+
+/* Forms admin — "Add a form" section (Staff Portal) */
+#formCreateForm { margin-bottom: 0; }
+
+
+.template-manage-row { flex-direction: column; align-items: stretch; }
+.template-upload-actions { align-items: center; }
+.template-file-input { flex: 1 1 200px; min-width: 0; margin-bottom: 0; font-size: .78rem; padding: .4rem .5rem; }
+@media (max-width: 560px) { .template-upload-actions { flex-direction: column; align-items: stretch; } }
