@@ -401,6 +401,27 @@ def init_db():
                 enabled TEXT, source TEXT, created_at TEXT, updated_at TEXT
             )
         """)
+        # `form_templates` — the persistent master copy of each official
+        # PDF, stored in Neon (base64 text, works identically on SQLite
+        # and Postgres). This exists specifically so the "Fill It Out
+        # With Me" wizard NEVER needs to contact nawasa.gd during a
+        # customer's session: a template is acquired once (staff upload,
+        # or a successful automated sync attempt) and validated as a real
+        # PDF before being stored here; generation always reads from this
+        # table. One row per form_id — uploading again replaces it.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS form_templates (
+                form_id TEXT PRIMARY KEY,
+                pdf_base64 TEXT,
+                filename TEXT,
+                content_hash TEXT,
+                size_bytes INTEGER,
+                field_names TEXT,
+                source TEXT,
+                uploaded_by TEXT,
+                uploaded_at TEXT
+            )
+        """)
         # =================================================================
         # Knowledge-base document/chunk tracking — additive tables, never
         # touched by any existing feature. These let the RAG sync pipeline
@@ -1001,6 +1022,82 @@ def delete_form(form_id):
         cur.execute(f"DELETE FROM forms WHERE id = {ph}", (form_id,))
         deleted = cur.rowcount > 0
     return deleted, None
+
+
+# =======================================================================
+# Form templates — persistent master PDF copies backing the "Fill It Out
+# With Me" wizard (see form_wizard.py). See the CREATE TABLE comment
+# above for why this exists: generation must never depend on a live
+# request to nawasa.gd. `field_names` is a JSON list of AcroForm field
+# names pypdf found in the uploaded PDF (empty list if it isn't a
+# fillable PDF) — kept purely as a staff-facing diagnostic so whoever
+# uploads a template can see whether true in-field filling is possible
+# for that form, without needing to open the PDF in a separate tool.
+# =======================================================================
+def save_form_template(form_id, pdf_base64, filename, content_hash, size_bytes,
+                        field_names, source="upload", uploaded_by=""):
+    ph = _ph()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    existing = get_form_template(form_id, include_data=False)
+    with _cursor(commit=True) as cur:
+        if existing:
+            cur.execute(
+                f"UPDATE form_templates SET pdf_base64={ph}, filename={ph}, content_hash={ph}, "
+                f"size_bytes={ph}, field_names={ph}, source={ph}, uploaded_by={ph}, uploaded_at={ph} "
+                f"WHERE form_id={ph}",
+                (pdf_base64, filename, content_hash, size_bytes, json.dumps(field_names),
+                 source, uploaded_by, now, form_id),
+            )
+        else:
+            cur.execute(
+                f"INSERT INTO form_templates (form_id, pdf_base64, filename, content_hash, size_bytes, "
+                f"field_names, source, uploaded_by, uploaded_at) "
+                f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (form_id, pdf_base64, filename, content_hash, size_bytes, json.dumps(field_names),
+                 source, uploaded_by, now),
+            )
+
+
+def get_form_template(form_id, include_data=True):
+    """include_data=False skips the (potentially large) pdf_base64 column
+    — use that for admin list views; use the default (True) only when
+    the actual PDF bytes are needed (i.e. right before generation)."""
+    ph = _ph()
+    cols = "*" if include_data else "form_id, filename, content_hash, size_bytes, field_names, source, uploaded_by, uploaded_at"
+    with _cursor() as cur:
+        cur.execute(f"SELECT {cols} FROM form_templates WHERE form_id = {ph}", (form_id,))
+        row = cur.fetchone()
+    if row is None:
+        return None
+    out = dict(row)
+    try:
+        out["field_names"] = json.loads(out.get("field_names") or "[]")
+    except Exception:
+        out["field_names"] = []
+    return out
+
+
+def load_form_templates():
+    """Lightweight listing (no PDF bytes) for the staff diagnostics view —
+    which forms have a working stored template, when it was added, and
+    whether it has fillable AcroForm fields."""
+    with _cursor() as cur:
+        cur.execute("SELECT form_id, filename, content_hash, size_bytes, field_names, "
+                     "source, uploaded_by, uploaded_at FROM form_templates ORDER BY form_id ASC")
+        rows = _rows(cur.fetchall())
+    for r in rows:
+        try:
+            r["field_names"] = json.loads(r.get("field_names") or "[]")
+        except Exception:
+            r["field_names"] = []
+    return rows
+
+
+def delete_form_template(form_id):
+    ph = _ph()
+    with _cursor(commit=True) as cur:
+        cur.execute(f"DELETE FROM form_templates WHERE form_id = {ph}", (form_id,))
+        return cur.rowcount > 0
 
 
 def get_form(form_id):
