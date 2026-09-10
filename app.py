@@ -23,6 +23,7 @@ import threading
 import time
 import uuid
 import base64
+import hashlib
 import subprocess
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -710,8 +711,10 @@ def _make_recommend_form_tool(session_id):
                     "situation and suggest they contact NAWASA directly, or check the Forms "
                     "section in this chat for the full list.")
 
+        _template_ids = {t["form_id"] for t in db.load_form_templates()}
         LAST_FORM_CARDS[session_id] = [
-            {"id": f["id"], "name": f["name"], "description": f["description"], "url": f["url"]}
+            {"id": f["id"], "name": f["name"], "description": f["description"], "url": f["url"],
+             "template_ready": f["id"] in _template_ids}
             for f in top_matches
         ]
         lines = [f"Name: {f['name']}\nDescription: {f['description']}\nOfficial PDF: {f['url']}" for f in top_matches]
@@ -809,6 +812,7 @@ def serve_static(filename):
 
 @app.route("/api/init")
 def api_init():
+    _template_ids = {t["form_id"] for t in db.load_form_templates()}
     return jsonify({
         "territories": TERRITORIES,
         "territory_whatsapp": TERRITORY_WHATSAPP,
@@ -820,7 +824,8 @@ def api_init():
         "severity_levels": SEVERITY_LEVELS,
         "status_stages": STATUS_STAGES,
         "faqs": [{"category": f["category"], "q": f["q"], "a": f["a"]} for f in db.load_faqs(include_disabled=False)],
-        "forms": [{"id": f["id"], "name": f["name"], "description": f["description"], "url": f["url"]} for f in db.load_forms(include_disabled=False)],
+        "forms": [{"id": f["id"], "name": f["name"], "description": f["description"], "url": f["url"],
+                    "template_ready": f["id"] in _template_ids} for f in db.load_forms(include_disabled=False)],
         "business_hours": get_business_hours_status(),
         "nawasa_phone": NAWASA_PHONE,
         "nawasa_website": NAWASA_WEBSITE,
@@ -1448,7 +1453,12 @@ def api_faqs_delete(faq_id):
 @app.route("/api/forms", methods=["GET"])
 def api_forms_list():
     forms = db.load_forms(include_disabled=False)
-    return jsonify([{"id": f["id"], "name": f["name"], "description": f["description"], "url": f["url"]} for f in forms])
+    templates = {t["form_id"] for t in db.load_form_templates()}
+    return jsonify([
+        {"id": f["id"], "name": f["name"], "description": f["description"], "url": f["url"],
+         "template_ready": f["id"] in templates}
+        for f in forms
+    ])
 
 
 @app.route("/api/forms", methods=["POST"])
@@ -1532,8 +1542,10 @@ def api_formwizard_start():
         return jsonify({"error": "That form doesn't exist."}), 404
     step, error = form_wizard.start(session_id, form_id)
     if error:
-        return jsonify({"error": error}), 400
-    form_wizard.set_pdf_url(session_id, form_row["url"])
+        # Pre-check failure (e.g. no master template loaded yet) — give the
+        # frontend the official URL too so it can offer "Open Official
+        # Form" as a fallback without a second round trip. See form_wizard.
+        return jsonify({"error": error, "official_url": form_row["url"]}), 400
     return jsonify(step)
 
 
@@ -1616,6 +1628,132 @@ def api_formwizard_download(token):
     if path is None or not path.exists():
         return jsonify({"error": "This download link has expired. Please regenerate the form."}), 404
     return send_from_directory(path.parent, path.name, as_attachment=True, download_name=filename)
+
+
+# =======================================================================
+# Form template management (staff-only) — acquiring and storing the
+# persistent master PDF copies the wizard generates from. Two ways in:
+#
+# 1. Upload (recommended, always works): staff download the real PDF
+#    through their OWN browser — which nawasa.gd's WAF doesn't block,
+#    unlike automated server requests — then upload that file here.
+# 2. Automatic sync attempt (best-effort): tries fetching the official
+#    URL server-side. Works only if/when NAWASA allowlists this server;
+#    until then it will typically fail with the same anti-bot page the
+#    website sync already runs into, and this route reports that clearly
+#    rather than storing bad data.
+#
+# Both paths validate the result is a real, parseable PDF before ever
+# writing it to Neon — a failed attempt never overwrites a working
+# template. Nothing here is reachable from a customer's session; the
+# wizard (see form_wizard.py) only ever READS what's already stored.
+# =======================================================================
+@app.route("/api/formwizard/admin/templates", methods=["GET"])
+@require_permission("manage_forms")
+def api_formwizard_admin_templates_list():
+    templates = {t["form_id"]: t for t in db.load_form_templates()}
+    forms = db.load_forms(include_disabled=True)
+    out = []
+    for f in forms:
+        t = templates.get(f["id"])
+        out.append({
+            "form_id": f["id"], "form_name": f["name"],
+            "template_ready": t is not None,
+            "filename": t["filename"] if t else "",
+            "size_bytes": t["size_bytes"] if t else 0,
+            "field_count": len(t["field_names"]) if t else 0,
+            "field_names": t["field_names"] if t else [],
+            "source": t["source"] if t else "",
+            "uploaded_by": t["uploaded_by"] if t else "",
+            "uploaded_at": t["uploaded_at"] if t else "",
+        })
+    return jsonify(out)
+
+
+def _validate_and_extract_pdf(pdf_bytes):
+    """Returns (field_names, error). error is None on success. Shared by
+    both the upload and sync-attempt routes so a bad/blocked response is
+    caught the same way regardless of how the bytes were obtained."""
+    if pdf_bytes[:4] != b"%PDF":
+        return None, "That file doesn't look like a real PDF (missing the %PDF header)."
+    if len(pdf_bytes) < 200:
+        return None, f"That file is too small to be a real form ({len(pdf_bytes)} bytes)."
+    try:
+        from pypdf import PdfReader
+        import io
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        _ = len(reader.pages)  # forces a real parse, not just header inspection
+        try:
+            fields = list((reader.get_fields() or {}).keys())
+        except Exception:
+            fields = []
+    except Exception as e:
+        return None, f"This couldn't be parsed as a valid PDF ({e})."
+    return fields, None
+
+
+@app.route("/api/formwizard/admin/templates/<form_id>/upload", methods=["POST"])
+@require_permission("manage_forms")
+def api_formwizard_admin_upload(form_id):
+    if db.get_form(form_id) is None:
+        return jsonify({"error": "That form doesn't exist."}), 404
+    body = request.get_json(force=True) or {}
+    filename = (body.get("filename") or "template.pdf").strip()
+    data_b64 = body.get("data_base64") or ""
+    if not data_b64:
+        return jsonify({"error": "No file data received."}), 400
+    try:
+        pdf_bytes = base64.b64decode(data_b64)
+    except Exception as e:
+        return jsonify({"error": f"Couldn't decode the uploaded file ({e})."}), 400
+
+    field_names, error = _validate_and_extract_pdf(pdf_bytes)
+    if error:
+        return jsonify({"error": error}), 400
+
+    content_hash = hashlib.sha256(pdf_bytes).hexdigest()[:24]
+    db.save_form_template(
+        form_id, data_b64, filename, content_hash, len(pdf_bytes),
+        field_names, source="upload", uploaded_by=_actor_label(),
+    )
+    db.log_audit(_actor_label(), "Form template uploaded", item=form_id,
+                 details=f"{filename}, {len(pdf_bytes)} bytes, {len(field_names)} fillable field(s) detected")
+    return jsonify({"ok": True, "form_id": form_id, "size_bytes": len(pdf_bytes), "field_names": field_names})
+
+
+@app.route("/api/formwizard/admin/templates/<form_id>/sync", methods=["POST"])
+@require_permission("manage_forms")
+def api_formwizard_admin_sync(form_id):
+    form_row = db.get_form(form_id)
+    if form_row is None:
+        return jsonify({"error": "That form doesn't exist."}), 404
+    pdf_bytes, error = pdf_ingest.download_pdf(form_row["url"])
+    if error:
+        return jsonify({"error": f"Automatic sync failed: {error} — try uploading the PDF manually instead."}), 502
+    field_names, error = _validate_and_extract_pdf(pdf_bytes)
+    if error:
+        return jsonify({"error": f"Downloaded a file, but it wasn't a valid PDF: {error}"}), 400
+
+    data_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+    content_hash = hashlib.sha256(pdf_bytes).hexdigest()[:24]
+    filename = form_row["url"].rsplit("/", 1)[-1] or f"{form_id}.pdf"
+    db.save_form_template(
+        form_id, data_b64, filename, content_hash, len(pdf_bytes),
+        field_names, source="auto-sync", uploaded_by=_actor_label(),
+    )
+    db.log_audit(_actor_label(), "Form template auto-synced", item=form_id,
+                 details=f"{len(pdf_bytes)} bytes, {len(field_names)} fillable field(s) detected")
+    return jsonify({"ok": True, "form_id": form_id, "size_bytes": len(pdf_bytes), "field_names": field_names})
+
+
+@app.route("/api/formwizard/admin/templates/<form_id>", methods=["DELETE"])
+@require_permission("manage_forms")
+def api_formwizard_admin_delete_template(form_id):
+    deleted = db.delete_form_template(form_id)
+    if not deleted:
+        return jsonify({"error": "No template stored for that form."}), 404
+    db.log_audit(_actor_label(), "Form template removed", item=form_id)
+    return jsonify({"deleted": form_id})
 
 
 @app.route("/api/website-content", methods=["GET"])
