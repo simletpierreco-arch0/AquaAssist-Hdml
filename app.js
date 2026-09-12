@@ -3504,6 +3504,13 @@ async function startFormWizard(formId, formName) {
     // send a tiny opening ping through the normal chat pipeline first.
     await sendMessage(`I'd like to fill out the "${formName}" form.`);
   }
+  if (!state.sessionId) {
+    // sendMessage above failed (e.g. AquaAssist itself is having trouble
+    // right now) — that failure already showed its own error bubble.
+    // Bail out here instead of also firing a confusing second "session_id
+    // required" error from the wizard endpoint.
+    return;
+  }
   try {
     const res = await fetch(`${API}/api/formwizard/start`, {
       method: "POST", headers: { "Content-Type": "application/json" },
