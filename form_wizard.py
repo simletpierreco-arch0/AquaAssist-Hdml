@@ -87,130 +87,312 @@ def _selected(answers, question_id, option):
 
 
 FORM_SCHEMAS = {
+    # =====================================================================
+    # Water Service Application Form — rebuilt directly from the uploaded
+    # PDF's actual text (Sections A/B/C/D/E; Section F is informational
+    # terms, Section G is the signature/declaration, and "FOR OFFICE USE
+    # ONLY" is staff-only — none of those three have Question entries).
+    # Corrections vs. the earlier guess-based schema: "Service Required"
+    # is actually 3 checkboxes (Water / Additional Meter / Sewer) — there
+    # is NO separate "Temporary" checkbox despite it being in the form's
+    # title; "Nature of Building" is a 3-way radio (Domestic / Non-
+    # Domestic / Industrial), not free text; ID type is a defined 4-option
+    # radio with a conditional DL number; and Section B/C contains a full
+    # 5-option (A–E) sub-declaration for applicants with no proof of
+    # ownership, previously missing entirely from this schema.
+    # =====================================================================
     "form-water-service-application": {
         "display_name": "Private Water Service Application",
         "filename_base": "Completed_NAWASA_Water_Connection_Application",
         "signature_note": "Remember to add your signature in Section G before submitting the form.",
         "questions": [
+            # --- Section A: Applicant's Information ---
+            Question(id="full_name", type="text", required=True, prompt="What's your full name (Applicant's Name)?"),
+            Question(id="alias", type="text", required=False,
+                     prompt="Do you go by any other known name/alias? You can skip this if not."),
+            Question(id="billing_address", type="textarea", required=True, prompt="What's your billing address?"),
+            Question(id="email", type="email", required=True, prompt="What's your email address?"),
+            Question(id="phone", type="phone", required=True,
+                     prompt="What telephone number(s) can we reach you at (work, home, and/or cell)?"),
+            Question(
+                id="id_type", type="radio", required=True,
+                prompt="What type of ID will you provide sight of?",
+                options=["National ID", "Passport", "NIS", "Driver's Licence"],
+            ),
+            Question(
+                id="dl_number", type="text", required=True, prompt="What's your Driver's Licence number?",
+                condition=lambda a: a.get("id_type") == "Driver's Licence",
+            ),
+            Question(id="application_date", type="date", required=True, prompt="What is the application date?"),
+            Question(
+                id="new_or_transfer", type="radio", required=True,
+                prompt="Is this a New Service or a Transfer of Service?",
+                options=["New Service", "Transfer of Service"],
+            ),
+            Question(
+                id="existing_account_number", type="text", required=True,
+                prompt="What's the existing account number being transferred?",
+                condition=lambda a: a.get("new_or_transfer") == "Transfer of Service",
+            ),
             Question(
                 id="services", type="checkbox", required=True,
-                prompt="Which service(s) do you need? You can pick more than one, then Continue.",
-                options=["New Water Connection", "Additional Meter", "Temporary Water Connection", "Sewer Connection"],
+                prompt="What service is required? You can pick more than one, then Continue.",
+                options=["Water", "Additional Meter", "Sewer"],
             ),
-            Question(id="full_name", type="text", required=True, prompt="What's your full name?"),
+            Question(id="service_location", type="textarea", required=True, prompt="What's the service location?"),
+            Question(id="service_directions", type="textarea", required=False,
+                     prompt="Directions to get to the intended service point? You can skip this if the address is enough on its own."),
             Question(
-                id="alias", type="text", required=False,
-                prompt="Do you go by any other name (an alias)? You can skip this if not.",
+                id="nature_of_building", type="radio", required=True,
+                prompt="What is the nature of the building?",
+                options=["Domestic", "Non-Domestic", "Industrial"],
             ),
             Question(
-                id="is_owner", type="radio", required=True,
-                prompt="Are you the property owner?", options=["Yes", "No"],
+                id="trading_name", type="text", required=True, prompt="What's the trading/registered name of the business?",
+                condition=lambda a: a.get("nature_of_building") in ("Non-Domestic", "Industrial"),
             ),
             Question(
-                id="owner_id_type", type="text", required=True,
-                prompt="What type of ID will you provide (e.g. Driver's Licence, Passport, National ID)?",
+                id="applicant_company_position", type="text", required=True, prompt="What is your position in the company?",
+                condition=lambda a: a.get("nature_of_building") in ("Non-Domestic", "Industrial"),
+            ),
+
+            # --- Section B: Ownership ---
+            Question(id="is_owner", type="radio", required=True,
+                     prompt="Do you own the property where service is required?", options=["Yes", "No"]),
+            Question(
+                id="has_title_documents", type="radio", required=True,
+                prompt="Do you have title documents proving that you are the owner of the property?",
+                options=["Yes", "No"],
                 condition=lambda a: a.get("is_owner") == "Yes",
             ),
             Question(
-                id="permission_granted", type="radio", required=True,
-                prompt="Has the property owner given you written permission to apply?", options=["Yes", "No"],
-                condition=lambda a: a.get("is_owner") == "No",
+                id="supporting_documents", type="checkbox", required=True,
+                prompt="Which of these will you attach in support of this application? You can pick more than one, then Continue.",
+                options=["Conveyance", "Will/Administration/Probate", "Statutory Declaration"],
+                condition=lambda a: a.get("has_title_documents") == "Yes",
+            ),
+
+            # --- No proof of ownership: the form's own 5-option (A-E) sub-declaration ---
+            Question(
+                id="no_proof_statement", type="radio", required=True,
+                prompt="Since you don't have title documents, which of these statements applies to you?",
+                options=[
+                    "A - Continuous undisturbed possession for a period of years",
+                    "B - Sole beneficiary of a deceased owner's estate",
+                    "C - Joint beneficial interest with other person(s), beneficiaries of a deceased owner's estate",
+                    "D - Purchased from the previous owners, but not yet formally conveyed",
+                    "E - Owners agreed to convey by Deed of Gift, not yet complete",
+                ],
+                help=("If you're not sure which of these applies to your situation, let me know - I'll flag this "
+                      "for NAWASA's Customer Service team to help you determine the right option rather than "
+                      "guessing, since this is a legal determination."),
+                condition=lambda a: a.get("has_title_documents") == "No",
             ),
             Question(
-                id="deposit_ack", type="radio", required=True,
-                prompt=("A security deposit applies for applicants without proof of ownership "
-                        "($240 Domestic / $340 Commercial / $2,000 Projects, refundable). Do you "
-                        "understand and agree to this deposit requirement?"),
-                options=["Yes", "No"],
-                condition=lambda a: a.get("is_owner") == "No",
+                id="possession_years", type="text", required=True,
+                prompt="For how many years have you been in continuous undisturbed possession of the property?",
+                condition=lambda a: (a.get("no_proof_statement") or "").startswith("A"),
             ),
-            Question(id="billing_address", type="textarea", required=True, prompt="What's your billing address?"),
             Question(
-                id="property_address", type="textarea", required=False,
-                prompt=("What's the address where the service is needed, if different from your billing "
-                        "address? You can skip this if it's the same."),
+                id="possession_start_date", type="text", required=True,
+                prompt="Around what month and year did that possession begin?",
+                condition=lambda a: (a.get("no_proof_statement") or "").startswith("A"),
             ),
-            Question(id="email", type="email", required=True, prompt="What's your email address?"),
-            Question(id="phone", type="phone", required=True, prompt="What's the best phone number to reach you?"),
             Question(
-                id="connection_size", type="radio", required=True,
-                prompt="What size connection do you need?",
-                help=("This is the diameter of the pipe connecting your property to NAWASA's main line — "
-                      "not something most customers know off-hand. Most residential homes use ½\" or ¾\". "
-                      "Larger sizes (1\" and up) are typically for commercial properties or high-volume use. "
-                      "If you're not sure, choose ½\" — NAWASA confirms the correct size during their site "
-                      "assessment, so an early guess here won't lock you into anything or affect your cost."),
-                options=["½\"", "¾\"", "1\"", "1¼\"/1½\"/2\"", "4\""],
-                condition=lambda a: _selected(a, "services", "New Water Connection") or _selected(a, "services", "Additional Meter"),
+                id="deceased_owner_name", type="text", required=True,
+                prompt="What's the name of the deceased person whose estate you're the beneficiary of?",
+                condition=lambda a: (a.get("no_proof_statement") or "")[:1] in ("B", "C"),
             ),
-            Question(id="application_date", type="date", required=True, prompt="What is the application date?"),
+            Question(
+                id="deceased_owner_death_date", type="date", required=True,
+                prompt="What was their date of death?",
+                condition=lambda a: (a.get("no_proof_statement") or "")[:1] in ("B", "C"),
+            ),
+            Question(
+                id="co_owners", type="textarea", required=True,
+                prompt="Please list the name(s) of the other person(s) who jointly share this beneficial interest with you.",
+                condition=lambda a: (a.get("no_proof_statement") or "").startswith("C"),
+            ),
+            Question(
+                id="purchase_date", type="date", required=True,
+                prompt="What date did you purchase the property from the previous owners?",
+                condition=lambda a: (a.get("no_proof_statement") or "").startswith("D"),
+            ),
+
+            # --- Section D: applicant is NOT the owner ---
+            Question(id="owner_name", type="text", required=True, prompt="What's the property owner's full name?",
+                     condition=lambda a: a.get("is_owner") == "No"),
+            Question(id="owner_address", type="textarea", required=True, prompt="What's the property owner's address?",
+                     condition=lambda a: a.get("is_owner") == "No"),
+            Question(id="owner_phone", type="phone", required=True,
+                     prompt="What telephone number(s) can the owner be reached at?",
+                     condition=lambda a: a.get("is_owner") == "No"),
+
+            # --- Section E: User of the property ---
+            Question(id="is_main_user", type="radio", required=True,
+                     prompt="Will you be the main user of the service(s) applied for?", options=["Yes", "No"]),
+            Question(id="main_user_name", type="text", required=True, prompt="What's the main user's full name?",
+                     condition=lambda a: a.get("is_main_user") == "No"),
+            Question(id="had_previous_service", type="radio", required=True,
+                     prompt="Have you (or any intended user) ever been provided with service by NAWASA before?",
+                     options=["Yes", "No"]),
+            Question(id="had_previous_line", type="radio", required=True,
+                     prompt="Was there a water line on the property before?", options=["Yes", "No"]),
+            Question(
+                id="previous_account_details", type="text", required=True,
+                prompt="What's the previous account number, meter number, or owner's name, if known?",
+                condition=lambda a: a.get("had_previous_line") == "Yes",
+            ),
+            Question(id="nearest_customer_name", type="text", required=False,
+                     prompt="Name of the nearest NAWASA customer to the service location, if known. You can skip this if not."),
+            Question(
+                id="nearest_customer_phone", type="phone", required=False,
+                prompt="Their telephone number, if known. You can skip this if not.",
+                condition=lambda a: bool((a.get("nearest_customer_name") or "").strip()),
+            ),
         ],
     },
+
+    # =====================================================================
+    # Private Water Service Cancellation Form - rebuilt from the actual
+    # PDF. "Service Location" (a text line) and "Location of Property"
+    # (a large empty box below it) are two DIFFERENT real fields - the
+    # box is for a hand-drawn location sketch, which isn't something a
+    # customer can sensibly complete via a chat question, so it's flagged
+    # in the signature note instead of asked here. No date field exists
+    # on this form, so none is asked. User/Owner/NAWASA Officer
+    # signatures are never asked.
+    # =====================================================================
     "form-cancellation": {
         "display_name": "Private Water Service Cancellation Form",
         "filename_base": "Completed_NAWASA_Cancellation_Form",
-        "signature_note": "Remember to add your signature before submitting the form.",
+        "signature_note": ("Remember that both the User and the Owner (if different) need to sign before "
+                            "submitting the form. The form also has a \"Location of Property\" box for a hand-"
+                            "drawn location sketch - please complete that yourself if NAWASA needs it."),
         "questions": [
-            Question(id="reference_or_account", type="text", required=True,
-                     prompt="What's your NAWASA account number or application reference number?"),
-            Question(id="applicant_name", type="text", required=True, prompt="What's your full name?"),
+            Question(id="property_owner_name", type="text", required=True, prompt="What's the name of the property owner?"),
+            Question(id="phone", type="phone", required=True, prompt="What's the owner's telephone number?"),
+            Question(id="user_name_if_not_owner", type="text", required=False,
+                     prompt="If the user is not the owner, what's the user's name? You can skip this if the user and owner are the same person."),
+            Question(id="service_location", type="textarea", required=True, prompt="What's the service location?"),
+            Question(id="meter_id", type="text", required=False,
+                     prompt="What's the Meter ID, if one has been assigned? You can skip this if not."),
             Question(id="cancellation_reason", type="textarea", required=True,
-                     prompt="Please briefly explain why you'd like to cancel this application."),
-            Question(id="phone", type="phone", required=True, prompt="What's the best phone number to reach you?"),
-            Question(id="email", type="email", required=False,
-                     prompt="What's your email address? You can skip this if you'd rather not provide one."),
-            Question(id="cancellation_date", type="date", required=True, prompt="What is today's date?"),
+                     prompt="What's the reason(s) for cancellation of service?"),
         ],
     },
+
+    # =====================================================================
+    # Customer Without Proof of Legal Ownership - Agreement Document.
+    # Rebuilt from the actual PDF. The security deposit amount is set by
+    # NAWASA ("as assessed"), not chosen by the customer, so it's handled
+    # as an acknowledgment rather than a number the customer supplies.
+    # There's no separately-labeled "witness name" field on this
+    # document - the witnessing lines are for the witness's own
+    # signature - so it isn't asked here.
+    # =====================================================================
     "form-no-proof-of-ownership": {
         "display_name": "Customer Without Proof of Ownership Agreement",
         "filename_base": "Completed_NAWASA_No_Proof_Of_Ownership_Agreement",
         "signature_note": "Remember to add your signature before submitting the form.",
         "questions": [
+            Question(id="agreement_date", type="date", required=True, prompt="What is the date of this agreement?"),
             Question(id="applicant_name", type="text", required=True, prompt="What's your full name?"),
-            Question(id="property_address", type="textarea", required=True,
-                     prompt="What's the address of the property needing water service?"),
-            Question(id="relationship_to_property", type="text", required=True,
-                     prompt="What is your relationship to this property (e.g. tenant, occupant, family member)?"),
-            Question(id="deposit_ack", type="radio", required=True,
-                     prompt="This agreement requires a refundable security deposit. Do you understand and agree?",
-                     options=["Yes", "No"]),
-            Question(id="phone", type="phone", required=True, prompt="What's the best phone number to reach you?"),
-            Question(id="email", type="email", required=False,
-                     prompt="What's your email address? You can skip this if you'd rather not provide one."),
+            Question(id="applicant_address", type="textarea", required=True, prompt="What's your address?"),
+            Question(id="parish", type="text", required=True, prompt="Which parish is this in?"),
+            Question(
+                id="deposit_ack", type="radio", required=True,
+                prompt=("This agreement requires a security deposit, as assessed by NAWASA, before installation. "
+                        "Do you understand and agree to this?"),
+                options=["Yes", "No"],
+            ),
         ],
     },
+
+    # =====================================================================
+    # Declaration of Ownership - rebuilt from the actual PDF. The form's
+    # two ownership-basis clauses (item 1's i/ii/iii and item 2's i/ii)
+    # overlap conceptually; this schema implements the union as three
+    # clear options tied to the concrete details the form actually asks
+    # for. The $EC Water Connection Fee amount is NAWASA-set, not
+    # customer-provided, so it's not asked. Only ONE declarant is
+    # supported per wizard session - the real form has two signature
+    # slots for joint declarants, so a second declarant's own details
+    # would need to be added by hand if applicable.
+    # =====================================================================
     "form-declaration-of-ownership": {
         "display_name": "Declaration of Ownership",
         "filename_base": "Completed_NAWASA_Declaration_Of_Ownership",
-        "signature_note": "Remember to add your signature before submitting the form.",
+        "signature_note": "Remember to add your signature before submitting the form. If there's a second joint declarant, their name/signature/date need to be added by hand.",
         "questions": [
             Question(id="declarant_name", type="text", required=True, prompt="What's your full name?"),
-            Question(id="property_address", type="textarea", required=True, prompt="What's the address of the land?"),
-            Question(id="basis_of_ownership", type="textarea", required=True,
-                     prompt=("Please briefly describe how you came to own this land (e.g. inherited, "
-                             "purchased, gifted) in the absence of a Deed of Conveyance.")),
-            Question(id="witness_name", type="text", required=False,
-                     prompt="Do you have a witness who can support this declaration? If so, what's their name? You can skip this if not."),
-            Question(id="phone", type="phone", required=True, prompt="What's the best phone number to reach you?"),
+            Question(id="declarant_address", type="textarea", required=True, prompt="What's your own address?"),
+            Question(id="parish", type="text", required=True, prompt="Which parish is the property in?"),
+            Question(id="property_address", type="textarea", required=True, prompt="What's the address of the property?"),
+            Question(
+                id="ownership_basis", type="radio", required=True,
+                prompt="Which best describes the basis of your ownership, in the absence of a Deed of Conveyance?",
+                options=[
+                    "Continuous undisturbed possession (12+ years)",
+                    "Sole beneficiary of a deceased owner's estate",
+                    "Joint beneficial interest with other person(s)",
+                ],
+                help=("If you're not sure which of these applies to your situation, that's alright - say so and "
+                      "AquaAssist will flag this as needing guidance from NAWASA or a qualified professional "
+                      "rather than guessing, since this is a legal determination."),
+            ),
+            Question(
+                id="possession_years", type="text", required=True,
+                prompt="For how many years have you been in continuous undisturbed possession?",
+                condition=lambda a: a.get("ownership_basis") == "Continuous undisturbed possession (12+ years)",
+            ),
+            Question(
+                id="possession_start_period", type="text", required=True,
+                prompt="Around what month and year did that possession begin?",
+                condition=lambda a: a.get("ownership_basis") == "Continuous undisturbed possession (12+ years)",
+            ),
+            Question(
+                id="deceased_owner_name", type="text", required=True,
+                prompt="What's the name of the deceased person whose estate you're the beneficiary of?",
+                condition=lambda a: a.get("ownership_basis") in (
+                    "Sole beneficiary of a deceased owner's estate", "Joint beneficial interest with other person(s)"),
+            ),
+            Question(
+                id="deceased_owner_death_date", type="date", required=True,
+                prompt="What was their date of death?",
+                condition=lambda a: a.get("ownership_basis") in (
+                    "Sole beneficiary of a deceased owner's estate", "Joint beneficial interest with other person(s)"),
+            ),
+            Question(
+                id="co_owners", type="textarea", required=True,
+                prompt="Please list the name(s) of the other person(s) who jointly share this beneficial interest with you.",
+                condition=lambda a: a.get("ownership_basis") == "Joint beneficial interest with other person(s)",
+            ),
             Question(id="declaration_date", type="date", required=True, prompt="What is today's date?"),
         ],
     },
+
+    # =====================================================================
+    # Permission in Support of Application for Water Connection - rebuilt
+    # from the actual PDF. The deed citation is ONE date (day/month/year
+    # together in the original text) plus Liber and Page - there's no
+    # separate "Year" field independent of that date. The Notarial
+    # Certificate section is completed by the notary, never the customer.
+    # =====================================================================
     "form-permission-in-support": {
         "display_name": "Permission in Support of Application for Water Connection",
         "filename_base": "Completed_NAWASA_Permission_In_Support",
-        "signature_note": "Remember that the property owner must sign this form before it's submitted.",
+        "signature_note": "Remember that the property owner needs to sign this in front of a Notary Public - the Notarial Certificate section is completed by the notary, not by you.",
         "questions": [
-            Question(id="owner_name", type="text", required=True,
-                     prompt="What's the property owner's full name (the person granting permission)?"),
-            Question(id="owner_phone", type="phone", required=True, prompt="What's the property owner's phone number?"),
-            Question(id="applicant_name", type="text", required=True,
-                     prompt="What's the applicant's full name (the person receiving permission)?"),
-            Question(id="property_address", type="textarea", required=True, prompt="What's the property address?"),
-            Question(id="permission_scope", type="textarea", required=True,
-                     prompt=("Briefly describe what the owner is giving permission for (e.g. installing "
-                             "a water connection at this property).")),
-            Question(id="permission_date", type="date", required=True, prompt="What is today's date?"),
+            Question(id="owner_names", type="text", required=True,
+                     prompt="Full name(s) of the property owner(s) granting permission?"),
+            Question(id="property_location", type="textarea", required=True, prompt="Where is the property situated?"),
+            Question(id="parish", type="text", required=True, prompt="Which parish is this in?"),
+            Question(id="deed_date", type="date", required=True, prompt="What's the date of the Deed of Conveyance?"),
+            Question(id="deed_liber", type="text", required=True, prompt="What's the Liber (volume) number?"),
+            Question(id="deed_page", type="text", required=True, prompt="What's the Page number?"),
+            Question(id="applicant_names", type="text", required=True,
+                     prompt="Full name(s) of the applicant(s) receiving permission?"),
         ],
     },
 }
