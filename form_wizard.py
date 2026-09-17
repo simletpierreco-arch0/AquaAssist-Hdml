@@ -629,6 +629,222 @@ def _safe_filename(base):
     return re.sub(r"[^A-Za-z0-9_.-]", "_", base) + ".pdf"
 
 
+# =========================================================================
+# Real, measured coordinate map — built by running pdfplumber against the
+# actual uploaded PDFs and finding the exact pixel position of every blank
+# line (underscore run) and every checkbox's label, then converting from
+# pdfplumber's top-down page coordinates to reportlab's bottom-up ones
+# (y = page_height - bottom). This is what makes overlay placement land on
+# the real blank instead of a generic guessed spot. Coordinates are in
+# points, page size 612x792 (US Letter) unless noted. `page` is 1-indexed.
+# Text fields draw a string at (x, y); checkbox fields draw an "X" at
+# (x, y) just to the left of/on the printed checkbox glyph.
+# =========================================================================
+FIELD_COORDS = {
+    "form-cancellation": {
+        "property_owner_name": {"page": 1, "x": 208, "y": 792 - 229 + 2, "size": 9},
+        "phone":               {"page": 1, "x": 435, "y": 792 - 229 + 2, "size": 9},
+        "user_name_if_not_owner": {"page": 1, "x": 246, "y": 792 - 255.8 + 2, "size": 9},
+        "service_location":    {"page": 1, "x": 168, "y": 792 - 282.6 + 2, "size": 9},
+        "meter_id":            {"page": 1, "x": 457, "y": 792 - 282.6 + 2, "size": 9},
+        "cancellation_reason": {"page": 1, "x": 122, "y": 792 - 322.6 + 2, "size": 9, "wrap_width": 420},
+    },
+    "form-no-proof-of-ownership": {
+        # "made on the [day]day of [month]in the year[year]BETWEEN" — three
+        # real, separately-measured blanks, not one composed string.
+        "agreement_date": [
+            {"page": 1, "x": 356, "y": 792 - 125.9 + 2, "size": 8, "part": "day"},
+            {"page": 1, "x": 435, "y": 792 - 125.9 + 2, "size": 8, "part": "month"},
+            {"page": 1, "x": 103, "y": 792 - 140.3 + 2, "size": 8, "part": "year"},
+        ],
+        "applicant_name":   {"page": 1, "x": 242, "y": 792 - 140.3 + 2, "size": 9},
+        "applicant_address": {"page": 1, "x": 90, "y": 792 - 164.5 + 2, "size": 9, "wrap_width": 430},
+        "parish":           {"page": 1, "x": 365, "y": 792 - 164.5 + 2, "size": 9},
+        # deposit_ack (Yes/No) has no printed checkbox on this form — it's a
+        # customer acknowledgment, not filled onto the page at all.
+    },
+    "form-declaration-of-ownership": {
+        "declarant_name":    {"page": 1, "x": 110, "y": 792 - 196.6 + 2, "size": 9},
+        "declarant_address": {"page": 1, "x": 331, "y": 792 - 196.6 + 2, "size": 9},
+        "parish":            {"page": 1, "x": 158, "y": 792 - 210 + 2, "size": 9},
+        "property_address":  {"page": 1, "x": 358, "y": 792 - 247 + 2, "size": 9},
+        "possession_years":  {"page": 1, "x": 200, "y": 792 - 314.4 + 2, "size": 9},
+        "declaration_date":  {"page": 2, "x": 152, "y": 792 - 372.4 + 2, "size": 9},
+    },
+    "form-permission-in-support": {
+        "owner_names":       {"page": 1, "x": 133, "y": 792 - 126.2 + 2, "size": 9, "wrap_width": 420},
+        "property_location": {"page": 1, "x": 80,  "y": 792 - 155.2 + 2, "size": 9, "wrap_width": 470},
+        "parish":            {"page": 1, "x": 108, "y": 792 - 169.8 + 2, "size": 9},
+        "deed_liber":        {"page": 1, "x": 292, "y": 792 - 198.8 + 2, "size": 9},
+        "applicant_names":   {"page": 1, "x": 165, "y": 792 - 238 + 2, "size": 9, "wrap_width": 380},
+        # "dated the [day] day of [month] in the year [year] and recorded..."
+        "deed_date": [
+            {"page": 1, "x": 80,  "y": 792 - 184.4 + 2, "size": 8, "part": "day"},
+            {"page": 1, "x": 165, "y": 792 - 184.4 + 2, "size": 8, "part": "month"},
+            {"page": 1, "x": 346, "y": 792 - 184.4 + 2, "size": 8, "part": "year"},
+        ],
+    },
+    "form-water-service-application": {
+        "full_name":       {"page": 1, "x": 140, "y": 792 - 150.9 + 2, "size": 9},
+        "alias":           {"page": 1, "x": 237, "y": 792 - 172.8 + 2, "size": 9},
+        "billing_address": {"page": 1, "x": 128, "y": 792 - 194.6 + 2, "size": 9, "wrap_width": 425},
+        "email":           {"page": 1, "x": 122, "y": 792 - 216.6 + 2, "size": 9},
+        "phone":           {"page": 1, "x": 152, "y": 792 - 238.4 + 2, "size": 8, "wrap_width": 400},
+        "application_date":{"page": 1, "x": 200, "y": 792 - 282.5 + 2, "size": 9},
+        "existing_account_number": {"page": 1, "x": 108, "y": 792 - 370 + 2, "size": 9},
+        "service_location":{"page": 1, "x": 135, "y": 792 - 435.6 + 2, "size": 9, "wrap_width": 415},
+        "service_directions": {"page": 1, "x": 44, "y": 792 - 457.4 + 2, "size": 8, "wrap_width": 510},
+        "trading_name":    {"page": 1, "x": 187, "y": 792 - 566.9 + 2, "size": 9},
+        "applicant_company_position": {"page": 1, "x": 332, "y": 792 - 588.7 + 2, "size": 9},
+        # Section D (page 2 in this 4-page PDF)
+        "owner_name":       {"page": 2, "x": 123, "y": 792 - 497.2 + 2, "size": 9},
+        "owner_address":    {"page": 2, "x": 131, "y": 792 - 519 + 2, "size": 9},
+        "owner_phone":      {"page": 2, "x": 153, "y": 792 - 540.9 + 2, "size": 8, "wrap_width": 390},
+        "main_user_name":   {"page": 2, "x": 262, "y": 792 - 696.1 + 2, "size": 9},
+        "previous_account_details": {"page": 2, "x": 403, "y": 792 - 782.8 + 2, "size": 8},
+        "nearest_customer_name": {"page": 2, "x": 192, "y": 792 - 825.3 + 2, "size": 9},
+        "nearest_customer_phone": {"page": 2, "x": 121, "y": 792 - 847.4 + 2, "size": 9},
+    },
+}
+
+# Checkbox glyph positions: an "X" is drawn just before/over the printed
+# checkbox for the option the customer selected. Keyed by (form_id,
+# question_id, answer_value) -> {page, x, y}.
+CHECKBOX_COORDS = {
+    ("form-water-service-application", "id_type", "National ID"): {"page": 1, "x": 155, "y": 792 - 292.3 - 3},
+    ("form-water-service-application", "id_type", "Passport"): {"page": 1, "x": 226, "y": 792 - 292.3 - 3},
+    ("form-water-service-application", "id_type", "NIS"): {"page": 1, "x": 400, "y": 792 - 292.3 - 3},
+    ("form-water-service-application", "services", "Water"): {"page": 1, "x": 158, "y": 792 - 379.9 - 3},
+    ("form-water-service-application", "services", "Additional Meter"): {"page": 1, "x": 275, "y": 792 - 379.9 - 3},
+    ("form-water-service-application", "services", "Sewer"): {"page": 1, "x": 415, "y": 792 - 379.9 - 3},
+    ("form-water-service-application", "nature_of_building", "Domestic"): {"page": 1, "x": 154, "y": 792 - 511.1 - 3},
+    ("form-water-service-application", "nature_of_building", "Non-Domestic"): {"page": 1, "x": 261, "y": 792 - 511.1 - 3},
+    ("form-water-service-application", "nature_of_building", "Industrial"): {"page": 1, "x": 429, "y": 792 - 511.1 - 3},
+    ("form-water-service-application", "is_owner", "Yes"): {"page": 1, "x": 288, "y": 792 - 644.2 - 3},
+    ("form-water-service-application", "is_owner", "No"): {"page": 1, "x": 381, "y": 792 - 644.2 - 3},
+    ("form-water-service-application", "has_title_documents", "Yes"): {"page": 1, "x": 441, "y": 792 - 688.3 - 3},
+    ("form-water-service-application", "is_main_user", "Yes"): {"page": 2, "x": 284, "y": 792 - 662.2 - 3},
+    ("form-water-service-application", "is_main_user", "No"): {"page": 2, "x": 413, "y": 792 - 662.2 - 3},
+    ("form-water-service-application", "had_previous_service", "Yes"): {"page": 2, "x": 32, "y": 792 - 727.9 - 3},
+    ("form-water-service-application", "had_previous_service", "No"): {"page": 2, "x": 158, "y": 792 - 727.9 - 3},
+    ("form-water-service-application", "had_previous_line", "Yes"): {"page": 2, "x": 264, "y": 792 - 749.7 - 3},
+    ("form-water-service-application", "had_previous_line", "No"): {"page": 2, "x": 389, "y": 750.4 - 3},
+}
+
+# Some real form blanks split a single date across THREE separate
+# printed blanks (day / month / year) rather than one continuous line —
+# FIELD_COORDS can map a question id to a LIST of coordinate dicts, each
+# with a "part" key ("day"/"month"/"year"), instead of a single dict, to
+# place each piece on its own real blank rather than composing one long
+# string that overlaps the printed words in between.
+def _date_part_text(iso_date, part):
+    try:
+        dt = datetime.strptime(iso_date, "%Y-%m-%d")
+    except Exception:
+        return iso_date
+    if part == "day":
+        day = dt.day
+        suffix = "th" if 11 <= day % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+        return f"{day}{suffix}"
+    if part == "month":
+        return dt.strftime("%B")
+    if part == "year":
+        return str(dt.year)
+    return iso_date
+
+
+def _overlay_fill(reader, answers, schema, form_id):
+    """Draws each answer directly onto the real blank line / checkbox it
+    belongs to, using FIELD_COORDS/CHECKBOX_COORDS measured from the
+    actual official PDF (see the module docstring and the block comment
+    above). Returns (writer, covered_field_ids) — covered_field_ids is a
+    set of question ids successfully placed on the page, used by the
+    caller to know exactly which answers still need to appear on the
+    summary appendix instead. This is the PRIMARY path for these five
+    forms, since none of them have real AcroForm fields (confirmed by
+    inspecting all five with pypdf) — this replaces guessed placement
+    with positions actually measured on the real page."""
+    from pypdf import PdfWriter, PdfReader as _Reader
+    import io
+
+    field_map = FIELD_COORDS.get(form_id, {})
+    checkbox_map = {k: v for k, v in CHECKBOX_COORDS.items() if k[0] == form_id}
+    if not field_map and not checkbox_map:
+        return None, set()
+
+    page_overlays = {}  # page_num -> list of (x, y, text_or_mark, size, wrap_width)
+    covered_ids = set()
+
+    for q in schema["questions"]:
+        if q.id not in answers:
+            continue
+        val = answers[q.id]
+        coord = field_map.get(q.id)
+        if coord:
+            coord_list = coord if isinstance(coord, list) else [coord]
+            placed_any = False
+            for c in coord_list:
+                part = c.get("part")
+                if part:
+                    text = _date_part_text(str(val or ""), part)
+                elif isinstance(val, list):
+                    text = ", ".join(val)
+                else:
+                    text = str(val or "")
+                if text.strip():
+                    page_overlays.setdefault(c["page"], []).append(
+                        (c["x"], c["y"], text, c.get("size", 9), c.get("wrap_width"))
+                    )
+                    placed_any = True
+            if placed_any:
+                covered_ids.add(q.id)
+
+        if q.type in ("radio", "checkbox"):
+            selected = val if isinstance(val, list) else ([val] if val else [])
+            any_checkbox_drawn = False
+            for opt in selected:
+                cb = CHECKBOX_COORDS.get((form_id, q.id, opt))
+                if cb:
+                    page_overlays.setdefault(cb["page"], []).append((cb["x"], cb["y"], "X", 11, None))
+                    any_checkbox_drawn = True
+            if any_checkbox_drawn:
+                covered_ids.add(q.id)
+
+    if not page_overlays:
+        return None, set()
+
+    writer = PdfWriter()
+    writer.append(reader)
+
+    from reportlab.pdfgen import canvas as _canvas
+    for page_num, items in page_overlays.items():
+        page_index = page_num - 1
+        if page_index < 0 or page_index >= len(writer.pages):
+            continue
+        page_box = writer.pages[page_index].mediabox
+        width, height = float(page_box.width), float(page_box.height)
+        buf = io.BytesIO()
+        c = _canvas.Canvas(buf, pagesize=(width, height))
+        c.setFont("Helvetica", 9)
+        for (x, y, text, size, wrap_width) in items:
+            c.setFont("Helvetica", size)
+            if wrap_width and len(text) * (size * 0.55) > wrap_width:
+                max_chars = max(10, int(wrap_width / (size * 0.55)))
+                lines = re.findall(r".{1,%d}(?:\s+|$)" % max_chars, text) or [text]
+                line_y = y
+                for line in lines[:2]:
+                    c.drawString(x, line_y, line.strip())
+                    line_y -= (size + 2)
+            else:
+                c.drawString(x, y, text)
+        c.save()
+        buf.seek(0)
+        overlay_reader = _Reader(buf)
+        writer.pages[page_index].merge_page(overlay_reader.pages[0])
+
+    return writer, covered_ids
+
+
 def _try_acroform_fill(reader, answers, schema):
     """Best-effort: if the real PDF has fillable AcroForm fields, fuzzy-
     match this form's question ids/prompts against the PDF's actual field
@@ -674,13 +890,13 @@ def _try_acroform_fill(reader, answers, schema):
     return writer, matched
 
 
-def _append_summary_page(writer, schema, answers, signature_note):
-    """Adds a clean, clearly-labeled page listing every answer, in the
-    original question order. This runs ALWAYS (regardless of whether
-    AcroForm filling found matching fields) so the customer's actual
-    answers are guaranteed to be visibly present in the output — see the
-    module docstring for why this doesn't attempt guessed-coordinate
-    overlay onto the original form pages."""
+def _append_summary_page(writer, schema, answers, signature_note, only_ids=None):
+    """Adds a clean, clearly-labeled page listing answers NOT already
+    placed directly on the real form (see _overlay_fill) — `only_ids`
+    restricts the listing to exactly those, so a fully-mapped form never
+    shows a redundant duplicate of what's already on the page itself.
+    When only_ids is None, every answer is listed (used only when the
+    whole form has no coordinate mapping at all yet)."""
     import io
     from reportlab.lib.pagesizes import letter
     from reportlab.pdfgen import canvas
@@ -703,8 +919,9 @@ def _append_summary_page(writer, schema, answers, signature_note):
             y -= leading
         return y
 
+    heading = "Additional Information" if only_ids is not None else "Information Provided"
     c.setFont("Helvetica-Bold", 14)
-    c.drawString(margin, y, f"AquaAssist — Information Provided for: {schema['display_name']}")
+    c.drawString(margin, y, f"AquaAssist — {heading} for: {schema['display_name']}")
     y -= 22
     c.setFont("Helvetica", 9)
     c.drawString(margin, y, f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M')} via NAWASA's AquaAssist chatbot.")
@@ -712,6 +929,8 @@ def _append_summary_page(writer, schema, answers, signature_note):
 
     for q in schema["questions"]:
         if q.id not in answers:
+            continue
+        if only_ids is not None and q.id not in only_ids:
             continue
         val = answers[q.id]
         display = ", ".join(val) if isinstance(val, list) else (val or "(skipped)")
@@ -726,6 +945,7 @@ def _append_summary_page(writer, schema, answers, signature_note):
         "part of NAWASA's original official form (attached above/before this page). " + signature_note,
         margin, y, max_width_chars=100, font="Helvetica-Oblique", size=9, leading=12,
     )
+
     c.showPage()
     c.save()
     buf.seek(0)
@@ -777,13 +997,30 @@ def generate_pdf(session_id):
         return None, None, [], f"Couldn't open the official PDF ({e})."
 
     writer, matched = _try_acroform_fill(reader, sess.answers, schema)
-    if matched == 0:
+    overlay_writer, covered_ids = _overlay_fill(reader, sess.answers, schema, sess.form_id)
+    answered_ids = {q.id for q in schema["questions"] if q.id in sess.answers}
+    uncovered_ids = answered_ids - covered_ids
+
+    if overlay_writer is not None and covered_ids:
+        # Real, measured-coordinate placement onto the actual form — this
+        # is the correct path for these five forms (none have AcroForm
+        # fields; see FIELD_COORDS/CHECKBOX_COORDS above).
+        writer = overlay_writer
+        if uncovered_ids:
+            warnings.append(
+                f"{len(covered_ids)} of {len(answered_ids)} answers were placed directly on the form; the "
+                f"rest are listed on the attached summary page since their exact position on the form "
+                f"hasn't been mapped yet."
+            )
+    else:
+        uncovered_ids = answered_ids  # nothing was placed on the page itself
         warnings.append(
-            "The official PDF doesn't have fillable fields this system could confidently match, so your "
-            "answers are included as a clearly labeled summary page instead of being typed directly onto "
-            "the original form fields."
+            "This form's fields haven't been mapped to exact positions on the official PDF yet, so your "
+            "answers are included as a clearly labeled summary page instead of being placed directly onto "
+            "the original form. Please flag this so it can be fixed."
         )
-    writer = _append_summary_page(writer, schema, sess.answers, schema["signature_note"])
+    if uncovered_ids:
+        writer = _append_summary_page(writer, schema, sess.answers, schema["signature_note"], only_ids=uncovered_ids)
 
     filename = _safe_filename(schema["filename_base"])
     token = secrets.token_urlsafe(24)
