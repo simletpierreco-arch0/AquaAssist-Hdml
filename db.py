@@ -481,6 +481,8 @@ def init_db():
     migrate_legacy_storage()
     _add_column_if_missing("website_pages", "source", "TEXT")
     _add_column_if_missing("website_pages", "first_indexed_at", "TEXT")
+    _add_column_if_missing("chat_messages", "attachment_mime", "TEXT")
+    _add_column_if_missing("chat_messages", "attachment_data", "TEXT")
     _seed_tips_if_empty()
     _seed_features_if_empty()
 
@@ -1415,13 +1417,14 @@ def log_chat_event(session_id, territory, had_error=False):
 # =======================================================================
 # Chat transcripts (Live Chat monitor in the Staff Portal)
 # =======================================================================
-def log_chat_message(session_id, territory, role, content):
+def log_chat_message(session_id, territory, role, content, attachment_mime="", attachment_data=""):
     ph = _ph()
     with _cursor(commit=True) as cur:
         cur.execute(
-            f"INSERT INTO chat_messages (session_id, territory, role, content, timestamp) "
-            f"VALUES ({ph},{ph},{ph},{ph},{ph})",
-            (session_id, territory, role, content, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            f"INSERT INTO chat_messages (session_id, territory, role, content, timestamp, "
+            f"attachment_mime, attachment_data) VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (session_id, territory, role, content, datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+             attachment_mime or "", attachment_data or ""),
         )
 
 
