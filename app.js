@@ -2367,10 +2367,23 @@ function renderLiveChatTranscript(messages) {
   if (!wrap) return;
   const wasAtBottom = wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 20;
   wrap.innerHTML = "";
-  messages.forEach((m) => {
+  messages.forEach((m, idx) => {
     const row = document.createElement("div");
     row.className = `livechat-msg livechat-msg-${m.role}`;
     row.innerHTML = `<div class="livechat-msg-role">${escapeHtml(formatChatRole(m.role))} · <span class="hint-text">${escapeHtml(m.timestamp)}</span></div><div class="livechat-msg-text">${escapeHtml(m.content)}</div>`;
+    if (m.attachment_mime && m.attachment_data) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "attachment-cell-btn attachment-link livechat-attachment-btn";
+      const icon = m.attachment_mime.startsWith("image/") ? "🖼️" : m.attachment_mime.startsWith("video/") ? "🎥" : m.attachment_mime.startsWith("audio/") ? "🎤" : "📎";
+      if (m.attachment_mime.startsWith("image/")) {
+        btn.innerHTML = `<img src="data:${m.attachment_mime};base64,${m.attachment_data}" class="report-thumb" alt="attachment" />`;
+      } else {
+        btn.textContent = `${icon} View attachment`;
+      }
+      btn.addEventListener("click", () => openAttachmentViewer(m.attachment_mime, m.attachment_data, formatChatRole(m.role)));
+      row.appendChild(btn);
+    }
     wrap.appendChild(row);
   });
   if (wasAtBottom || messages.length <= 2) wrap.scrollTop = wrap.scrollHeight;
