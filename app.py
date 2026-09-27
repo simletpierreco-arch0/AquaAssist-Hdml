@@ -871,7 +871,12 @@ def api_chat():
         return jsonify({"error": "Empty message."}), 400
 
     transcript_text = message if message else "[sent an attachment]"
-    db.log_chat_message(session_id, territory, "user", transcript_text)
+    first_attachment = attachments[0] if attachments else None
+    db.log_chat_message(
+        session_id, territory, "user", transcript_text,
+        attachment_mime=(first_attachment or {}).get("mime", ""),
+        attachment_data=(first_attachment or {}).get("data_base64", ""),
+    )
 
     if db.is_session_paused(session_id):
         return jsonify({"session_id": session_id, "paused": True})
