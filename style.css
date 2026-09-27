@@ -1120,3 +1120,5 @@ img, svg, video, canvas { max-width: 100%; height: auto; }
 .template-upload-actions { align-items: center; }
 .template-file-input { flex: 1 1 200px; min-width: 0; margin-bottom: 0; font-size: .78rem; padding: .4rem .5rem; }
 @media (max-width: 560px) { .template-upload-actions { flex-direction: column; align-items: stretch; } }
+.livechat-attachment-btn { display: block; margin-top: .4rem; }
+.livechat-attachment-btn .report-thumb { width: 90px; height: 90px; border-radius: 8px; }
